@@ -1,0 +1,14 @@
+GitMycelium
+Copyright 2026 ndeana and the GitMycelium contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes the Lucide icon set (https://lucide.dev),
+Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as part of
+Feather (MIT). All other copyright (c) for Lucide are held by Lucide Contributors
+2022. Licensed under the ISC License; see third_party/lucide/LICENSE.
+
+This product links against Qt (https://www.qt.io), licensed under the GNU Lesser
+General Public License v3, and libgit2 (https://libgit2.org), licensed under the
+GNU General Public License v2 with a linking exception. See
+THIRD_PARTY_NOTICES.md for details.

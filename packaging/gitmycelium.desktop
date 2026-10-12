@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=GitMycelium
+GenericName=Git Client
+Comment=Native Git client: commit graph, branches and a merge editor
+Exec=gitmycelium %U
+Icon=gitmycelium
+Terminal=false
+Categories=Development;RevisionControl;
+Keywords=git;vcs;version control;branch;merge;commit;
+StartupNotify=true
+StartupWMClass=gitmycelium
+MimeType=inode/directory;

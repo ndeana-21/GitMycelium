@@ -1,0 +1,44 @@
+#pragma once
+
+#include "core/types.h"
+
+#include <QDialog>
+#include <QString>
+
+#include <vector>
+
+class QComboBox;
+class QLineEdit;
+class QListWidget;
+class QPushButton;
+
+namespace gk {
+
+/// Collects the people to credit in a commit's `Co-authored-by:` trailer block. It
+/// only gathers names and addresses; the window turns them into the trailer with
+/// git's own `interpret-trailers`, so the message the reader sees is the message
+/// that gets committed.
+class CoAuthorDialog : public QDialog {
+    Q_OBJECT
+
+public:
+    explicit CoAuthorDialog(QWidget* parent = nullptr);
+
+    void setSuggestions(const std::vector<CoAuthor>& authors);
+    std::vector<CoAuthor> authors() const;
+
+private:
+    void addCurrent();
+    void refreshOkState();
+
+    QLineEdit* m_name = nullptr;
+    QLineEdit* m_email = nullptr;
+    QComboBox* m_recent = nullptr;
+    QPushButton* m_add = nullptr;
+    QListWidget* m_list = nullptr;
+    QPushButton* m_ok = nullptr;
+    std::vector<CoAuthor> m_suggestions;
+    std::vector<CoAuthor> m_authors;
+};
+
+} // namespace gk

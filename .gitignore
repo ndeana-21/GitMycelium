@@ -1,0 +1,44 @@
+# Build trees
+/build/
+/build-*/
+/cmake-build-*/
+/out/
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+compile_commands.json
+Testing/
+
+# Packaging output
+/_CPack_Packages/
+*.dmg
+*.deb
+*.rpm
+*.tar.gz
+*.AppImage
+packaging/icons/*.iconset/
+packaging/icons/*.icns
+
+# Editors and IDEs
+.cache/
+.clangd/
+.idea/
+.vscode/
+.vs/
+*.user
+*.swp
+*~
+.#*
+
+# Operating systems
+.DS_Store
+Thumbs.db
+
+# Local agent and tool settings
+.claude/
+CLAUDE.local.md
+
+# Scratch output from headless runs
+*.png
+!docs/*.png
+!packaging/icons/*.png

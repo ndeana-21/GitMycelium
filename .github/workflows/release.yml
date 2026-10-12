@@ -1,0 +1,252 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and publish (e.g. v1.0.0)
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  LIBGIT2_VERSION: '1.9.1'
+  QT_VERSION: '6.8.3'
+
+jobs:
+  linux-appimage:
+    name: Linux AppImage
+    # The oldest supported runner: the AppImage runs on any distribution whose glibc
+    # is at least this one's (2.35).
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config zlib1g-dev \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-xinerama0 libxcb-xkb1 libegl1 libfontconfig1
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+
+      - name: Build libgit2
+        # Ubuntu 22.04 ships libgit2 1.1. Network access goes through the git binary,
+        # so libgit2 is built without HTTPS and SSH and pulls in nothing else.
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/libgit2/libgit2/archive/refs/tags/v${LIBGIT2_VERSION}.tar.gz" | tar xz
+          cmake -S "libgit2-${LIBGIT2_VERSION}" -B libgit2-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DBUILD_TESTS=OFF -DBUILD_CLI=OFF -DUSE_HTTPS=OFF -DUSE_SSH=OFF
+          cmake --build libgit2-build
+          sudo cmake --install libgit2-build
+          sudo ldconfig
+
+      - name: Build GitMycelium
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+          cmake --build build --target gitmycelium
+          DESTDIR="$PWD/AppDir" cmake --install build
+
+      - name: Add third-party license texts
+        # The AppImage carries Qt and libgit2, so their license texts travel with it.
+        run: |
+          set -euo pipefail
+          doc=AppDir/usr/share/doc/gitmycelium/third_party
+          mkdir -p "$doc"
+          cp third_party/qt/LGPL-3.0.txt "$doc/Qt-LGPL-3.0.txt"
+          cp third_party/qt/GPL-3.0.txt "$doc/Qt-GPL-3.0.txt"
+          cp "libgit2-${LIBGIT2_VERSION}/COPYING" "$doc/libgit2-COPYING.txt"
+          printf 'Qt %s source: https://download.qt.io/archive/qt/\nlibgit2 %s source: https://github.com/libgit2/libgit2/releases/tag/v%s\n' \
+            "$QT_VERSION" "$LIBGIT2_VERSION" "$LIBGIT2_VERSION" > "$doc/SOURCES.txt"
+
+      - name: Package the AppImage
+        run: |
+          set -euo pipefail
+          base=https://github.com/linuxdeploy
+          curl -fsSLO "$base/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
+          curl -fsSLO "$base/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage"
+          chmod +x linuxdeploy*.AppImage
+          plugins="libqoffscreen.so"
+          if [ -e "$QT_ROOT_DIR/plugins/platforms/libqwayland-generic.so" ]; then
+            plugins="$plugins;libqwayland-generic.so"
+          fi
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          export QMAKE="$QT_ROOT_DIR/bin/qmake"
+          export EXTRA_PLATFORM_PLUGINS="$plugins"
+          export LDAI_OUTPUT="GitMycelium-${TAG#v}-x86_64.AppImage"
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir \
+            --desktop-file AppDir/usr/share/applications/gitmycelium.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/scalable/apps/gitmycelium.svg \
+            --plugin qt --output appimage
+          echo "APPIMAGE=$LDAI_OUTPUT" >> "$GITHUB_ENV"
+
+      - name: Smoke-test the AppImage
+        run: |
+          set -euo pipefail
+          export APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=offscreen
+          "./$APPIMAGE" --version
+          "./$APPIMAGE" --probe . | head -5
+          "./$APPIMAGE" --shot ui.png .
+          test -s ui.png
+          sha256sum "$APPIMAGE" > "$APPIMAGE.sha256"
+
+      - name: Upload the build
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitmycelium-linux-x86_64
+          path: |
+            ${{ env.APPIMAGE }}
+            ${{ env.APPIMAGE }}.sha256
+
+  macos-dmg:
+    name: macOS DMG
+    # macos-14 is Apple Silicon, the only macOS target.
+    runs-on: macos-14
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '12.0'
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Install build tools
+        run: brew install ninja pkg-config
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+
+      - name: Build libgit2
+        # Built here rather than taken from Homebrew: Homebrew's links OpenSSL and
+        # libssh2, which would then travel inside the bundle for nothing (network
+        # access goes through the git binary), and targets only the newest macOS.
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/libgit2/libgit2/archive/refs/tags/v${LIBGIT2_VERSION}.tar.gz" | tar xz
+          cmake -S "libgit2-${LIBGIT2_VERSION}" -B libgit2-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/libgit2" \
+            -DCMAKE_INSTALL_NAME_DIR="$RUNNER_TEMP/libgit2/lib" \
+            -DBUILD_TESTS=OFF -DBUILD_CLI=OFF -DUSE_HTTPS=OFF -DUSE_SSH=OFF
+          cmake --build libgit2-build
+          cmake --install libgit2-build
+          echo "PKG_CONFIG_PATH=$RUNNER_TEMP/libgit2/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - name: Build the app icon
+        run: |
+          set -euo pipefail
+          png=packaging/icons/gitmycelium-1024.png
+          iconset=packaging/icons/gitmycelium.iconset
+          mkdir -p "$iconset"
+          for base in 16 32 128 256 512; do
+            sips -s format png -z "$base" "$base" "$png" --out "$iconset/icon_${base}x${base}.png" >/dev/null
+            double=$((base * 2))
+            sips -s format png -z "$double" "$double" "$png" --out "$iconset/icon_${base}x${base}@2x.png" >/dev/null
+          done
+          iconutil -c icns "$iconset" -o packaging/icons/gitmycelium.icns
+
+      - name: Build GitMycelium
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --target gitmycelium
+
+      - name: Bundle, sign and package
+        run: |
+          set -euo pipefail
+          app=build/src/GitMycelium.app
+          # The bundle carries Qt and libgit2, so their license texts travel with it.
+          doc="$app/Contents/Resources/third_party"
+          mkdir -p "$doc"
+          cp third_party/qt/LGPL-3.0.txt "$doc/Qt-LGPL-3.0.txt"
+          cp third_party/qt/GPL-3.0.txt "$doc/Qt-GPL-3.0.txt"
+          cp "libgit2-${LIBGIT2_VERSION}/COPYING" "$doc/libgit2-COPYING.txt"
+          printf 'Qt %s source: https://download.qt.io/archive/qt/\nlibgit2 %s source: https://github.com/libgit2/libgit2/releases/tag/v%s\n' \
+            "$QT_VERSION" "$LIBGIT2_VERSION" "$LIBGIT2_VERSION" > "$doc/SOURCES.txt"
+          "$QT_ROOT_DIR/bin/macdeployqt" "$app" -libpath="$RUNNER_TEMP/libgit2/lib"
+          # Nothing outside the bundle and the system may be linked any more.
+          if otool -L "$app/Contents/MacOS/GitMycelium" | tail -n +2 \
+               | grep -vE '@(rpath|executable_path|loader_path)/|/usr/lib/|/System/'; then
+            echo "the binary still links something outside the bundle" >&2
+            exit 1
+          fi
+          # Ad-hoc signature: no Apple account needed, and Gatekeeper does not call
+          # the bundle damaged. It is not notarized, so the first launch is allowed in
+          # Privacy & Security (README, "Opening the app on macOS").
+          codesign --force --deep --sign - "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          (cd build && cpack -G DragNDrop)
+          dmg="GitMycelium-${TAG#v}-arm64.dmg"
+          mv build/*.dmg "$dmg"
+          echo "DMG=$dmg" >> "$GITHUB_ENV"
+
+      - name: Smoke-test the bundle
+        run: |
+          set -euo pipefail
+          export QT_QPA_PLATFORM=offscreen
+          bin=build/src/GitMycelium.app/Contents/MacOS/GitMycelium
+          "$bin" --version
+          "$bin" --probe . | head -5
+          "$bin" --shot ui.png .
+          test -s ui.png
+          shasum -a 256 "$DMG" > "$DMG.sha256"
+
+      - name: Upload the build
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitmycelium-macos-arm64
+          path: |
+            ${{ env.DMG }}
+            ${{ env.DMG }}.sha256
+
+  publish:
+    name: Publish the release
+    needs: [linux-appimage, macos-dmg]
+    # A tag with a suffix (v1.1.0-rc1) builds but publishes nothing.
+    if: ${{ !contains(github.event.inputs.tag || github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ls -l dist
+          version="${TAG#v}"
+          awk -v v="$version" '
+            $0 ~ "^## \\[?" v "\\]?" { on = 1; next }
+            on && /^## / { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          test -s notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+            gh release edit "$TAG" --title "GitMycelium $version" --notes-file notes.md
+          else
+            gh release create "$TAG" dist/* \
+              --title "GitMycelium $version" --notes-file notes.md --verify-tag
+          fi

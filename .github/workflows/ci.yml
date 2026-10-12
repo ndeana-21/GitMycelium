@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS runner macos-14 is Apple Silicon (arm64) — the only macOS target
+        # this project supports.
+        os: [ubuntu-24.04, macos-14]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config qt6-base-dev libgit2-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake ninja pkg-config libgit2
+          # brew keeps the .pc files under its own prefix; pkg-config is told where.
+          echo "PKG_CONFIG_PATH=$(brew --prefix libgit2)/lib/pkgconfig:$(brew --prefix)/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+
+      - name: Build the app icon (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          # `iconutil` is macOS-only, so the .icns is made here from the checked-in
+          # PNG rather than committed. The sizes are exactly the ones it accepts.
+          png=packaging/icons/gitmycelium-1024.png
+          iconset=packaging/icons/gitmycelium.iconset
+          rm -rf "$iconset"
+          mkdir -p "$iconset"
+          for base in 16 32 128 256 512; do
+            sips -s format png -z "$base" "$base" "$png" --out "$iconset/icon_${base}x${base}.png" >/dev/null
+            double=$((base * 2))
+            sips -s format png -z "$double" "$double" "$png" --out "$iconset/icon_${base}x${base}@2x.png" >/dev/null
+          done
+          iconutil -c icns "$iconset" -o packaging/icons/gitmycelium.icns
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Render UI offscreen (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          QT_QPA_PLATFORM=offscreen ./build/src/gitmycelium --shot ui.png .
+          test -s ui.png
+
+      - name: Render UI offscreen (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          QT_QPA_PLATFORM=offscreen ./build/src/GitMycelium.app/Contents/MacOS/GitMycelium --shot ui.png .
+          test -s ui.png
+
+      - name: Package the .dmg (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          app=build/src/GitMycelium.app
+          # Qt's frameworks have to travel inside the bundle or the app only runs
+          # where Qt is installed.
+          macdeployqt="$(command -v macdeployqt || echo "${QT_ROOT_DIR}/bin/macdeployqt")"
+          "$macdeployqt" "$app"
+          # Ad-hoc signature: no Apple account needed, and it stops Gatekeeper from
+          # calling the bundle "damaged". A downloaded copy is still quarantined and
+          # is allowed once in Privacy & Security (README, "Opening the app on macOS").
+          codesign --force --deep --sign - "$app"
+          codesign --verify --verbose=2 "$app"
+          (cd build && cpack -G DragNDrop)
+          ls -l build/*.dmg
+
+      - name: Upload UI snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-snapshot-${{ matrix.os }}
+          path: ui.png
+
+      - name: Upload the macOS package
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitmycelium-macos-arm64
+          path: build/*.dmg
