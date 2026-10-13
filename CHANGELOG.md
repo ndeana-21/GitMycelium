@@ -4,6 +4,36 @@ All notable changes to GitMycelium are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] - 2026-10-13
+
+### Added
+
+- **In-app updates.** Help → Check for Updates finds a newer release and installs
+  it in place: the AppImage file is replaced, and on macOS the app bundle is swapped
+  once the app quits. The download is checked against the sha256 in the release's
+  `update.json` before anything is replaced. The app checks once a day on launch;
+  turn that off in Preferences → Appearance → Updates. `--update-check` prints the
+  same comparison headlessly.
+- Every release build carries the CI run number: `--version` and the About box show
+  it (`1.1.0 (build 12)`), and on macOS it is the bundle's `CFBundleVersion`, so the
+  system no longer confuses two builds of the same version (stale Finder icons, an
+  older copy launched in place of the new one).
+
+### Fixed
+
+- `test_repo_watcher` no longer fails on macOS when FSEvents delivers the fixture's
+  own writes late.
+
+### Downloads
+
+- **Linux x86_64:** `GitMycelium-1.1.0-x86_64.AppImage` (glibc 2.35 or newer).
+- **macOS (Apple Silicon, macOS 12 or newer):** `GitMycelium-1.1.0-arm64.dmg`. Ad-hoc
+  signed and not notarized: allow the first launch as described in
+  [Opening the app on macOS](https://github.com/ndeana-21/GitMycelium#opening-the-app-on-macos).
+  Later updates install from inside the app.
+
+1.0.0 has no updater, so moving to 1.1.0 is one last manual download.
+
 ## [1.0.0] - 2026-10-13
 
 The first public release: a fast, native Git client for large repositories, built

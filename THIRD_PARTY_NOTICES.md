@@ -16,7 +16,7 @@ The full license text is in [third_party/lucide/LICENSE](third_party/lucide/LICE
 
 ### Qt 6 — GNU LGPL v3
 
-[Qt](https://www.qt.io) (Core, Gui, Widgets, Svg; Test for the test suite only) is
+[Qt](https://www.qt.io) (Core, Gui, Widgets, Svg, Network; Test for the test suite only) is
 used under the [GNU Lesser General Public License v3](https://www.gnu.org/licenses/lgpl-3.0.html).
 GitMycelium links Qt **dynamically** and does not modify it. If you distribute a
 binary that contains Qt libraries (for example a macOS `.dmg` produced by

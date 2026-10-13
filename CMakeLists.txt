@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(gitmycelium VERSION 1.0.0
+project(gitmycelium VERSION 1.1.0
         DESCRIPTION "A fast, native Git client for large repositories"
         LANGUAGES CXX)
 
@@ -18,7 +18,11 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Test Svg)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Test Svg Network)
+
+# The release workflow's run number. It tells two builds of one version apart: the
+# updater compares it, and macOS keys its icon and launch caches on CFBundleVersion.
+set(GMC_BUILD_NUMBER 0 CACHE STRING "CI build number (0 for a local build)")
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBGIT2 REQUIRED IMPORTED_TARGET libgit2)
 

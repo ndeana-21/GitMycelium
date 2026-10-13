@@ -63,6 +63,7 @@ src/repo      RepoSession — the ONLY gateway to git state
 src/graph     DAG lane layout (GraphLayout) — Qt-free
 src/theme     palette, glyphs, embedded SVG icons
 src/model     Qt item models (CommitModel and friends), word/diff helpers
+src/update    release manifest + self-update (Qt Core/Network, no git)
 src/ui        widgets + GraphDelegate (commit-graph painting)
 src/app       main()
 ```
@@ -550,6 +551,12 @@ libgit2 forbids concurrent calls on the same repository handle. Therefore:
   take the tool's exit code.
 - Every terminal emulator spells "start in this directory" differently: `buildTerminalLaunch` gives known ones their flag (konsole `--workdir`, gnome-terminal/xfce/tilix/alacritty `--working-directory=`, kitty `--directory`) and everything else a portable `-e sh -c 'cd "$1" && exec "${SHELL:-sh}"'` (directory as an argument, so spaces need no quoting). An
   unrecognised `$TERMINAL` that does not resolve is skipped. `--ui-terminal` prints the chosen command without launching it.
+
+### Updates
+
+- The updater reads `update.json`, which the release workflow writes beside every release (`releases/latest/download/update.json`): version, `github.run_number` as the build, and per platform (`linux-x86_64`, `macos-arm64`) the URL, size and sha256. A same-version re-run is an update because the build moved; `isNewer` compares version, then build. `GMC_BUILD_NUMBER` (CMake cache, 0 locally) feeds `--version`, the About box and macOS `CFBundleVersion`. macOS keys its icon and launch caches on bundle id + `CFBundleVersion`, and two builds that both said `1.0.0` showed the old icon and launched an older copy.
+- Nothing is replaced until the download matches its sha256. An AppImage (`$APPIMAGE`) is downloaded beside itself and `rename(2)`d over (the running one keeps its mount). A `.app` is copied out of the mounted DMG with `ditto` into a hidden sibling, `codesign --verify`'d, and swapped by a detached `/bin/sh` that waits for our pid to exit (frameworks and plugins load lazily, so a bundle must not change under a running process). A copy that is neither only links to the release page.
+- The check is network I/O, not git: `QNetworkAccessManager`, so packages must carry a TLS backend. The release smoke test runs `--update-check` from inside the package and accepts a manifest or the 404 of a release without one; anything else (no TLS) fails. Only the interactive launch checks (`setUpdateChecksEnabled`), at most once per 20 h (`ui/updates/last-check`), off with `ui/updates/check`. `GMC_UPDATE_MANIFEST` points it at a `file://` manifest (`test_updater`, `test_update_dialog`).
 
 ### Platforms and packaging
 

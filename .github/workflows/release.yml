@@ -57,7 +57,8 @@ jobs:
 
       - name: Build GitMycelium
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr \
+            -DGMC_BUILD_NUMBER=${{ github.run_number }}
           cmake --build build --target gitmycelium
           DESTDIR="$PWD/AppDir" cmake --install build
 
@@ -99,6 +100,10 @@ jobs:
           set -euo pipefail
           export APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=offscreen
           "./$APPIMAGE" --version
+          # HTTPS from inside the package: an answer (a manifest or a 404) proves a TLS
+          # backend travelled with it; a missing one fails before any status.
+          "./$APPIMAGE" --update-check | tee update-check.txt || true
+          grep -qE '^(published:|error: The newest release publishes no update manifest)' update-check.txt
           "./$APPIMAGE" --probe . | head -5
           "./$APPIMAGE" --shot ui.png .
           test -s ui.png
@@ -162,7 +167,8 @@ jobs:
 
       - name: Build GitMycelium
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DGMC_BUILD_NUMBER=${{ github.run_number }}
           cmake --build build --target gitmycelium
 
       - name: Bundle, sign and package
@@ -200,6 +206,8 @@ jobs:
           export QT_QPA_PLATFORM=offscreen
           bin=build/src/GitMycelium.app/Contents/MacOS/GitMycelium
           "$bin" --version
+          "$bin" --update-check | tee update-check.txt || true
+          grep -qE '^(published:|error: The newest release publishes no update manifest)' update-check.txt
           "$bin" --probe . | head -5
           "$bin" --shot ui.png .
           test -s ui.png
@@ -229,6 +237,42 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+
+      - name: Write the update manifest
+        # What the app's updater reads (releases/latest/download/update.json): the
+        # version, this run's build number, and each package with its checksum. The
+        # build number moves on every run, so a re-run of the same tag is an update.
+        env:
+          REPO: ${{ github.repository }}
+          BUILD: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib
+          tag = os.environ["TAG"]
+          base = f"https://github.com/{os.environ['REPO']}/releases/download/{tag}"
+          keys = {"-x86_64.AppImage": "linux-x86_64", "-arm64.dmg": "macos-arm64"}
+          assets = {}
+          for path in sorted(pathlib.Path("dist").iterdir()):
+              key = next((k for suffix, k in keys.items() if path.name.endswith(suffix)), None)
+              if key is None:
+                  continue
+              data = path.read_bytes()
+              digest = hashlib.sha256(data).hexdigest()
+              published = (path.parent / (path.name + ".sha256")).read_text().split()[0]
+              assert digest == published, f"{path.name}: {digest} != {published}"
+              assets[key] = {"url": f"{base}/{path.name}", "sha256": digest, "size": len(data)}
+          assert set(assets) == set(keys.values()), assets
+          manifest = {
+              "version": tag.removeprefix("v"),
+              "build": int(os.environ["BUILD"]),
+              "tag": tag,
+              "notes": f"https://github.com/{os.environ['REPO']}/releases/tag/{tag}",
+              "assets": assets,
+          }
+          pathlib.Path("dist/update.json").write_text(json.dumps(manifest, indent=2) + "\n")
+          print(json.dumps(manifest, indent=2))
+          PY
 
       - name: Create or update the release
         env:

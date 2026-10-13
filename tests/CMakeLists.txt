@@ -372,6 +372,15 @@ target_link_libraries(test_commit_paging PRIVATE gmc_model gmc_repo gmc_git gmc_
                                                  Qt6::Gui Qt6::Test)
 add_test(NAME test_commit_paging COMMAND test_commit_paging)
 
+add_executable(test_updater test_updater.cpp)
+target_link_libraries(test_updater PRIVATE gmc_update Qt6::Test Qt6::Core)
+add_test(NAME updater COMMAND test_updater)
+
+add_executable(test_update_dialog test_update_dialog.cpp)
+target_link_libraries(test_update_dialog PRIVATE gmc_ui Qt6::Test Qt6::Widgets)
+add_test(NAME update_dialog COMMAND test_update_dialog)
+
+
 # A test's outcome must not depend on the machine. git refuses to commit without an
 # identity and a fresh CI runner has none, while a developer's global settings
 # (signing, hooks path) would leak in, so every test reads this file as its global

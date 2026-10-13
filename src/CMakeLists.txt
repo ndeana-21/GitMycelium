@@ -109,6 +109,17 @@ add_library(gmc_model STATIC
 )
 target_link_libraries(gmc_model PUBLIC gmc_core gmc_graph gmc_repo gmc_theme Qt6::Core Qt6::Gui)
 
+add_library(gmc_update STATIC
+    update/update_manifest.cpp
+    update/update_manifest.h
+    update/updater.cpp
+    update/updater.h
+)
+target_include_directories(gmc_update PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(gmc_update PUBLIC Qt6::Core Qt6::Network)
+target_compile_definitions(gmc_update PRIVATE
+    GMC_VERSION="${PROJECT_VERSION}" GMC_BUILD_NUMBER=${GMC_BUILD_NUMBER})
+
 add_library(gmc_ui STATIC
     ui/diff_view.cpp
     ui/diff_view.h
@@ -190,8 +201,10 @@ add_library(gmc_ui STATIC
     ui/create_repository_dialog.h
     ui/hooks_dialog.cpp
     ui/hooks_dialog.h
+    ui/update_dialog.cpp
+    ui/update_dialog.h
 )
-target_link_libraries(gmc_ui PUBLIC gmc_model gmc_repo gmc_theme Qt6::Widgets)
+target_link_libraries(gmc_ui PUBLIC gmc_model gmc_repo gmc_theme gmc_update Qt6::Widgets)
 
 add_executable(gitmycelium app/main.cpp theme/icons.qrc
     ${CMAKE_SOURCE_DIR}/packaging/app_icon.qrc)
@@ -201,6 +214,11 @@ target_link_libraries(gitmycelium PRIVATE gmc_ui gmc_repo gmc_git gmc_core Qt6::
 target_compile_definitions(gitmycelium PRIVATE GMC_VERSION="${PROJECT_VERSION}")
 
 if(APPLE)
+    if(GMC_BUILD_NUMBER GREATER 0)
+        set(GMC_BUNDLE_VERSION "${GMC_BUILD_NUMBER}")
+    else()
+        set(GMC_BUNDLE_VERSION "${PROJECT_VERSION}")
+    endif()
     # A .app is what macOS runs. CPack's DragNDrop generator wraps this bundle, and
     # `macdeployqt` (run in CI) copies the Qt frameworks in beside the binary; without
     # it the app would only start on a machine that already has Qt. CMake writes the
@@ -210,7 +228,7 @@ if(APPLE)
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_BUNDLE_NAME "GitMycelium"
         MACOSX_BUNDLE_GUI_IDENTIFIER "dev.gitmycelium.gitmycelium"
-        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${GMC_BUNDLE_VERSION}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
         MACOSX_BUNDLE_ICON_FILE "gitmycelium.icns"
         MACOSX_BUNDLE_COPYRIGHT "gitmycelium")

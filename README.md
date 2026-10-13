@@ -62,11 +62,33 @@ After that it opens normally. Alternatively, remove the quarantine flag in Termi
 xattr -dr com.apple.quarantine /Applications/GitMycelium.app
 ```
 
-Repeat this after installing a new download.
+Repeat this after installing a new download by hand. An update installed from inside
+the app (see below) does not need it.
+
+### Updating
+
+**Help → Check for Updates** compares your copy with the newest release. If a newer
+version or a newer build of the same version is out, **Install and Restart**
+downloads the package for your platform and checks its sha256 against the release's
+`update.json`. Only a matching download is put in place. Then GitMycelium restarts
+into it:
+
+- **AppImage**: the AppImage file is replaced where it lies.
+- **macOS**: the new `GitMycelium.app` is copied out of the `.dmg`, its signature
+  is checked, and it replaces the old bundle once the app has quit.
+
+The folder holding the app must be writable. A copy built from source, or unpacked
+from a tarball, only says that an update exists and links to the release page.
+
+By default the app checks once a day, a few seconds after it starts. The check is one
+anonymous request for `update.json` on GitHub; nothing about you or your
+repositories is sent. Turn it off in **Preferences → Appearance → Updates**.
+`gitmycelium --update-check` prints the same comparison in a terminal.
 
 ## Contents
 
 - [Download](#download)
+- [Updating](#updating)
 - [Features](#features)
 - [Requirements](#requirements)
 - [Building on Linux](#building-on-linux)
@@ -160,6 +182,7 @@ Repeat this after installing a new download.
 
 - Command palette (`Ctrl+P`) with every action, and a rebindable keymap.
 - Dark theme by default, a light theme, and UI zoom.
+- Updates install from inside the app, verified against the release's checksums.
 - Per-repository preferences: column layout, branch pins, branch visibility,
   auto-fetch and pre-flight checks.
 
@@ -291,6 +314,9 @@ QT_QPA_PLATFORM=offscreen ./build/src/gitmycelium --shot ui.png /path/to/reposit
 
 # Rebase headlessly and report what happened, including the automatic conflict pass
 ./build/src/gitmycelium --rebase-onto main --sweep /path/to/repository
+
+# Compare this copy with the newest release (downloads nothing)
+./build/src/gitmycelium --update-check
 ```
 
 > **Note:** most `--ui-*` diagnostic flags carry out real operations such as

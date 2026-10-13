@@ -2,10 +2,12 @@
 #include "graph/graph_layout.h"
 #include "repo/repo_session.h"
 #include "ui/main_window.h"
+#include "update/updater.h"
 #include "ui/theme_apply.h"
 #include "theme/theme.h"
 
 #include <QApplication>
+#include <QEventLoop>
 #include <QIcon>
 #include <QFont>
 #include <QStyleFactory>
@@ -151,6 +153,38 @@ const char* rebaseStatusName(gk::RebaseStatus status) {
 
 /// Headless rebase: it cannot be driven through the window without a display, so
 /// this reports what the window would show.
+/// One check against the release manifest, printed: what is installed, what is
+/// published, and whether this copy could put it in place.
+int updateCheckHeadless() {
+    using namespace gk::update;
+    Updater updater;
+    QEventLoop loop;
+    bool ok = false;
+    QString error;
+    QObject::connect(&updater, &Updater::checked, &loop, [&](bool checkedOk, const QString& why) {
+        ok = checkedOk;
+        error = why;
+        loop.quit();
+    });
+    updater.check();
+    loop.exec();
+
+    std::printf("installed: %s\n", describeVersion(currentVersion(), currentBuild()).toUtf8().constData());
+    std::printf("install kind: %s\n",
+                describeInstallKind(updater.installTarget().kind).toUtf8().constData());
+    std::printf("manifest: %s\n", manifestUrl().toString().toUtf8().constData());
+    if (!ok) {
+        std::printf("error: %s\n", error.toUtf8().constData());
+        return 1;
+    }
+    const UpdateManifest& manifest = *updater.manifest();
+    std::printf("published: %s\n", describeVersion(manifest.version, manifest.build).toUtf8().constData());
+    std::printf("update: %s\n", updater.updateAvailable() ? "yes" : "no");
+    const QString refusal = updater.installRefusal();
+    std::printf("installable: %s\n", refusal.isEmpty() ? "yes" : refusal.toUtf8().constData());
+    return 0;
+}
+
 int rebaseHeadless(const std::string& path, const QString& target, bool sweep) {
     gk::RepoSession session;
     QString error;
@@ -383,6 +417,8 @@ void printUsage() {
                  "  --ui-lfs [show|init|track|untrack|status|prune|fetch|pull|push] [arg]  Git LFS\n"
                  "  --ui-date-format [iso|european|us|relative]  the Date column format\n"
                  "  --version, -V  print the version and exit\n"
+                 "  --update-check  ask the release page for a newer build, print what an\n"
+                 "                  update would install, and exit (downloads nothing)\n"
                  "                      turn the check-for-conflicts-before-merging step\n"
                  "                      on or off for this repository\n"
                  "  --ui-rerere <enable|disable|autoupdate-on|autoupdate-off|status|\n"
@@ -397,6 +433,7 @@ int main(int argc, char* argv[]) {
     gk::Repository::initLibrary();
 
     bool probeMode = false;
+    bool updateCheck = false;
     bool menuMode = false;
     std::string path;
     std::string shotPath;
@@ -961,8 +998,14 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--zoom" && i + 1 < argc) {
             zoomArg = std::atoi(argv[++i]);
         } else if (arg == "--version" || arg == "-V") {
-            std::printf("GitMycelium %s\n", GMC_VERSION);
+            std::printf("GitMycelium %s\n",
+                        gk::update::describeVersion(gk::update::currentVersion(),
+                                                    gk::update::currentBuild())
+                            .toUtf8()
+                            .constData());
             return 0;
+        } else if (arg == "--update-check") {
+            updateCheck = true;
         } else if (arg == "--help" || arg == "-h") {
             printUsage();
             return 0;
@@ -1001,6 +1044,9 @@ int main(int argc, char* argv[]) {
     // The icon is embedded (packaging/app_icon.qrc) so it travels with the binary;
     // the .desktop entry names the same icon for the launcher.
     app.setWindowIcon(QIcon(QStringLiteral(":/icons/gitmycelium.svg")));
+    if (updateCheck) {
+        return updateCheckHeadless();
+    }
     // The theme and the zoom are saved globally. The command line can override
     // them for one run — a light snapshot in CI must not rewrite the reader's
     // profile, so a `--theme`/`--zoom` argument applies here and is not stored.
@@ -1059,6 +1105,7 @@ int main(int argc, char* argv[]) {
     // A snapshot or a headless check must not rewrite the reader's session.
     window.setTabsPersistenceEnabled(!headlessRun && shotPath.empty() && uiLoadTraceSeconds == 0);
     window.setBackgroundIndexingEnabled(!headlessRun && shotPath.empty());
+    window.setUpdateChecksEnabled(!headlessRun && shotPath.empty() && uiLoadTraceSeconds == 0);
     if (!path.empty()) {
         window.openRepository(QString::fromStdString(path));
     } else if (!headlessRun && shotPath.empty()) {

@@ -115,6 +115,7 @@ private:
     SigningPreferences m_signing;
 
     QCheckBox* m_animateBox = nullptr;
+    QCheckBox* m_updateCheckBox = nullptr;
     QComboBox* m_themeBox = nullptr;
     QSpinBox* m_zoomBox = nullptr;
     QComboBox* m_dateFormatBox = nullptr;

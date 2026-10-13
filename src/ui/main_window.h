@@ -46,6 +46,10 @@ class QTimer;
 class QTabBar;
 
 namespace gk {
+namespace update {
+class Updater;
+}
+
 
 class CommitModel;
 class CommitGraphView;
@@ -119,6 +123,10 @@ public:
     void setTabsPersistenceEnabled(bool on) { m_tabsPersistence = on; }
     /// Off by default: a test or a `--shot` must not change the repository it reads.
     void setBackgroundIndexingEnabled(bool on);
+    /// Off by default: only an interactive launch asks the release page for a newer
+    /// build (at most once a day, and only while the preference allows it).
+    void setUpdateChecksEnabled(bool on);
+    void showUpdateDialog();
     /// Opens only the active one; a session with several monorepos must not read them all
     /// at startup.
     void restoreTabs();
@@ -828,6 +836,8 @@ private:
     /// session.
     bool m_tabsPersistence = false;
     bool m_backgroundIndexing = false;
+    update::Updater* m_updater = nullptr;
+    QToolButton* m_updateButton = nullptr;
     /// Set while restoring so the restore does not immediately re-save (and, if a saved path
     /// has gone, does not write the shortened set back).
     bool m_restoringTabs = false;

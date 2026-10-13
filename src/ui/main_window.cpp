@@ -37,6 +37,8 @@
 #include "theme/glyphs.h"
 #include "theme/icons.h"
 #include "ui/refs_delegate.h"
+#include "ui/update_dialog.h"
+#include "update/updater.h"
 #include "theme/theme.h"
 
 #include <QAction>
@@ -110,7 +112,7 @@ void showAboutBox(QWidget* parent) {
                        "Licensed under the Apache License, Version 2.0.<br>"
                        "Uses Qt (LGPLv3), libgit2 (GPLv2 with linking exception) "
                        "and Lucide icons (ISC).")
-            .arg(QCoreApplication::applicationVersion()));
+            .arg(update::describeVersion(update::currentVersion(), update::currentBuild())));
 }
 
 constexpr int kMaxDiffLines = 8000;
@@ -197,6 +199,32 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     loadGraphAnimation();
     setWindowTitle(QStringLiteral("GitMycelium"));
     resize(1500, 900);
+}
+
+void MainWindow::setUpdateChecksEnabled(bool on) {
+    if (!on || !SettingsStore().boolValue(SettingsStore::globalKey(QStringLiteral("updates/check")),
+                                          true)) {
+        return;
+    }
+    SettingsStore store;
+    const QString lastKey = SettingsStore::globalKey(QStringLiteral("updates/last-check"));
+    const QDateTime last = QDateTime::fromString(store.stringValue(lastKey), Qt::ISODate);
+    if (last.isValid() && last.secsTo(QDateTime::currentDateTimeUtc()) < 20 * 3600) {
+        return;
+    }
+    QTimer::singleShot(5000, this, [this, lastKey] {
+        SettingsStore().setString(lastKey, QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+        m_updater->check();
+    });
+}
+
+void MainWindow::showUpdateDialog() {
+    UpdateDialog dialog(m_updater, this);
+    connect(&dialog, &UpdateDialog::restartRequested, this, [this] {
+        close();
+        QCoreApplication::quit();
+    });
+    dialog.exec();
 }
 
 void MainWindow::setBackgroundIndexingEnabled(bool on) {
@@ -1128,6 +1156,8 @@ void MainWindow::buildUi() {
     auto* helpMenu = menuBar()->addMenu(QStringLiteral("&Help"));
     auto* about = addThemedAction(helpMenu, Icon::Info, QStringLiteral("&About GitMycelium"));
     connect(about, &QAction::triggered, this, [this] { showAboutBox(this); });
+    addThemedAction(helpMenu, Icon::Pull, QStringLiteral("Check for &Updates…"), this,
+                    [this] { showUpdateDialog(); });
 
     auto* escape = new QShortcut(QKeySequence(Qt::Key_Escape), this);
     connect(escape, &QShortcut::activated, this, [this] {
@@ -1234,6 +1264,28 @@ void MainWindow::buildUi() {
     m_visibilityButton->setVisible(false);
     connect(m_visibilityButton, &QToolButton::clicked, this, &MainWindow::clearVisibility);
     statusBar()->addPermanentWidget(m_visibilityButton);
+
+    // A background check that finds nothing says nothing; one that finds a newer
+    // build leaves a button here rather than interrupting with a dialog.
+    m_updater = new update::Updater(this);
+    m_updateButton = new QToolButton(this);
+    m_updateButton->setObjectName(QStringLiteral("updateAvailable"));
+    m_updateButton->setAutoRaise(true);
+    m_updateButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    setThemedIcon(m_updateButton, Icon::Pull);
+    m_updateButton->setVisible(false);
+    connect(m_updateButton, &QToolButton::clicked, this, &MainWindow::showUpdateDialog);
+    connect(m_updater, &update::Updater::checked, this, [this](bool ok, const QString&) {
+        const auto& manifest = m_updater->manifest();
+        const bool available = ok && m_updater->updateAvailable();
+        if (available) {
+            m_updateButton->setText(
+                QStringLiteral("Update to %1")
+                    .arg(update::describeVersion(manifest->version, manifest->build)));
+        }
+        m_updateButton->setVisible(available);
+    });
+    statusBar()->addPermanentWidget(m_updateButton);
 }
 
 void MainWindow::buildTabBar() {
@@ -3839,6 +3891,8 @@ void MainWindow::buildCommands() {
 
     add(QStringLiteral("help.about"), QStringLiteral("About GitMycelium"), QStringLiteral("Help"), {}, {},
         [this] { showAboutBox(this); });
+    add(QStringLiteral("help.update"), QStringLiteral("Check for Updates"), QStringLiteral("Help"), {},
+        {}, [this] { showUpdateDialog(); });
 
     // One checkout per local branch: the reason a palette beats a menu. Rebuilt
     // here rather than stored, because the set of branches changes under us.

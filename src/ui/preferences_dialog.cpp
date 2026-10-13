@@ -122,6 +122,14 @@ QWidget* PreferencesDialog::buildAppearancePage() {
     m_dateFormatBox->setCurrentIndex(dateIndex >= 0 ? dateIndex : 0);
     form->addRow(QStringLiteral("Date format"), m_dateFormatBox);
 
+    m_updateCheckBox = new QCheckBox(QStringLiteral("Check for updates when GitMycelium starts"), page);
+    m_updateCheckBox->setObjectName(QStringLiteral("updateCheck"));
+    m_updateCheckBox->setToolTip(QStringLiteral(
+        "At most once a day, asks the GitHub release page for a newer build. Nothing is "
+        "downloaded until you choose to install it."));
+    m_updateCheckBox->setChecked(
+        SettingsStore().boolValue(SettingsStore::globalKey(QStringLiteral("updates/check")), true));
+    form->addRow(QStringLiteral("Updates"), m_updateCheckBox);
     layout->addLayout(form);
     layout->addStretch(1);
     return page;
@@ -452,6 +460,8 @@ void PreferencesDialog::save() {
     store.setInt(SettingsStore::globalKey(QStringLiteral("zoom")), m_zoomBox->value());
     store.setString(SettingsStore::globalKey(QStringLiteral("commit-date-format")),
                     m_dateFormatBox->currentData().toString());
+    store.setBool(SettingsStore::globalKey(QStringLiteral("updates/check")),
+                  m_updateCheckBox->isChecked());
     if (m_repositoryPath.isEmpty()) {
         return;
     }
