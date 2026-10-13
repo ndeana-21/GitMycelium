@@ -54,6 +54,9 @@ void RepoWatcherTest::aNewFileIsReportedOnce() {
     watcher.setRoots(m_work, m_work + QStringLiteral("/.git"));
     QVERIFY(watcher.watchedDirectoryCount() > 0);
     QSignalSpy spy(&watcher, &RepoWatcher::changed);
+    // FSEvents (macOS) delivers late the fixture's own writes made before watching began.
+    QTest::qWait(700);
+    spy.clear();
 
     QVERIFY(touch(m_work + QStringLiteral("/a.txt")));
     QTRY_VERIFY_WITH_TIMEOUT(spy.count() >= 1, 5000);
