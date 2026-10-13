@@ -4,7 +4,7 @@ All notable changes to GitMycelium are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.1.1] - 2026-10-13
 
 ### Fixed
 
@@ -22,6 +22,13 @@ All notable changes to GitMycelium are recorded here. The format follows
 - What has not been read yet shows as skeleton rows (branches, the graph before
   its first page, the Commit Panel, a commit's files, the diff, the branch label)
   instead of an empty or stale view.
+
+### Downloads
+
+- **Linux x86_64:** `GitMycelium-1.1.1-x86_64.AppImage`.
+- **macOS (Apple Silicon):** `GitMycelium-1.1.1-arm64.dmg`.
+
+From 1.1.0 on, Help → Check for Updates installs this in place.
 
 ## [1.1.0] - 2026-10-13
 
