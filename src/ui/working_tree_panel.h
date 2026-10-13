@@ -21,6 +21,8 @@ class QTreeView;
 
 namespace gk {
 
+class Skeleton;
+
 class FileActionDelegate;
 
 /// The Commit Panel: what is about to be committed. From the top: discard everything, how many files changed on which
@@ -37,6 +39,9 @@ public:
     explicit WorkingTreePanel(QWidget* parent = nullptr);
 
     void setChanges(const std::vector<FileChange>& changes);
+    /// Skeleton rows over both lists while the status is still being read.
+    void setLoading(bool loading);
+    bool loading() const;
     /// The branch the commit will land on. An empty name is a detached HEAD.
     void setBranch(const QString& name, const QColor& color);
     void setMode(CommitFilesModel::Mode mode);
@@ -125,6 +130,7 @@ private:
     QModelIndex firstFileIn(const Section& section) const;
     Section& other(const Section& section);
 
+    Skeleton* m_skeleton = nullptr;
     Section m_unstaged;
     Section m_staged;
     int m_changedPaths = 0;

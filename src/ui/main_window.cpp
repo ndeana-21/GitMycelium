@@ -37,6 +37,7 @@
 #include "theme/glyphs.h"
 #include "theme/icons.h"
 #include "ui/refs_delegate.h"
+#include "ui/skeleton.h"
 #include "ui/update_dialog.h"
 #include "update/updater.h"
 #include "theme/theme.h"
@@ -113,6 +114,80 @@ void showAboutBox(QWidget* parent) {
                        "Uses Qt (LGPLv3), libgit2 (GPLv2 with linking exception) "
                        "and Lucide icons (ISC).")
             .arg(update::describeVersion(update::currentVersion(), update::currentBuild())));
+}
+
+/// What `renderFile` reads for one file, gathered so the read can run on a worker.
+struct DocumentRequest {
+    QString path;
+    bool workingTree = false;
+    bool staged = false;
+    QString commitId;
+    QString compareBase;
+    QString compareTarget;
+    QString compareLabel;
+    bool compareWorkingTree = false;
+};
+
+DiffView::Document readDocument(RepoSession& session, const DocumentRequest& request) {
+    const QString& path = request.path;
+    DiffView::Document document;
+    document.path = path;
+    std::string bytes;
+    if (request.workingTree && request.staged) {
+        // The staged side: HEAD against the index. Staging a change here means
+        // taking it back out, so the control offers Unstage.
+        document.diff = session.stagedFileDiff(path);
+        document.staging = DiffView::Staging::Unstage;
+        document.revisionContent = session.indexFileContent(path);
+        document.hasRevision = true;
+        document.contentLabel = QStringLiteral("Index");
+    } else if (request.workingTree) {
+        document.diff = session.workdirFileDiff(path);
+        document.staging = DiffView::Staging::Stage;
+        // The unstaged side can also be thrown away; the staged side cannot (that is
+        // an unstage, and the committed version is what is left).
+        document.offerDiscard = true;
+        if (session.workingFileContent(path, &bytes, nullptr)) {
+            document.workingContent = std::move(bytes);
+            document.hasWorking = true;
+        }
+        document.contentLabel = QStringLiteral("Working tree");
+    } else if (!request.compareBase.isEmpty()) {
+        if (request.compareWorkingTree) {
+            document.diff = session.workdirFileDiffAgainst(request.compareBase, path);
+            if (session.workingFileContent(path, &bytes, nullptr)) {
+                document.workingContent = std::move(bytes);
+                document.hasWorking = true;
+            }
+        } else {
+            document.diff = session.fileDiffBetween(request.compareBase, request.compareTarget, path);
+            if (session.fileAtRevision(request.compareTarget, path, &bytes, nullptr)) {
+                document.revisionContent = std::move(bytes);
+                document.hasRevision = true;
+            }
+        }
+        document.contentLabel = request.compareLabel;
+    } else {
+        document.diff = session.commitFileDiff(request.commitId, path);
+        if (session.fileAtRevision(request.commitId, path, &bytes, nullptr)) {
+            document.revisionContent = std::move(bytes);
+            document.hasRevision = true;
+        }
+        document.contentLabel = request.commitId.left(7);
+    }
+    return document;
+}
+
+CommitDetails readCommitDetails(RepoSession& session, const QString& commitId) {
+    CommitDetails details;
+    details.files = session.changedFiles(commitId);
+    // Only the commit HEAD points at is amendable: rewording an older one rebuilds
+    // everything after it, which is a rebase and not a text field.
+    details.amendable = commitId == QString::fromStdString(session.info().headId);
+    // Asked for one commit, on selection: reading `%G?` runs the signature check,
+    // which is not something to do for every row of the graph.
+    details.signature = session.commitSignature(commitId);
+    return details;
 }
 
 constexpr int kMaxDiffLines = 8000;
@@ -277,6 +352,12 @@ void MainWindow::wireContext(RepoContext* context) {
                     context->commitModel->reset();
                 }
             });
+    connect(session, &RepoSession::snapshotReady, this, [this, session] { onSnapshotReady(session); });
+    connect(model, &CommitModel::loadingChanged, this, [this, context] {
+        if (active() == context) {
+            updateGraphSkeleton();
+        }
+    });
     connect(session, &RepoSession::readFailed, this, [this, session](QString message) {
         if (RepoContext* context = contextOf(session); context && active() == context) {
             notify(NotificationLog::Error, QStringLiteral("Cannot read the repository: %1").arg(message));
@@ -375,6 +456,7 @@ void MainWindow::bindViews() {
     }
     m_refView->setModel(m_refModel);
     m_commitView->setModel(m_commitModel);
+    updateGraphSkeleton();
     if (m_conflictView) {
         m_conflictView->setSession(m_session);
     }
@@ -468,6 +550,16 @@ void MainWindow::activateContext(int index) {
     RepoContext* context = active();
     adoptContext(context);
     bindViews();
+    // A file or a commit asked for in the tab being left belongs to that tab.
+    ++m_documentToken;
+    ++m_commitFilesToken;
+    m_documentPending = false;
+    if (m_diffView) {
+        m_diffView->setLoading(false);
+    }
+    if (m_details) {
+        m_details->setFilesLoading(false);
+    }
     rebuildTabBar();
     // A network or maintenance run belongs to one tab; the one being shown is not
     // running anything until it starts its own.
@@ -489,7 +581,7 @@ void MainWindow::activateContext(int index) {
     // The alias is remembered per repository, so a rename survives a restart.
     if (context->alias.isEmpty()) {
         const QString alias =
-            loadTabAlias(QString::fromStdString(m_session->info().commonDir));
+            loadTabAlias(QString::fromStdString(m_session->paths().commonDir));
         if (!alias.isEmpty()) {
             context->alias = alias;
         }
@@ -523,14 +615,22 @@ void MainWindow::activateContext(int index) {
     loadCommitColumns();
     loadCommitDateFormat();
     loadTimeline();
+    // A tab shown before comes back at once with what it last read; the fresh read
+    // replaces it when it lands. A tab never shown has nothing to show yet.
+    if (m_asyncReads) {
+        if (m_session->snapshot()) {
+            applyPanels();
+        } else {
+            setPanelsLoading(!context->panelsShown);
+        }
+    }
     refreshPanels();
-    const RepoInfo info = m_session->info();
-    m_watcher->setRoots(QString::fromStdString(info.workDir), QString::fromStdString(info.gitDir));
+    const RepoPaths paths = m_session->paths();
+    m_watcher->setRoots(QString::fromStdString(paths.workDir), QString::fromStdString(paths.gitDir));
     loadAutoFetch();
     loadPreflight();
     loadPrevention();
     loadSubmoduleAutoupdate();
-    refreshRerereActions();
     // A selection made before the switch comes back with its diff.
     if (!m_selectedCommitId.isEmpty()) {
         selectCommit(m_selectedCommitId);
@@ -1253,6 +1353,8 @@ void MainWindow::buildUi() {
 
     m_branchLabel = new QLabel(QStringLiteral("no repository"), this);
     m_branchLabel->setObjectName(QStringLiteral("statusBranch"));
+    m_branchLabel->setMinimumWidth(theme::scaledPixels(160));
+    m_branchSkeleton = new Skeleton(m_branchLabel, Skeleton::Shape::Line);
     statusBar()->addPermanentWidget(m_branchLabel);
 
     // The graph can be narrowed to one branch or to "everything but these". A
@@ -1490,6 +1592,7 @@ QWidget* MainWindow::buildReferencePanel() {
 
     auto* refView = new RefTreeView(panel);
     m_refView = refView;
+    m_refSkeleton = new Skeleton(refView->viewport(), Skeleton::Shape::List);
     refView->setModel(m_refModel);
     refView->setUniformRowHeights(true);
     refView->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -1548,6 +1651,7 @@ QWidget* MainWindow::buildReferencePanel() {
 
 void MainWindow::buildCommitPanel() {
     m_commitView = new CommitGraphView(this);
+    m_graphSkeleton = new Skeleton(m_commitView->viewport(), Skeleton::Shape::Graph);
     m_commitView->setModel(m_commitModel);
     m_commitView->setUniformRowHeights(true);
     m_commitView->setRootIsDecorated(false);
@@ -1804,6 +1908,90 @@ void MainWindow::refreshPanels() {
     // Something the session did not do may have moved a ref (another client, the
     // watcher), so the cached history walk must not be trusted across a refresh.
     m_session->invalidateCommitWalk();
+    if (!m_asyncReads || !m_session->isOpen()) {
+        m_session->primeSnapshot();
+        applyPanels();
+        return;
+    }
+    // Taken now, not when the read lands: a window activation in between must not
+    // take the state this refresh is already reading for a change.
+    m_lastFingerprint = repositoryFingerprint();
+    // Everything a refresh shows is read on a worker in one pass; the window keeps
+    // what it shows now (or skeletons, the first time) until `snapshotReady`.
+    if (RepoContext* context = active(); context && !context->panelsShown) {
+        setPanelsLoading(true);
+    }
+    m_session->requestSnapshot();
+}
+
+void MainWindow::onSnapshotReady(RepoSession* session) {
+    RepoContext* context = contextOf(session);
+    // A background tab's snapshot waits in its session for the switch to it. One
+    // retired by a write since is not applied: that write asked for its own.
+    if (!context || context != active() || !m_session->snapshot()) {
+        return;
+    }
+    applyPanels();
+}
+
+void MainWindow::setPanelsLoading(bool loading) {
+    if (loading) {
+        // The repository is open: its page, in outline, not the start page or the
+        // previous tab's branch.
+        if (m_stack && m_stack->currentIndex() == kStartPage) {
+            m_stack->setCurrentIndex(kHistoryPage);
+        }
+        if (m_branchLabel) {
+            m_branchLabel->clear();
+        }
+        setStatus(QString());
+    }
+    if (m_refSkeleton) {
+        m_refSkeleton->setActive(loading);
+    }
+    if (m_branchSkeleton) {
+        m_branchSkeleton->setActive(loading);
+    }
+    if (m_details) {
+        m_details->setWorkingTreeLoading(loading);
+    }
+}
+
+void MainWindow::updateGraphSkeleton() {
+    if (!m_graphSkeleton) {
+        return;
+    }
+    const bool waiting = m_asyncReads && m_session && m_session->isOpen() && m_commitModel &&
+                         m_commitModel->isLoading() && m_commitModel->realRowCount() == 0;
+    m_graphSkeleton->setActive(waiting);
+}
+
+void MainWindow::setAsyncReadsEnabled(bool on) {
+    m_asyncReads = on;
+    updateGraphSkeleton();
+}
+
+QStringList MainWindow::loadingStateForDiagnostics() const {
+    auto state = [](const Skeleton* skeleton) {
+        return skeleton && skeleton->isActive() ? QStringLiteral("loading") : QStringLiteral("ready");
+    };
+    return {QStringLiteral("refs: %1").arg(state(m_refSkeleton)),
+            QStringLiteral("graph: %1").arg(state(m_graphSkeleton)),
+            QStringLiteral("branch: %1").arg(state(m_branchSkeleton)),
+            QStringLiteral("changes: %1")
+                .arg(m_details && m_details->workingTreeLoading() ? QStringLiteral("loading")
+                                                                  : QStringLiteral("ready")),
+            QStringLiteral("files: %1")
+                .arg(m_details && m_details->filesLoading() ? QStringLiteral("loading")
+                                                            : QStringLiteral("ready"))};
+}
+
+void MainWindow::applyPanels() {
+    if (RepoContext* context = active()) {
+        context->panelsShown = m_session->isOpen();
+    }
+    setPanelsLoading(false);
+    refreshRerereActions();
     // Everything the diff pane was showing may have moved: a fetch, a merge or an
     // amend all change what a file at a commit looks like.
     m_renderedPath.clear();
@@ -2013,10 +2201,10 @@ QString MainWindow::repositorySettingsPath() const {
     // the repository it belongs to, and the view settings should follow the
     // repository, not the directory it happens to be checked out in. For an
     // ordinary repository the common dir is `.git`, which is just as unique.
-    const RepoInfo info = m_session->info();
-    QString key = QString::fromStdString(info.commonDir);
+    const RepoPaths paths = m_session->paths();
+    QString key = QString::fromStdString(paths.commonDir);
     if (key.isEmpty()) {
-        key = QString::fromStdString(info.gitDir);
+        key = QString::fromStdString(paths.gitDir);
     }
     const QString canonical = QFileInfo(key).canonicalFilePath();
     return canonical.isEmpty() ? key : canonical;
@@ -2027,10 +2215,10 @@ QString MainWindow::repositoryLegacySettingsPath() const {
         return QString();
     }
     // Exactly what the old key was: the checkout path, trailing slash trimmed.
-    const RepoInfo info = m_session->info();
-    QString path = QString::fromStdString(info.workDir.empty() ? info.gitDir : info.workDir);
+    const RepoPaths paths = m_session->paths();
+    QString path = QString::fromStdString(paths.workDir.empty() ? paths.gitDir : paths.workDir);
     if (path.isEmpty()) {
-        path = QString::fromStdString(info.gitDir);
+        path = QString::fromStdString(paths.gitDir);
     }
     while (path.size() > 1 && path.endsWith(QLatin1Char('/'))) {
         path.chop(1);
@@ -2269,15 +2457,36 @@ void MainWindow::showCommitFiles(const QString& commitId) {
     if (!commit) {
         return;
     }
-    const auto files = m_session->changedFiles(commitId);
-    // Only the commit HEAD points at is amendable: rewording an older one rebuilds
-    // everything after it, which is a rebase and not a text field.
-    const bool amendable = commitId == QString::fromStdString(m_session->info().headId);
-    m_details->showCommit(*commit, files, amendable);
-    // Asked for one commit, on selection: reading `%G?` runs the signature check,
-    // which is not something to do for every row of the graph.
-    m_details->setSignatureInfo(m_session->commitSignature(commitId));
-    if (files.empty()) {
+    const quint64 token = ++m_commitFilesToken;
+    if (!m_asyncReads) {
+        showCommitDetails(commitId, readCommitDetails(*m_session, commitId));
+        return;
+    }
+    // The header is in the row already; the file list and the signature are not.
+    m_details->showCommit(*commit, {}, false);
+    m_details->setFilesLoading(true);
+    m_diffView->setLoading(true);
+    m_session->readAsync<CommitDetails>(
+        this, [commitId](RepoSession& session) { return readCommitDetails(session, commitId); },
+        [this, token, commitId](CommitDetails details) {
+            if (token == m_commitFilesToken) {
+                showCommitDetails(commitId, details);
+            }
+        });
+}
+
+void MainWindow::showCommitDetails(const QString& commitId, const CommitDetails& details) {
+    const int row = m_commitModel->rowForCommit(commitId);
+    const CommitInfo* commit = row >= 0 ? m_commitModel->commitAt(row) : nullptr;
+    if (!commit) {
+        m_details->setFilesLoading(false);
+        m_diffView->setLoading(false);
+        return;
+    }
+    m_details->showCommit(*commit, details.files, details.amendable);
+    m_details->setSignatureInfo(details.signature);
+    if (details.files.empty()) {
+        m_diffView->setLoading(false);
         m_diffView->clear();
     }
 }
@@ -2920,72 +3129,55 @@ void MainWindow::renderFile(const QString& path, bool workingTree, bool staged) 
                                          : QStringLiteral("cmp:%1..%2")
                                                .arg(m_compareBase, m_compareTarget))));
     if (m_renderedPath == path && m_renderedContext == context) {
+        // Already on screen, or on its way: the skeleton a commit selection put up
+        // for it is not this call's to keep.
+        if (!m_documentPending) {
+            m_diffView->setLoading(false);
+        }
         return;
     }
     m_renderedPath = path;
     m_renderedContext = context;
     m_renderedStaged = staged;
-
-    DiffView::Document document;
-    document.path = path;
-
-    if (workingTree && staged) {
-        // The staged side: HEAD against the index. Staging a change here means
-        // taking it back out, so the control offers Unstage.
-        document.diff = m_session->stagedFileDiff(path);
-        document.staging = DiffView::Staging::Unstage;
-        document.revisionContent = m_session->indexFileContent(path);
-        document.hasRevision = true;
-        document.contentLabel = QStringLiteral("Index");
-    } else if (workingTree) {
-        document.diff = m_session->workdirFileDiff(path);
-        document.staging = DiffView::Staging::Stage;
-        // The unstaged side can also be thrown away; the staged side cannot (that is
-        // an unstage, and the committed version is what is left).
-        document.offerDiscard = true;
-        std::string bytes;
-        if (m_session->workingFileContent(path, &bytes, nullptr)) {
-            document.workingContent = std::move(bytes);
-            document.hasWorking = true;
-        }
-        document.contentLabel = QStringLiteral("Working tree");
-    } else {
-        if (!m_compareBase.isEmpty()) {
-            if (m_compareMode == CompareMode::WorkingTree) {
-                document.diff = m_session->workdirFileDiffAgainst(m_compareBase, path);
-                std::string bytes;
-                if (m_session->workingFileContent(path, &bytes, nullptr)) {
-                    document.workingContent = std::move(bytes);
-                    document.hasWorking = true;
-                }
-            } else {
-                document.diff = m_session->fileDiffBetween(m_compareBase, m_compareTarget, path);
-                std::string bytes;
-                if (m_session->fileAtRevision(m_compareTarget, path, &bytes, nullptr)) {
-                    document.revisionContent = std::move(bytes);
-                    document.hasRevision = true;
-                }
-            }
-            document.contentLabel = m_compareLabel;
-        } else {
-            if (m_selectedCommitId.isEmpty()) {
-                return;
-            }
-            document.diff = m_session->commitFileDiff(m_selectedCommitId, path);
-            std::string bytes;
-            if (m_session->fileAtRevision(m_selectedCommitId, path, &bytes, nullptr)) {
-                document.revisionContent = std::move(bytes);
-                document.hasRevision = true;
-            }
-            document.contentLabel = m_selectedCommitId.left(7);
-        }
+    if (!workingTree && m_compareBase.isEmpty() && m_selectedCommitId.isEmpty()) {
+        return;
     }
 
+    DocumentRequest request;
+    request.path = path;
+    request.workingTree = workingTree;
+    request.staged = staged;
+    request.commitId = m_selectedCommitId;
+    request.compareBase = m_compareBase;
+    request.compareTarget = m_compareTarget;
+    request.compareLabel = m_compareLabel;
+    request.compareWorkingTree = m_compareMode == CompareMode::WorkingTree;
+
+    const quint64 token = ++m_documentToken;
+    if (!m_asyncReads) {
+        showDocument(readDocument(*m_session, request));
+        return;
+    }
+    // The text stays readable until the new one is ready, under skeleton rows, so
+    // the pane never flashes empty and never shows the old file as if it were new.
+    m_diffView->setLoading(true);
+    m_documentPending = true;
+    m_session->readAsync<DiffView::Document>(
+        this, [request](RepoSession& session) { return readDocument(session, request); },
+        [this, token](DiffView::Document document) {
+            if (token == m_documentToken) {
+                m_documentPending = false;
+                showDocument(document);
+            }
+        });
+}
+
+void MainWindow::showDocument(const DiffView::Document& document) {
     m_diffView->setCodec(m_diffCodec);
     m_diffView->show(document);
     if (m_diffView->blameView()) {
         // The viewer asked for blame; keep it in step with the file it is showing.
-        showBlameFor(path);
+        showBlameFor(document.path);
     }
 
     const FileDiff& diff = document.diff;
@@ -3136,21 +3328,34 @@ QString MainWindow::repositoryFingerprint() const {
     if (!m_session->isOpen()) {
         return QString();
     }
-    const RepoInfo info = m_session->info();
-    QString out = QString::fromStdString(info.headId);
-    out += QLatin1Char('|') + QString::fromStdString(info.headBranch);
-    out += QLatin1Char('|') + QString::number(static_cast<int>(info.operation));
-    out += info.detached ? QLatin1Char('D') : QLatin1Char('n');
+    // Read from the files, not the session: this runs every time the window comes
+    // back to the front, and a session read would wait behind a history page. HEAD's
+    // text names the branch (or the detached commit); times and sizes say whether
+    // anything under it, or an operation's marker, moved.
+    const RepoPaths paths = m_session->paths();
+    const QString gitDir = QString::fromStdString(paths.gitDir);
+    const QString commonDir =
+        QString::fromStdString(paths.commonDir.empty() ? paths.gitDir : paths.commonDir);
+    QString head;
+    QFile headFile(gitDir + QStringLiteral("/HEAD"));
+    if (headFile.open(QIODevice::ReadOnly)) {
+        head = QString::fromUtf8(headFile.read(512)).trimmed();
+    }
+    const QString refPrefix = QStringLiteral("ref: refs/heads/");
+    const QString branch = head.startsWith(refPrefix) ? head.mid(refPrefix.size()) : QString();
 
-    // Times and sizes, not contents: this runs every time the window comes back to
-    // the front, and it has to cost nothing.
-    const QString gitDir = QString::fromStdString(info.gitDir);
-    const QString branch = QString::fromStdString(info.headBranch);
+    QString out = head;
     const QStringList watched = {
-        gitDir + QStringLiteral("/HEAD"),
         gitDir + QStringLiteral("/index"),
         gitDir + QStringLiteral("/FETCH_HEAD"),
-        branch.isEmpty() ? QString() : gitDir + QStringLiteral("/refs/heads/") + branch,
+        gitDir + QStringLiteral("/MERGE_HEAD"),
+        gitDir + QStringLiteral("/CHERRY_PICK_HEAD"),
+        gitDir + QStringLiteral("/REVERT_HEAD"),
+        gitDir + QStringLiteral("/SQUASH_MSG"),
+        gitDir + QStringLiteral("/rebase-merge"),
+        gitDir + QStringLiteral("/rebase-apply"),
+        commonDir + QStringLiteral("/packed-refs"),
+        branch.isEmpty() ? QString() : commonDir + QStringLiteral("/refs/heads/") + branch,
     };
     for (const QString& file : watched) {
         if (file.isEmpty()) {
@@ -6660,6 +6865,7 @@ void MainWindow::setHeadless(bool headless) {
     if (m_commitView) {
         m_commitView->setAnimationsEnabled(false);
     }
+    Skeleton::setAnimationsEnabled(false);
     // A modal dialog is a hang in a headless run and tells the log nothing. Close what
     // appears and write down what it said.
     auto* watchdog = new QTimer(this);

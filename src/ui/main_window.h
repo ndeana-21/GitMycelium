@@ -46,6 +46,7 @@ class QTimer;
 class QTabBar;
 
 namespace gk {
+class Skeleton;
 namespace update {
 class Updater;
 }
@@ -64,6 +65,13 @@ class StartPage;
 /// Offered as a menu so the operation is always explicit — dragging must never
 /// silently rewrite history.
 enum class RefDropAction { MergeInto, RebaseOnto, Checkout };
+
+/// A commit's file list and signature: what selecting it reads beyond its row.
+struct CommitDetails {
+    std::vector<ChangedFile> files;
+    bool amendable = false;
+    CommitSignature signature;
+};
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -126,6 +134,12 @@ public:
     /// Off by default: only an interactive launch asks the release page for a newer
     /// build (at most once a day, and only while the preference allows it).
     void setUpdateChecksEnabled(bool on);
+    /// Off by default, so a test or a headless check reads synchronously and sees the
+    /// result of what it just did. The interactive launch turns it on: refreshes read
+    /// on a worker, and what is not read yet shows as skeleton rows.
+    void setAsyncReadsEnabled(bool on);
+    /// For a test of the asynchronous path: whether each part still shows its skeleton.
+    QStringList loadingStateForDiagnostics() const;
     void showUpdateDialog();
     /// Opens only the active one; a session with several monorepos must not read them all
     /// at startup.
@@ -445,6 +459,12 @@ private:
     void buildChangesPanel();
 
     void refreshPanels();
+    /// What `refreshPanels` does with what it read; reads only from the session's
+    /// snapshot when one is installed.
+    void applyPanels();
+    void onSnapshotReady(RepoSession* session);
+    void setPanelsLoading(bool loading);
+    void updateGraphSkeleton();
     void refreshStatusBar();
     void refreshStatusBar(const std::vector<FileChange>& changes);
     void showWorkingTreeChanges();
@@ -466,6 +486,8 @@ private:
     /// Overwrites the working-tree copy, so it asks first.
     void restoreRenderedFileFromView();
     void showBlameFor(const QString& path);
+    void showDocument(const DiffView::Document& document);
+    void showCommitDetails(const QString& commitId, const CommitDetails& details);
     void showFileHistory(const QString& path);
     void showReflog();
     void editSparseCheckout();
@@ -739,6 +761,7 @@ private:
         QString alias; ///< display name when the reader renames the tab
         bool opened = false;
         bool primed = false; ///< the first page has been requested already
+        bool panelsShown = false; ///< a refresh has been applied to the window at least once
         /// The page is sticky while an operation is unfinished, so leaving it has to be
         /// remembered or the next refresh drags the reader back.
         bool conflictPageDismissed = false;
@@ -836,6 +859,14 @@ private:
     /// session.
     bool m_tabsPersistence = false;
     bool m_backgroundIndexing = false;
+    bool m_asyncReads = false;
+    /// Moves on with every file render; a document read for an older one is dropped.
+    quint64 m_documentToken = 0;
+    bool m_documentPending = false;
+    quint64 m_commitFilesToken = 0;
+    Skeleton* m_refSkeleton = nullptr;
+    Skeleton* m_graphSkeleton = nullptr;
+    Skeleton* m_branchSkeleton = nullptr;
     update::Updater* m_updater = nullptr;
     QToolButton* m_updateButton = nullptr;
     /// Set while restoring so the restore does not immediately re-save (and, if a saved path

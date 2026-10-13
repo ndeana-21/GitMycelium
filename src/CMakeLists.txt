@@ -201,6 +201,8 @@ add_library(gmc_ui STATIC
     ui/create_repository_dialog.h
     ui/hooks_dialog.cpp
     ui/hooks_dialog.h
+    ui/skeleton.cpp
+    ui/skeleton.h
     ui/update_dialog.cpp
     ui/update_dialog.h
 )

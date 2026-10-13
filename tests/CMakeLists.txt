@@ -380,6 +380,10 @@ add_executable(test_update_dialog test_update_dialog.cpp)
 target_link_libraries(test_update_dialog PRIVATE gmc_ui Qt6::Test Qt6::Widgets)
 add_test(NAME update_dialog COMMAND test_update_dialog)
 
+add_executable(test_async_reads test_async_reads.cpp ${CMAKE_SOURCE_DIR}/src/theme/icons.qrc)
+target_link_libraries(test_async_reads PRIVATE gmc_ui gmc_model gmc_repo gmc_git gmc_core gmc_theme Qt6::Widgets Qt6::Test)
+add_test(NAME async_reads COMMAND test_async_reads)
+
 
 # A test's outcome must not depend on the machine. git refuses to commit without an
 # identity and a fresh CI runner has none, while a developer's global settings

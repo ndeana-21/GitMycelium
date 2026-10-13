@@ -17,6 +17,8 @@
 #include <cctype>
 #include <sstream>
 
+#include <unordered_set>
+
 namespace gk {
 
 namespace {
@@ -24,13 +26,19 @@ namespace {
 // Defined below with the other guarded-write helpers; declared here because the
 // staging methods above them use them too.
 template <typename Fn>
-bool guarded(QMutex* mutex, std::unique_ptr<Repository>& repo, QString* errorOut, Fn&& fn);
+bool guarded(QMutex* mutex, std::atomic<quint64>* epoch, std::unique_ptr<Repository>& repo,
+             QString* errorOut, Fn&& fn);
 
 template <typename Fn>
-bool recorded(QMutex* mutex, std::unique_ptr<Repository>& repo, Oplog* oplog,
-              const QString& label, QString* errorOut, Fn&& fn);
+bool recorded(QMutex* mutex, std::atomic<quint64>* epoch, std::unique_ptr<Repository>& repo,
+              Oplog* oplog, const QString& label, QString* errorOut, Fn&& fn);
 
 bool operationPointersIntact(const RefState& current, const RefState& from, const RefState& to);
+
+struct RetireSnapshotOnExit {
+    const RepoSession* session;
+    ~RetireSnapshotOnExit() { session->invalidateSnapshot(); }
+};
 
 /// git spells a true boolean several ways; the config holds what the reader wrote.
 bool configBool(Repository& repo, const std::string& key) {
@@ -69,8 +77,15 @@ RepoSession::~RepoSession() {
 bool RepoSession::open(const QString& path, QString* errorOut) {
     try {
         auto repo = Repository::open(path.toStdString());
+        const RepoInfo opened = repo->info();
         QMutexLocker lock(&m_mutex);
         m_repo = std::move(repo);
+        ++m_snapshotEpoch;
+        {
+            QMutexLocker pathsLock(&m_pathsMutex);
+            m_paths = {opened.gitDir, opened.commonDir, opened.workDir, opened.bare};
+        }
+        m_isOpen.store(true);
         // A fresh repository gets a fresh log: the pointers an old log remembers
         // belong to another repository.
         m_oplog.clear();
@@ -100,24 +115,170 @@ bool RepoSession::createRepository(const QString& path, const QString& initialBr
 
 void RepoSession::close() {
     QMutexLocker lock(&m_mutex);
+    m_isOpen.store(false);
+    ++m_snapshotEpoch;
     m_repo.reset();
     m_oplog.clear();
+    QMutexLocker pathsLock(&m_pathsMutex);
+    m_paths = {};
 }
 
-bool RepoSession::isOpen() const {
+RepoPaths RepoSession::paths() const {
+    QMutexLocker lock(&m_pathsMutex);
+    return m_paths;
+}
+
+std::shared_ptr<const SessionSnapshot> RepoSession::snapshot() const {
+    QMutexLocker lock(&m_snapshotMutex);
+    if (m_snapshot && m_snapshot->epoch == m_snapshotEpoch.load()) {
+        return m_snapshot;
+    }
+    return nullptr;
+}
+
+void RepoSession::invalidateSnapshot() const {
+    ++m_snapshotEpoch;
+}
+
+std::shared_ptr<SessionSnapshot> RepoSession::readSnapshot() const {
+    auto out = std::make_shared<SessionSnapshot>();
+    {
+        QMutexLocker lock(&m_mutex);
+        if (!m_repo) {
+            return nullptr;
+        }
+        out->epoch = m_snapshotEpoch.load();
+        try {
+            Repository& repo = *m_repo;
+            out->info = repo.info();
+            out->refs = repo.refs();
+            out->refsByCommit = repo.refsByCommit(HistoryFilter{HistoryScope::AllRefs, {}});
+            out->status = repo.status();
+            out->upstream = repo.upstreamInfo(std::string{});
+            out->merging = repo.mergeInProgress();
+            out->rebasing = repo.rebaseInProgress();
+            out->squashing = repo.squashInProgress();
+            out->targetBranch = QString::fromStdString(repo.targetBranch());
+            out->signCommits = configBool(repo, "commit.gpgsign");
+            try {
+                out->commitTemplate = QString::fromStdString(repo.commitTemplate());
+            } catch (const std::exception&) {
+                // An unreadable template fills nothing, as on the live path.
+            }
+            for (const char* key : {"user.email", "user.name"}) {
+                out->config.insert(QString::fromLatin1(key),
+                                   QString::fromStdString(repo.configValue(key)));
+            }
+        } catch (const std::exception&) {
+            // A read that fails is left to the live path, which reports it.
+            return nullptr;
+        }
+        out->canUndo = m_oplog.canUndo();
+        out->canRedo = m_oplog.canRedo();
+        out->undoLabel = m_oplog.undoLabel();
+        out->redoLabel = m_oplog.redoLabel();
+    }
+    // The git binary needs only the directories, not the libgit2 handle.
+    const std::string& workDir = out->info.workDir;
+    try {
+        if (!workDir.empty()) {
+            out->stashes = StashOps(workDir).list();
+            out->submodules = SubmoduleOps(workDir).list();
+            out->remotes = RemoteOps(workDir).remotes();
+            const RerereOps rerere(workDir);
+            out->rerereEnabled = rerere.enabled();
+            out->rerereAutoupdate = rerere.autoupdate();
+        }
+        const std::string worktreeDir = workDir.empty() ? out->info.gitDir : workDir;
+        if (!worktreeDir.empty()) {
+            out->worktrees = WorktreeOps(worktreeDir).list(workDir);
+        }
+    } catch (const std::exception&) {
+        return nullptr;
+    }
+    return out;
+}
+
+bool RepoSession::installSnapshot(std::shared_ptr<SessionSnapshot> snapshot) {
+    if (!snapshot) {
+        return false;
+    }
+    // Compared under the session lock, which every write holds while it moves the
+    // epoch: a write cannot slip between the comparison and the install.
     QMutexLocker lock(&m_mutex);
-    return m_repo != nullptr;
+    if (snapshot->epoch != m_snapshotEpoch.load()) {
+        return false;
+    }
+    QMutexLocker snapshotLock(&m_snapshotMutex);
+    m_snapshot = std::move(snapshot);
+    return true;
+}
+
+void RepoSession::primeSnapshot() {
+    installSnapshot(readSnapshot());
+}
+
+void RepoSession::requestSnapshot() {
+    {
+        QMutexLocker lock(&m_snapshotMutex);
+        if (m_snapshotRunning) {
+            m_snapshotAgain = true;
+            return;
+        }
+        m_snapshotRunning = true;
+    }
+    if (!startWorker([this] { runSnapshotWorker(); })) {
+        QMutexLocker lock(&m_snapshotMutex);
+        m_snapshotRunning = false;
+    }
+}
+
+void RepoSession::runSnapshotWorker() {
+    // A write that lands mid-read retires the snapshot; read again rather than hand
+    // the window nothing. A repository being written continuously gets a few tries,
+    // then the window falls back to reading live.
+    bool installed = false;
+    for (int attempt = 0; attempt < 4 && !installed && m_alive.load(); ++attempt) {
+        installed = installSnapshot(readSnapshot());
+    }
+    bool again = false;
+    {
+        QMutexLocker lock(&m_snapshotMutex);
+        again = m_snapshotAgain;
+        m_snapshotAgain = false;
+        if (!again) {
+            m_snapshotRunning = false;
+        }
+    }
+    if (!m_alive.load()) {
+        return;
+    }
+    if (installed) {
+        emit snapshotReady();
+    }
+    if (again) {
+        runSnapshotWorker();
+    }
 }
 
 RepoInfo RepoSession::info() const {
+    if (const auto cached = snapshot()) {
+        return cached->info;
+    }
     return readOr(RepoInfo{}, [&](Repository& repo) { return repo.info(); });
 }
 
 std::vector<RefInfo> RepoSession::refs() const {
+    if (const auto cached = snapshot()) {
+        return cached->refs;
+    }
     return readOr(std::vector<RefInfo>{}, [&](Repository& repo) { return repo.refs(); });
 }
 
 std::vector<FileChange> RepoSession::status() const {
+    if (const auto cached = snapshot()) {
+        return cached->status;
+    }
     return readOr(std::vector<FileChange>{}, [&](Repository& repo) { return repo.status(); });
 }
 
@@ -161,7 +322,7 @@ FileDiff RepoSession::workdirFileDiffAgainst(const QString& revision, const QStr
 
 bool RepoSession::restoreFile(const QString& revision, const QString& path, bool staged,
                               QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut, [&](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         repo.restoreFile(revision.toStdString(), path.toStdString(), staged);
     });
 }
@@ -199,7 +360,7 @@ std::string RepoSession::indexFileContent(const QString& path) const {
 bool RepoSession::applyHunkSelection(const QString& path, int hunkIndex,
                                      const QVector<int>& lineIndices, HunkApply what,
                                      const HunkAnchor& expect, QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut, [&](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         const std::string target = path.toStdString();
         // Re-derive the diff instead of trusting the one the reader saw: the file
         // may have changed under the click. Staging and discarding both start from the
@@ -236,6 +397,7 @@ bool RepoSession::applyHunkSelection(const QString& path, int hunkIndex,
 
 bool RepoSession::stageFile(const QString& path, QString* errorOut) {
     QMutexLocker lock(&m_mutex);
+    ++m_snapshotEpoch;
     if (!m_repo) {
         if (errorOut) {
             *errorOut = QStringLiteral("no repository is open");
@@ -255,6 +417,7 @@ bool RepoSession::stageFile(const QString& path, QString* errorOut) {
 
 bool RepoSession::unstageFile(const QString& path, QString* errorOut) {
     QMutexLocker lock(&m_mutex);
+    ++m_snapshotEpoch;
     if (!m_repo) {
         if (errorOut) {
             *errorOut = QStringLiteral("no repository is open");
@@ -274,6 +437,7 @@ bool RepoSession::unstageFile(const QString& path, QString* errorOut) {
 
 bool RepoSession::stageAll(QString* errorOut) {
     QMutexLocker lock(&m_mutex);
+    ++m_snapshotEpoch;
     if (!m_repo) {
         if (errorOut) {
             *errorOut = QStringLiteral("no repository is open");
@@ -293,6 +457,7 @@ bool RepoSession::stageAll(QString* errorOut) {
 
 bool RepoSession::discardFileChanges(const QString& path, QString* errorOut) {
     QMutexLocker lock(&m_mutex);
+    ++m_snapshotEpoch;
     if (!m_repo) {
         if (errorOut) {
             *errorOut = QStringLiteral("no repository is open");
@@ -311,11 +476,11 @@ bool RepoSession::discardFileChanges(const QString& path, QString* errorOut) {
 }
 
 bool RepoSession::discardAllChanges(QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut, [](Repository& repo) { repo.discardAllChanges(); });
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [](Repository& repo) { repo.discardAllChanges(); });
 }
 
 bool RepoSession::createCommit(const QString& message, QString* newCommitOut, QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog, QStringLiteral("Commit"), errorOut,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog, QStringLiteral("Commit"), errorOut,
                     [&](Repository& repo) {
                         const Oid id =
                             repo.createCommit(message.toStdString(), configBool(repo, "commit.gpgsign"));
@@ -327,7 +492,7 @@ bool RepoSession::createCommit(const QString& message, QString* newCommitOut, QS
 
 bool RepoSession::createCommit(const QString& message, bool sign, QString* newCommitOut,
                                QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog, QStringLiteral("Commit"), errorOut,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog, QStringLiteral("Commit"), errorOut,
                     [&](Repository& repo) {
                         const Oid id = repo.createCommit(message.toStdString(), sign);
                         if (newCommitOut) {
@@ -338,6 +503,7 @@ bool RepoSession::createCommit(const QString& message, bool sign, QString* newCo
 
 bool RepoSession::undo(QString* labelOut, QString* errorOut) {
     QMutexLocker lock(&m_mutex);
+    ++m_snapshotEpoch;
     if (!m_repo) {
         if (errorOut) {
             *errorOut = QStringLiteral("no repository is open");
@@ -402,6 +568,7 @@ bool RepoSession::undo(QString* labelOut, QString* errorOut) {
 
 bool RepoSession::redo(QString* labelOut, QString* errorOut) {
     QMutexLocker lock(&m_mutex);
+    ++m_snapshotEpoch;
     if (!m_repo) {
         if (errorOut) {
             *errorOut = QStringLiteral("no repository is open");
@@ -460,21 +627,33 @@ bool RepoSession::redo(QString* labelOut, QString* errorOut) {
 }
 
 bool RepoSession::canUndo() const {
+    if (const auto cached = snapshot()) {
+        return cached->canUndo;
+    }
     QMutexLocker lock(&m_mutex);
     return m_oplog.canUndo();
 }
 
 bool RepoSession::canRedo() const {
+    if (const auto cached = snapshot()) {
+        return cached->canRedo;
+    }
     QMutexLocker lock(&m_mutex);
     return m_oplog.canRedo();
 }
 
 QString RepoSession::nextUndoLabel() const {
+    if (const auto cached = snapshot()) {
+        return cached->undoLabel;
+    }
     QMutexLocker lock(&m_mutex);
     return m_oplog.undoLabel();
 }
 
 QString RepoSession::nextRedoLabel() const {
+    if (const auto cached = snapshot()) {
+        return cached->redoLabel;
+    }
     QMutexLocker lock(&m_mutex);
     return m_oplog.redoLabel();
 }
@@ -567,8 +746,10 @@ namespace {
 /// Runs a write operation under the session mutex, converting the git-layer
 /// exception into an error string. Keeps `ui` free of GitError handling.
 template <typename Fn>
-bool guarded(QMutex* mutex, std::unique_ptr<Repository>& repo, QString* errorOut, Fn&& fn) {
+bool guarded(QMutex* mutex, std::atomic<quint64>* epoch, std::unique_ptr<Repository>& repo,
+             QString* errorOut, Fn&& fn) {
     QMutexLocker lock(mutex);
+    ++*epoch;
     if (!repo) {
         if (errorOut) {
             *errorOut = QStringLiteral("no repository is open");
@@ -597,10 +778,18 @@ bool guarded(QMutex* mutex, std::unique_ptr<Repository>& repo, QString* errorOut
 /// while the work runs. A hook file write is not a libgit2 call, so holding the
 /// session mutex would only block a read that has nothing to do with it.
 template <typename Fn>
-bool withDirectory(QMutex* mutex, std::unique_ptr<Repository>& repo, QString* errorOut, Fn&& fn) {
+bool withDirectory(QMutex* mutex, std::atomic<quint64>* epoch, std::unique_ptr<Repository>& repo,
+                   QString* errorOut, Fn&& fn) {
     std::string dir;
+    // The work runs outside the lock, so the epoch moves on both sides of it: a
+    // snapshot read in between is retired either way.
+    struct EpochOnExit {
+        std::atomic<quint64>* epoch;
+        ~EpochOnExit() { ++*epoch; }
+    } onExit{epoch};
     {
         QMutexLocker lock(mutex);
+        ++*epoch;
         if (!repo) {
             if (errorOut) {
                 *errorOut = QStringLiteral("no repository is open");
@@ -696,9 +885,10 @@ bool operationPointersIntact(const RefState& current, const RefState& from, cons
 /// records nothing, and one left open on a conflict is remembered only when it
 /// finally finishes.
 template <typename Fn>
-bool recorded(QMutex* mutex, std::unique_ptr<Repository>& repo, Oplog* oplog,
-              const QString& label, QString* errorOut, Fn&& fn) {
+bool recorded(QMutex* mutex, std::atomic<quint64>* epoch, std::unique_ptr<Repository>& repo,
+              Oplog* oplog, const QString& label, QString* errorOut, Fn&& fn) {
     QMutexLocker lock(mutex);
+    ++*epoch;
     if (!repo) {
         if (errorOut) {
             *errorOut = QStringLiteral("no repository is open");
@@ -753,19 +943,19 @@ std::vector<ReflogEntry> RepoSession::reflog(std::size_t limit) const {
 }
 
 bool RepoSession::resolveConflict(const QString& path, const QString& content, QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut, [&](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         repo.resolveConflict(path.toStdString(), content.toStdString());
     });
 }
 
 bool RepoSession::keepConflictSide(const QString& path, ConflictSide side, QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut, [&](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         repo.keepConflictSide(path.toStdString(), side);
     });
 }
 
 bool RepoSession::deleteConflictFile(const QString& path, QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut, [&](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         repo.removeFile(path.toStdString());
     });
 }
@@ -781,12 +971,12 @@ QStringList RepoSession::resolvedConflictPaths() const {
 }
 
 bool RepoSession::markConflicted(const QString& path, QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut,
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut,
                    [&](Repository& repo) { repo.markConflicted(path.toStdString()); });
 }
 
 bool RepoSession::writeConflictDraft(const QString& path, const QString& content, QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut, [&](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         repo.writeWorkdirFile(path.toStdString(), content.toStdString());
     });
 }
@@ -815,6 +1005,9 @@ RepoSession::SemanticJsonMerge RepoSession::semanticMergeJson(const QString& pat
 }
 
 bool RepoSession::rerereEnabled() const {
+    if (const auto cached = snapshot()) {
+        return cached->rerereEnabled;
+    }
     QMutexLocker lock(&m_mutex);
     if (!m_repo) {
         return false;
@@ -827,6 +1020,9 @@ bool RepoSession::rerereEnabled() const {
 }
 
 bool RepoSession::rerereAutoupdate() const {
+    if (const auto cached = snapshot()) {
+        return cached->rerereAutoupdate;
+    }
     QMutexLocker lock(&m_mutex);
     if (!m_repo) {
         return false;
@@ -873,19 +1069,19 @@ QStringList RepoSession::rerereRemainingPaths() const {
 bool RepoSession::setRerereEnabled(bool on, QString* errorOut) {
     // rerere is configuration and memory, not a ref: the operation log has nothing
     // to put back, so this goes through guarded(), not recorded().
-    return guarded(&m_mutex, m_repo, errorOut, [&](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         RerereOps(repo.info().workDir).setEnabled(on);
     });
 }
 
 bool RepoSession::setRerereAutoupdate(bool on, QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut, [&](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         RerereOps(repo.info().workDir).setAutoupdate(on);
     });
 }
 
 bool RepoSession::applyRerere(QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut, [&](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         const SyncResult result = RerereOps(repo.info().workDir).apply();
         if (!result.ok) {
             throw GitError(result.output.empty() ? "git rerere failed" : result.output);
@@ -894,7 +1090,7 @@ bool RepoSession::applyRerere(QString* errorOut) {
 }
 
 bool RepoSession::forgetRerere(const QString& path, QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut, [&](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         const SyncResult result = RerereOps(repo.info().workDir).forget(path.toStdString());
         if (!result.ok) {
             throw GitError(result.output.empty() ? "git rerere forget failed" : result.output);
@@ -903,7 +1099,7 @@ bool RepoSession::forgetRerere(const QString& path, QString* errorOut) {
 }
 
 bool RepoSession::createBranch(const QString& name, const QString& targetCommit, QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog,
                     QStringLiteral("Create branch %1").arg(name), errorOut,
                     [&](Repository& repo) {
                         repo.createBranch(name.toStdString(), targetCommit.toStdString());
@@ -912,7 +1108,7 @@ bool RepoSession::createBranch(const QString& name, const QString& targetCommit,
 
 bool RepoSession::createTrackingBranch(const QString& name, const QString& remote,
                                        QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog,
                     QStringLiteral("Create branch %1").arg(name), errorOut,
                     [&](Repository& repo) {
                         repo.createTrackingBranch(name.toStdString(), remote.toStdString());
@@ -922,7 +1118,7 @@ bool RepoSession::createTrackingBranch(const QString& name, const QString& remot
 bool RepoSession::setUpstream(const QString& branch, const QString& upstream, QString* errorOut) {
     // Branch tracking is configuration, not a pointer: the operation log records
     // refs and an index tree, so recording this would undo nothing.
-    return guarded(&m_mutex, m_repo, errorOut, [&](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         repo.setUpstream(branch.toStdString(), upstream.toStdString());
     });
 }
@@ -1067,19 +1263,19 @@ RepoSession::SweepOutcome RepoSession::sweepOperationConflicts(std::size_t maxRo
 }
 
 bool RepoSession::checkoutBranch(const QString& name, QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog,
                     QStringLiteral("Checkout %1").arg(name), errorOut,
                     [&](Repository& repo) { repo.checkoutBranch(name.toStdString()); });
 }
 
 bool RepoSession::deleteBranch(const QString& name, QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog,
                     QStringLiteral("Delete branch %1").arg(name), errorOut,
                     [&](Repository& repo) { repo.deleteBranch(name.toStdString(), false); });
 }
 
 bool RepoSession::deleteBranchForced(const QString& name, QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog,
                     QStringLiteral("Delete branch %1").arg(name), errorOut,
                     [&](Repository& repo) { repo.deleteBranch(name.toStdString(), true); });
 }
@@ -1166,7 +1362,7 @@ bool RepoSession::deleteBranches(const QStringList& names, const QString& base,
                               ? QStringLiteral("Delete branch %1").arg(names.front())
                               : QStringLiteral("Delete %1 branches").arg(names.size());
     const std::string baseRev = base.toStdString();
-    const bool ok = recorded(&m_mutex, m_repo, &m_oplog, label, errorOut, [&](Repository& repo) {
+    const bool ok = recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog, label, errorOut, [&](Repository& repo) {
         const RepoInfo repositoryInfo = repo.info();
         const std::string head =
             repositoryInfo.detached ? std::string{} : repositoryInfo.headBranch;
@@ -1205,7 +1401,7 @@ bool RepoSession::deleteBranches(const QStringList& names, const QString& base,
 bool RepoSession::setUpstreams(const QStringList& names, const QString& remote,
                                BranchBatchResult* resultOut, QString* errorOut) {
     BranchBatchResult local;
-    const bool ok = guarded(&m_mutex, m_repo, errorOut, [&](Repository& repo) {
+    const bool ok = guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         for (const QString& name : names) {
             const QString upstream = remote + QLatin1Char('/') + name;
             try {
@@ -1225,7 +1421,7 @@ bool RepoSession::setUpstreams(const QStringList& names, const QString& remote,
 
 
 bool RepoSession::mergeBranch(const QString& name, MergeResult* resultOut, QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog,
                     QStringLiteral("Merge %1").arg(name), errorOut, [&](Repository& repo) {
                         const MergeResult result = repo.mergeBranch(name.toStdString());
                         if (resultOut) {
@@ -1332,22 +1528,25 @@ MergePreview RepoSession::previewMerge(const QString& ours, const QString& their
 }
 
 bool RepoSession::commitMerge(const QString& message, QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog, QStringLiteral("Complete merge"), errorOut,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog, QStringLiteral("Complete merge"), errorOut,
                     [&](Repository& repo) { repo.commitMerge(message.toStdString()); });
 }
 
 bool RepoSession::abortMerge(QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut,
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut,
                    [&](Repository& repo) { repo.abortMerge(); });
 }
 
 bool RepoSession::mergeInProgress() const {
+    if (const auto cached = snapshot()) {
+        return cached->merging;
+    }
     QMutexLocker lock(&m_mutex);
     return m_repo && m_repo->mergeInProgress();
 }
 
 bool RepoSession::squashMerge(const QString& name, SquashResult* resultOut, QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut, [&](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         const SquashResult result = repo.squashMerge(name.toStdString());
         if (resultOut) {
             *resultOut = result;
@@ -1356,12 +1555,15 @@ bool RepoSession::squashMerge(const QString& name, SquashResult* resultOut, QStr
 }
 
 bool RepoSession::squashInProgress() const {
+    if (const auto cached = snapshot()) {
+        return cached->squashing;
+    }
     QMutexLocker lock(&m_mutex);
     return m_repo && m_repo->squashInProgress();
 }
 
 bool RepoSession::commitSquash(const QString& message, QString* newCommitOut, QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog, QStringLiteral("Squash merge"), errorOut,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog, QStringLiteral("Squash merge"), errorOut,
                     [&](Repository& repo) {
                         const Oid id = repo.commitSquash(message.toStdString());
                         if (newCommitOut) {
@@ -1372,7 +1574,7 @@ bool RepoSession::commitSquash(const QString& message, QString* newCommitOut, QS
 
 bool RepoSession::rebaseOnto(const QString& branch, const QString& onto, RebaseResult* resultOut,
                              QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog,
                     QStringLiteral("Rebase %1").arg(branch), errorOut, [&](Repository& repo) {
                         const RebaseResult result =
                             repo.rebaseOnto(branch.toStdString(), onto.toStdString());
@@ -1383,7 +1585,7 @@ bool RepoSession::rebaseOnto(const QString& branch, const QString& onto, RebaseR
 }
 
 bool RepoSession::rebaseContinue(RebaseResult* resultOut, QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog, QStringLiteral("Continue rebase"), errorOut,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog, QStringLiteral("Continue rebase"), errorOut,
                     [&](Repository& repo) {
                         const RebaseResult result = repo.rebaseContinue();
                         if (resultOut) {
@@ -1393,23 +1595,26 @@ bool RepoSession::rebaseContinue(RebaseResult* resultOut, QString* errorOut) {
 }
 
 bool RepoSession::rebaseAbort(QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut,
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut,
                    [&](Repository& repo) { repo.rebaseAbort(); });
 }
 
 bool RepoSession::rebaseInProgress() const {
+    if (const auto cached = snapshot()) {
+        return cached->rebasing;
+    }
     QMutexLocker lock(&m_mutex);
     return m_repo && m_repo->rebaseInProgress();
 }
 
 bool RepoSession::checkoutCommit(const QString& commitId, QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog,
                     QStringLiteral("Checkout commit %1").arg(commitId.left(7)), errorOut,
                     [&](Repository& repo) { repo.checkoutCommit(commitId.toStdString()); });
 }
 
 bool RepoSession::moveBranch(const QString& name, const QString& targetCommit, QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog,
                     QStringLiteral("Move branch %1").arg(name), errorOut, [&](Repository& repo) {
                         repo.moveBranch(name.toStdString(), targetCommit.toStdString(), false);
                     });
@@ -1417,7 +1622,7 @@ bool RepoSession::moveBranch(const QString& name, const QString& targetCommit, Q
 
 bool RepoSession::moveBranchForced(const QString& name, const QString& targetCommit,
                                    QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog,
                     QStringLiteral("Move branch %1").arg(name), errorOut, [&](Repository& repo) {
                         repo.moveBranch(name.toStdString(), targetCommit.toStdString(), true);
                     });
@@ -1452,7 +1657,7 @@ QString RepoSession::mergeBase(const QString& a, const QString& b) const {
 
 bool RepoSession::fastForwardBranch(const QString& branch, const QString& target,
                                     QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog,
                     QStringLiteral("Fast-forward %1").arg(branch), errorOut,
                     [&](Repository& repo) {
                         repo.fastForwardBranch(branch.toStdString(), target.toStdString());
@@ -1460,7 +1665,7 @@ bool RepoSession::fastForwardBranch(const QString& branch, const QString& target
 }
 
 bool RepoSession::renameBranch(const QString& from, const QString& to, QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog,
                     QStringLiteral("Rename branch %1").arg(from), errorOut,
                     [&](Repository& repo) {
                         repo.renameBranch(from.toStdString(), to.toStdString());
@@ -1469,7 +1674,7 @@ bool RepoSession::renameBranch(const QString& from, const QString& to, QString* 
 
 bool RepoSession::cherryPick(const std::vector<QString>& commitIds, QString* newCommitOut,
                              QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog, QStringLiteral("Cherry-pick"), errorOut,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog, QStringLiteral("Cherry-pick"), errorOut,
                     [&](Repository& repo) {
                         std::vector<Oid> ids;
                         ids.reserve(commitIds.size());
@@ -1507,7 +1712,7 @@ QString RepoSession::headTipId() const {
 
 bool RepoSession::rewriteHistory(const QString& upstream, const std::vector<RewriteStep>& steps,
                                  QString* errorOut, const QString& onto, const QString& branch) {
-    return recorded(&m_mutex, m_repo, &m_oplog, QStringLiteral("Rewrite history"), errorOut,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog, QStringLiteral("Rewrite history"), errorOut,
                     [&](Repository& repo) {
                         repo.rewriteHistory(upstream.toStdString(), steps, onto.toStdString(),
                                             branch.toStdString());
@@ -1524,7 +1729,7 @@ std::vector<RebaseCandidate> RepoSession::rebaseCandidates(const QString& upstre
 }
 
 bool RepoSession::dropCommit(const QString& commitId, QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog, QStringLiteral("Drop commit"), errorOut,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog, QStringLiteral("Drop commit"), errorOut,
                     [&](Repository& repo) { repo.dropCommit(commitId.toStdString()); });
 }
 
@@ -1535,13 +1740,13 @@ bool RepoSession::resetTo(const QString& commitId, ResetMode mode, QString* erro
     case ResetMode::Mixed: modeName = QStringLiteral("mixed"); break;
     case ResetMode::Hard: modeName = QStringLiteral("hard"); break;
     }
-    return recorded(&m_mutex, m_repo, &m_oplog,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog,
                     QStringLiteral("Reset --%1 to %2").arg(modeName, commitId.left(7)), errorOut,
                     [&](Repository& repo) { repo.resetTo(commitId.toStdString(), mode); });
 }
 
 bool RepoSession::revertCommit(const QString& commitId, QString* newCommitOut, QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog, QStringLiteral("Revert"), errorOut,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog, QStringLiteral("Revert"), errorOut,
                     [&](Repository& repo) {
                         const Oid created = repo.revertCommit(commitId.toStdString());
                         if (newCommitOut) {
@@ -1551,7 +1756,7 @@ bool RepoSession::revertCommit(const QString& commitId, QString* newCommitOut, Q
 }
 
 bool RepoSession::amendHeadMessage(const QString& message, QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog, QStringLiteral("Amend commit"), errorOut,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog, QStringLiteral("Amend commit"), errorOut,
                     [&](Repository& repo) {
                         repo.amendHeadMessage(message.toStdString(),
                                               configBool(repo, "commit.gpgsign"));
@@ -1559,13 +1764,13 @@ bool RepoSession::amendHeadMessage(const QString& message, QString* errorOut) {
 }
 
 bool RepoSession::amendHeadMessage(const QString& message, bool sign, QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog, QStringLiteral("Amend commit"), errorOut,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog, QStringLiteral("Amend commit"), errorOut,
                     [&](Repository& repo) { repo.amendHeadMessage(message.toStdString(), sign); });
 }
 
 bool RepoSession::amendHead(const QString& message, bool sign, QString* newCommitOut,
                             QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog, QStringLiteral("Amend commit"), errorOut,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog, QStringLiteral("Amend commit"), errorOut,
                     [&](Repository& repo) {
                         const Oid id = repo.amendHead(message.toStdString(), sign);
                         if (newCommitOut) {
@@ -1578,14 +1783,14 @@ bool RepoSession::amendStoppedCommit(const QString& message, QString* errorOut) 
     // Not recorded: this is a step inside an open rebase, and the rebase itself is what
     // the operation log records once it finishes. Recording here would make one undo
     // rebuild the whole replayed branch.
-    return guarded(&m_mutex, m_repo, errorOut, [&](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         repo.amendStoppedCommit(message.toStdString());
     });
 }
 
 bool RepoSession::createTag(const QString& name, const QString& target, const QString& message,
                             QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog,
                     QStringLiteral("Create tag %1").arg(name), errorOut, [&](Repository& repo) {
                         repo.createTag(name.toStdString(), target.toStdString(),
                                        message.toStdString());
@@ -1593,7 +1798,7 @@ bool RepoSession::createTag(const QString& name, const QString& target, const QS
 }
 
 bool RepoSession::deleteTag(const QString& name, QString* errorOut) {
-    return recorded(&m_mutex, m_repo, &m_oplog,
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog,
                     QStringLiteral("Delete tag %1").arg(name), errorOut,
                     [&](Repository& repo) { repo.deleteTag(name.toStdString()); });
 }
@@ -1621,12 +1826,18 @@ bool RepoSession::formatPatch(const QString& commitId, QString* patchOut, QStrin
 }
 
 UpstreamInfo RepoSession::upstreamInfo(const QString& branch) const {
+    if (const auto cached = branch.isEmpty() ? snapshot() : nullptr) {
+        return cached->upstream;
+    }
     return readOr(UpstreamInfo{}, [&](Repository& repo) {
         return repo.upstreamInfo(branch.toStdString());
     });
 }
 
 QString RepoSession::targetBranch() const {
+    if (const auto cached = snapshot()) {
+        return cached->targetBranch;
+    }
     QMutexLocker lock(&m_mutex);
     return m_repo ? QString::fromStdString(m_repo->targetBranch()) : QString();
 }
@@ -1683,18 +1894,15 @@ void RepoSession::requestRefMeta() {
     // not run under the session mutex: a `for-each-ref` over thousands of branches
     // takes tens of milliseconds, and holding the lock across it would stall every
     // other read.
-    {
-        QMutexLocker lock(&m_mutex);
-        if (!m_repo) {
-            return;
-        }
+    if (!isOpen()) {
+        return;
     }
     startWorker([this] {
         if (m_alive.load()) {
-            const RepoInfo repositoryInfo = info();
-            if (!repositoryInfo.workDir.empty()) {
+            const std::string workDir = paths().workDir;
+            if (!workDir.empty()) {
                 RefMetaSnapshot snapshot;
-                snapshot.meta = RefMetaOps(repositoryInfo.workDir).read();
+                snapshot.meta = RefMetaOps(workDir).read();
                 if (m_alive.load()) {
                     emit refMetaLoaded(std::move(snapshot));
                 }
@@ -1736,35 +1944,41 @@ QString RepoSession::hookContent(const QString& name) const {
 }
 
 bool RepoSession::writeHook(const QString& name, const QString& content, QString* errorOut) {
-    return withDirectory(&m_mutex, m_repo, errorOut, [&](const std::string& dir) {
+    return withDirectory(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](const std::string& dir) {
         HooksOps(dir).write(name.toStdString(), content.toStdString());
     });
 }
 
 bool RepoSession::enableHook(const QString& name, QString* errorOut) {
-    return withDirectory(&m_mutex, m_repo, errorOut, [&](const std::string& dir) {
+    return withDirectory(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](const std::string& dir) {
         HooksOps(dir).enable(name.toStdString());
     });
 }
 
 bool RepoSession::disableHook(const QString& name, QString* errorOut) {
-    return withDirectory(&m_mutex, m_repo, errorOut, [&](const std::string& dir) {
+    return withDirectory(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](const std::string& dir) {
         HooksOps(dir).disable(name.toStdString());
     });
 }
 
 QString RepoSession::configValue(const QString& key) const {
+    if (const auto cached = snapshot(); cached && cached->config.contains(key)) {
+        return cached->config.value(key);
+    }
     QMutexLocker lock(&m_mutex);
     return m_repo ? QString::fromStdString(m_repo->configValue(key.toStdString())) : QString();
 }
 
 bool RepoSession::setConfigValue(const QString& key, const QString& value, QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut, [&](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         repo.setConfigValue(key.toStdString(), value.toStdString());
     });
 }
 
 bool RepoSession::commitSigningEnabled() const {
+    if (const auto cached = snapshot()) {
+        return cached->signCommits;
+    }
     QMutexLocker lock(&m_mutex);
     return m_repo ? configBool(*m_repo, "commit.gpgsign") : false;
 }
@@ -1783,13 +1997,13 @@ CommitSignature RepoSession::commitSignature(const QString& revision) const {
 }
 
 bool RepoSession::ignorePath(const QString& pattern, bool globalExclude, QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut, [&](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         repo.addIgnorePattern(pattern.toStdString(), globalExclude);
     });
 }
 
 bool RepoSession::untrackPathspec(const QString& pathspec, QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut, [&](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         repo.untrackPathspec(pathspec.toStdString());
     });
 }
@@ -1810,6 +2024,9 @@ QString RepoSession::withCoAuthors(const QString& message,
 }
 
 QString RepoSession::commitTemplate() const {
+    if (const auto cached = snapshot()) {
+        return cached->commitTemplate;
+    }
     QMutexLocker lock(&m_mutex);
     if (!m_repo) {
         return {};
@@ -1889,6 +2106,9 @@ SyncResult RepoSession::runExternalMergeTool(const QString& path) const {
 }
 
 std::vector<StashEntry> RepoSession::stashList() const {
+    if (const auto cached = snapshot()) {
+        return cached->stashes;
+    }
     const RepoInfo repositoryInfo = info();
     if (repositoryInfo.workDir.empty()) {
         return {};
@@ -1902,9 +2122,10 @@ namespace {
 /// output. `guarded` is what locks and converts; the command is named only for the
 /// case git printed nothing at all.
 template <typename Fn>
-bool runStash(std::unique_ptr<Repository>& repo, QMutex* mutex, QString* errorOut,
+bool runStash(std::unique_ptr<Repository>& repo, QMutex* mutex,
+              std::atomic<quint64>* epoch, QString* errorOut,
               const char* fallback, Fn&& command) {
-    return guarded(mutex, repo, errorOut, [&](Repository& repository) {
+    return guarded(mutex, epoch, repo, errorOut, [&](Repository& repository) {
         const RepoInfo repositoryInfo = repository.info();
         if (repositoryInfo.workDir.empty()) {
             throw GitError("no working tree: this repository has no stash");
@@ -1926,36 +2147,39 @@ bool RepoSession::stashPush(const QString& message, bool includeUntracked, const
         target.push_back(path.toStdString());
     }
     const std::string text = message.toStdString();
-    return runStash(m_repo, &m_mutex, errorOut, "git stash push failed",
+    return runStash(m_repo, &m_mutex, &m_snapshotEpoch, errorOut, "git stash push failed",
                     [&](const StashOps& ops) { return ops.push(text, includeUntracked, target); });
 }
 
 bool RepoSession::stashApply(const QString& stash, QString* errorOut) {
     const std::string oid = stash.toStdString();
-    return runStash(m_repo, &m_mutex, errorOut, "git stash apply failed",
+    return runStash(m_repo, &m_mutex, &m_snapshotEpoch, errorOut, "git stash apply failed",
                     [&](const StashOps& ops) { return ops.apply(oid); });
 }
 
 bool RepoSession::stashPop(const QString& stash, QString* errorOut) {
     const std::string oid = stash.toStdString();
-    return runStash(m_repo, &m_mutex, errorOut, "git stash pop failed",
+    return runStash(m_repo, &m_mutex, &m_snapshotEpoch, errorOut, "git stash pop failed",
                     [&](const StashOps& ops) { return ops.pop(oid); });
 }
 
 bool RepoSession::stashDrop(const QString& stash, QString* errorOut) {
     const std::string oid = stash.toStdString();
-    return runStash(m_repo, &m_mutex, errorOut, "git stash drop failed",
+    return runStash(m_repo, &m_mutex, &m_snapshotEpoch, errorOut, "git stash drop failed",
                     [&](const StashOps& ops) { return ops.drop(oid); });
 }
 
 bool RepoSession::stashBranch(const QString& stash, const QString& branch, QString* errorOut) {
     const std::string oid = stash.toStdString();
     const std::string name = branch.toStdString();
-    return runStash(m_repo, &m_mutex, errorOut, "git stash branch failed",
+    return runStash(m_repo, &m_mutex, &m_snapshotEpoch, errorOut, "git stash branch failed",
                     [&](const StashOps& ops) { return ops.branch(oid, name); });
 }
 
 std::vector<WorktreeEntry> RepoSession::worktrees() const {
+    if (const auto cached = snapshot()) {
+        return cached->worktrees;
+    }
     const RepoInfo repositoryInfo = info();
     // A bare repository has no working tree of its own, but `git worktree` still
     // runs from the git directory — and listing is how its worktrees are seen.
@@ -2061,9 +2285,10 @@ namespace {
 /// own output. Like the stash helper: `guarded` locks and converts, the command
 /// names itself only for the case git printed nothing.
 template <typename Fn>
-bool runWorktree(std::unique_ptr<Repository>& repo, QMutex* mutex, QString* errorOut,
+bool runWorktree(std::unique_ptr<Repository>& repo, QMutex* mutex,
+              std::atomic<quint64>* epoch, QString* errorOut,
                  const char* fallback, Fn&& command) {
-    return guarded(mutex, repo, errorOut, [&](Repository& repository) {
+    return guarded(mutex, epoch, repo, errorOut, [&](Repository& repository) {
         const RepoInfo repositoryInfo = repository.info();
         const std::string dir =
             repositoryInfo.workDir.empty() ? repositoryInfo.gitDir : repositoryInfo.workDir;
@@ -2084,35 +2309,38 @@ bool RepoSession::addWorktree(const QString& path, const QString& branch, bool c
     const std::string target = path.toStdString();
     const std::string name = branch.toStdString();
     const std::string start = startPoint.toStdString();
-    return runWorktree(m_repo, &m_mutex, errorOut, "git worktree add failed",
+    return runWorktree(m_repo, &m_mutex, &m_snapshotEpoch, errorOut, "git worktree add failed",
                        [&](const WorktreeOps& ops) { return ops.add(target, name, createBranch, start); });
 }
 
 bool RepoSession::removeWorktree(const QString& path, bool force, QString* errorOut) {
     const std::string target = path.toStdString();
-    return runWorktree(m_repo, &m_mutex, errorOut, "git worktree remove failed",
+    return runWorktree(m_repo, &m_mutex, &m_snapshotEpoch, errorOut, "git worktree remove failed",
                        [&](const WorktreeOps& ops) { return ops.remove(target, force); });
 }
 
 bool RepoSession::lockWorktree(const QString& path, const QString& reason, QString* errorOut) {
     const std::string target = path.toStdString();
     const std::string text = reason.toStdString();
-    return runWorktree(m_repo, &m_mutex, errorOut, "git worktree lock failed",
+    return runWorktree(m_repo, &m_mutex, &m_snapshotEpoch, errorOut, "git worktree lock failed",
                        [&](const WorktreeOps& ops) { return ops.lock(target, text); });
 }
 
 bool RepoSession::unlockWorktree(const QString& path, QString* errorOut) {
     const std::string target = path.toStdString();
-    return runWorktree(m_repo, &m_mutex, errorOut, "git worktree unlock failed",
+    return runWorktree(m_repo, &m_mutex, &m_snapshotEpoch, errorOut, "git worktree unlock failed",
                        [&](const WorktreeOps& ops) { return ops.unlock(target); });
 }
 
 bool RepoSession::pruneWorktrees(QString* errorOut) {
-    return runWorktree(m_repo, &m_mutex, errorOut, "git worktree prune failed",
+    return runWorktree(m_repo, &m_mutex, &m_snapshotEpoch, errorOut, "git worktree prune failed",
                        [&](const WorktreeOps& ops) { return ops.prune(); });
 }
 
 std::vector<SubmoduleEntry> RepoSession::submodules() const {
+    if (const auto cached = snapshot()) {
+        return cached->submodules;
+    }
     const RepoInfo repositoryInfo = info();
     if (repositoryInfo.workDir.empty()) {
         return {}; // a bare repository has no submodules to check out
@@ -2125,9 +2353,10 @@ namespace {
 /// Runs one submodule command and turns a failure into a GitError carrying git's
 /// own output. The same shape as the worktree helper.
 template <typename Fn>
-bool runSubmodule(std::unique_ptr<Repository>& repo, QMutex* mutex, QString* errorOut,
+bool runSubmodule(std::unique_ptr<Repository>& repo, QMutex* mutex,
+              std::atomic<quint64>* epoch, QString* errorOut,
                   const char* fallback, Fn&& command) {
-    return guarded(mutex, repo, errorOut, [&](Repository& repository) {
+    return guarded(mutex, epoch, repo, errorOut, [&](Repository& repository) {
         const RepoInfo repositoryInfo = repository.info();
         if (repositoryInfo.workDir.empty()) {
             throw GitError("no working tree: a bare repository has no submodules");
@@ -2146,7 +2375,7 @@ bool RepoSession::addSubmodule(const QString& url, const QString& path, const QS
     const std::string remoteUrl = url.toStdString();
     const std::string target = path.toStdString();
     const std::string tracked = branch.toStdString();
-    return runSubmodule(m_repo, &m_mutex, errorOut, "git submodule add failed",
+    return runSubmodule(m_repo, &m_mutex, &m_snapshotEpoch, errorOut, "git submodule add failed",
                         [&](const SubmoduleOps& ops) {
                             return ops.add(remoteUrl, target, tracked, force);
                         });
@@ -2154,7 +2383,7 @@ bool RepoSession::addSubmodule(const QString& url, const QString& path, const QS
 
 bool RepoSession::deinitSubmodule(const QString& path, bool force, QString* errorOut) {
     const std::string target = path.toStdString();
-    return runSubmodule(m_repo, &m_mutex, errorOut, "git submodule deinit failed",
+    return runSubmodule(m_repo, &m_mutex, &m_snapshotEpoch, errorOut, "git submodule deinit failed",
                         [&](const SubmoduleOps& ops) { return ops.deinit(target, force); });
 }
 
@@ -2165,7 +2394,7 @@ bool RepoSession::updateSubmodules(const QStringList& paths, bool initialize, bo
     for (const QString& path : paths) {
         target.push_back(path.toStdString());
     }
-    return runSubmodule(m_repo, &m_mutex, errorOut, "git submodule update failed",
+    return runSubmodule(m_repo, &m_mutex, &m_snapshotEpoch, errorOut, "git submodule update failed",
                         [&](const SubmoduleOps& ops) {
                             return ops.update(target, initialize, remote, recursive);
                         });
@@ -2177,7 +2406,7 @@ bool RepoSession::syncSubmodules(const QStringList& paths, bool recursive, QStri
     for (const QString& path : paths) {
         target.push_back(path.toStdString());
     }
-    return runSubmodule(m_repo, &m_mutex, errorOut, "git submodule sync failed",
+    return runSubmodule(m_repo, &m_mutex, &m_snapshotEpoch, errorOut, "git submodule sync failed",
                         [&](const SubmoduleOps& ops) { return ops.sync(target, recursive); });
 }
 
@@ -2197,6 +2426,9 @@ void RepoSession::requestAutoUpdateSubmodules(bool remote) {
 }
 
 std::vector<RemoteInfo> RepoSession::remotes() const {
+    if (const auto cached = snapshot()) {
+        return cached->remotes;
+    }
     const RepoInfo repositoryInfo = info();
     if (repositoryInfo.workDir.empty()) {
         return {};
@@ -2206,6 +2438,8 @@ std::vector<RemoteInfo> RepoSession::remotes() const {
 
 SyncResult RepoSession::syncBlocking(SyncKind kind, const QString& remote,
                                      const QString& branch, PullMode mode) const {
+    // The binary moves refs and objects behind libgit2's back.
+    const RetireSnapshotOnExit retire{this};
     const RepoInfo repositoryInfo = info();
     if (repositoryInfo.workDir.empty()) {
         SyncResult result;
@@ -2239,6 +2473,8 @@ SyncResult RepoSession::syncBlocking(SyncKind kind, const QString& remote,
 }
 
 SyncResult RepoSession::fetchBlocking(const QStringList& remotes, bool prune) const {
+    // The binary moves refs and objects behind libgit2's back.
+    const RetireSnapshotOnExit retire{this};
     const RepoInfo repositoryInfo = info();
     if (repositoryInfo.workDir.empty()) {
         SyncResult result;
@@ -2314,6 +2550,8 @@ void RepoSession::requestFetch(const QStringList& remotes, bool prune) {
 }
 
 SyncResult RepoSession::pushTagBlocking(const QString& remote, const QString& tag) const {
+    // The binary moves refs and objects behind libgit2's back.
+    const RetireSnapshotOnExit retire{this};
     const RepoInfo repositoryInfo = info();
     if (repositoryInfo.workDir.empty()) {
         SyncResult result;
@@ -2325,6 +2563,8 @@ SyncResult RepoSession::pushTagBlocking(const QString& remote, const QString& ta
 }
 
 SyncResult RepoSession::deleteRemoteTagBlocking(const QString& remote, const QString& tag) const {
+    // The binary moves refs and objects behind libgit2's back.
+    const RetireSnapshotOnExit retire{this};
     const RepoInfo repositoryInfo = info();
     if (repositoryInfo.workDir.empty()) {
         SyncResult result;
@@ -2355,7 +2595,7 @@ bool RepoSession::applyPatch(const QString& path, bool* mailboxOut, QString* err
     if (mailboxOut) {
         *mailboxOut = PatchOps::isMailbox(path.toStdString());
     }
-    return guarded(&m_mutex, m_repo, errorOut, [&](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         const RepoInfo repositoryInfo = repo.info();
         const std::string dir =
             repositoryInfo.workDir.empty() ? repositoryInfo.gitDir : repositoryInfo.workDir;
@@ -2418,7 +2658,7 @@ QStringList RepoSession::sparseCheckoutTopLevelDirectories() const {
 }
 
 bool RepoSession::setSparseCheckout(const QStringList& dirs, QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut, [&](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         const RepoInfo info = repo.info();
         const std::string dir = info.workDir.empty() ? info.gitDir : info.workDir;
         if (dir.empty()) {
@@ -2469,7 +2709,7 @@ QStringList RepoSession::gitflowSummary() const {
 }
 
 bool RepoSession::initGitflow(const QString& master, const QString& develop, QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut, [&](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         const RepoInfo info = repo.info();
         const std::string dir = info.workDir.empty() ? info.gitDir : info.workDir;
         if (dir.empty()) {
@@ -2490,7 +2730,7 @@ bool RepoSession::initGitflow(const QString& master, const QString& develop, QSt
 }
 
 bool RepoSession::gitflowStart(const QString& kind, const QString& name, QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut, [&](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         const RepoInfo info = repo.info();
         const std::string dir = info.workDir.empty() ? info.gitDir : info.workDir;
         GitFlowKind parsed = GitFlowKind::Feature;
@@ -2506,7 +2746,7 @@ bool RepoSession::gitflowStart(const QString& kind, const QString& name, QString
 
 bool RepoSession::gitflowFinish(const QString& kind, const QString& name, const QString& version,
                                 QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut, [&](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         const RepoInfo info = repo.info();
         const std::string dir = info.workDir.empty() ? info.gitDir : info.workDir;
         GitFlowKind parsed = GitFlowKind::Feature;
@@ -2601,7 +2841,7 @@ QString RepoSession::lfsStatusReport() const {
 }
 
 bool RepoSession::lfsInstall(QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut, [](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [](Repository& repo) {
         const RepoInfo info = repo.info();
         const std::string dir = info.workDir.empty() ? info.gitDir : info.workDir;
         if (dir.empty()) {
@@ -2615,7 +2855,7 @@ bool RepoSession::lfsInstall(QString* errorOut) {
 }
 
 bool RepoSession::lfsTrack(const QString& pattern, QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut, [&](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         const RepoInfo info = repo.info();
         const std::string dir = info.workDir.empty() ? info.gitDir : info.workDir;
         if (dir.empty() || pattern.trimmed().isEmpty()) {
@@ -2629,7 +2869,7 @@ bool RepoSession::lfsTrack(const QString& pattern, QString* errorOut) {
 }
 
 bool RepoSession::lfsUntrack(const QString& pattern, QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut, [&](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         const RepoInfo info = repo.info();
         const std::string dir = info.workDir.empty() ? info.gitDir : info.workDir;
         if (dir.empty() || pattern.trimmed().isEmpty()) {
@@ -2643,7 +2883,7 @@ bool RepoSession::lfsUntrack(const QString& pattern, QString* errorOut) {
 }
 
 bool RepoSession::lfsCheckout(QString* errorOut) {
-    return guarded(&m_mutex, m_repo, errorOut, [](Repository& repo) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [](Repository& repo) {
         const RepoInfo info = repo.info();
         const std::string dir = info.workDir.empty() ? info.gitDir : info.workDir;
         if (dir.empty()) {
@@ -2657,6 +2897,8 @@ bool RepoSession::lfsCheckout(QString* errorOut) {
 }
 
 SyncResult RepoSession::lfsBlocking(LfsTask task, const QString& remote, const QString& ref) const {
+    // The binary moves refs and objects behind libgit2's back.
+    const RetireSnapshotOnExit retire{this};
     QMutexLocker lock(&m_mutex);
     SyncResult result;
     if (!m_repo) {
@@ -2704,7 +2946,10 @@ void RepoSession::requestLfs(LfsTask task, const QString& remote, const QString&
     });
 }
 
-SyncResult RepoSession::maintenanceBlocking(MaintenanceTask task) const {    QMutexLocker lock(&m_mutex);
+SyncResult RepoSession::maintenanceBlocking(MaintenanceTask task) const {
+    // The binary moves refs and objects behind libgit2's back.
+    const RetireSnapshotOnExit retire{this};
+    QMutexLocker lock(&m_mutex);
     SyncResult result;
     if (!m_repo) {
         result.output = "no repository is open";
@@ -2743,14 +2988,27 @@ std::vector<CommitInfo> RepoSession::commitsBlocking(quint64 skip, quint32 limit
 }
 
 void RepoSession::invalidateCommitWalk() const {
-    QMutexLocker lock(&m_mutex);
-    if (m_repo) {
-        m_repo->invalidateCommitWalk();
-    }
+    m_walkStale.store(true);
 }
 
 std::unordered_map<std::string, std::vector<RefInfo>> RepoSession::refsByCommit(
     const HistoryFilter& filter) const {
+    if (const auto cached = snapshot()) {
+        if (filter.visibleRefs.empty()) {
+            return cached->refsByCommit;
+        }
+        const std::unordered_set<std::string> visible(filter.visibleRefs.begin(),
+                                                      filter.visibleRefs.end());
+        std::unordered_map<std::string, std::vector<RefInfo>> out;
+        for (const auto& [commit, bucket] : cached->refsByCommit) {
+            for (const RefInfo& ref : bucket) {
+                if (visible.count(ref.fullName) > 0) {
+                    out[commit].push_back(ref);
+                }
+            }
+        }
+        return out;
+    }
     return readOr(std::unordered_map<std::string, std::vector<RefInfo>>{}, [&](Repository& repo) {
         return repo.refsByCommit(filter);
     });
@@ -2769,6 +3027,9 @@ void RepoSession::requestCommits(quint64 generation, quint64 skip, quint32 limit
             QMutexLocker lock(&m_mutex);
             if (!m_repo || !m_alive.load()) {
                 return;
+            }
+            if (m_walkStale.exchange(false)) {
+                m_repo->invalidateCommitWalk();
             }
             try {
                 const auto rows = m_repo->commits(skip, limit, &hasMore, filter);

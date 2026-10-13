@@ -1,4 +1,5 @@
 #include "ui/working_tree_panel.h"
+#include "ui/skeleton.h"
 
 #include "theme/icons.h"
 #include "theme/theme.h"
@@ -279,7 +280,18 @@ QWidget* WorkingTreePanel::buildFiles() {
     }
     // Takes the room only when both lists are folded, so the headers stay on top.
     layout->addStretch(0);
+    // Over the whole area, headers included: while the status is unread an empty
+    // list hides its section, and the skeleton must not go with it.
+    m_skeleton = new Skeleton(area, Skeleton::Shape::List);
     return area;
+}
+
+void WorkingTreePanel::setLoading(bool loading) {
+    m_skeleton->setActive(loading);
+}
+
+bool WorkingTreePanel::loading() const {
+    return m_skeleton->isActive();
 }
 
 void WorkingTreePanel::buildSection(Section& section, QWidget* parent, bool staged) {

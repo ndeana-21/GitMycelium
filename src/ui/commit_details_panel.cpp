@@ -7,6 +7,7 @@
 #include "theme/theme.h"
 #include "ui/grip_splitter.h"
 #include "ui/settings_store.h"
+#include "ui/skeleton.h"
 #include "ui/themed_icons.h"
 #include "ui/working_tree_panel.h"
 
@@ -276,6 +277,7 @@ void CommitDetailsPanel::buildUi() {
 
     m_files = new CommitFilesModel(this);
     m_fileView = new QTreeView(listArea);
+    m_fileSkeleton = new Skeleton(m_fileView->viewport(), Skeleton::Shape::List);
     m_fileView->setObjectName(QStringLiteral("commitFiles"));
     m_fileView->setModel(m_files);
     m_fileView->setHeaderHidden(true);
@@ -414,6 +416,7 @@ void CommitDetailsPanel::wireWorkingTree() {
 
 void CommitDetailsPanel::showCommit(const CommitInfo& commit, const std::vector<ChangedFile>& files,
                                     bool amendable) {
+    m_fileSkeleton->setActive(false);
     m_workingTree = false;
     m_comparing = false;
     m_pages->setCurrentIndex(0);
@@ -454,6 +457,7 @@ void CommitDetailsPanel::showCommit(const CommitInfo& commit, const std::vector<
 }
 
 void CommitDetailsPanel::showWorkingTree(const std::vector<FileChange>& changes) {
+    m_wip->setLoading(false);
     m_workingTree = true;
     m_comparing = false;
     m_commitId.clear();
@@ -492,6 +496,7 @@ void CommitDetailsPanel::refreshTheme() {
 void CommitDetailsPanel::showComparison(const QString& base, const QString& target,
                                         const std::vector<ChangedFile>& files,
                                         const QString& label) {
+    m_fileSkeleton->setActive(false);
     m_workingTree = false;
     m_comparing = true;
     m_commitId.clear(); // a comparison is not a commit, so nothing is amendable
@@ -787,6 +792,27 @@ void CommitDetailsPanel::onFileSelectionChanged() {
     // A folder is selected and the checkbox is off: the list narrows to it. That
     // is what the checkbox is for — seeing the whole commit at once instead.
     m_files->setFolderFilter(index.data(CommitFilesModel::PrefixRole).toString());
+}
+
+void CommitDetailsPanel::setFilesLoading(bool loading) {
+    m_fileSkeleton->setActive(loading);
+}
+
+bool CommitDetailsPanel::filesLoading() const {
+    return m_fileSkeleton->isActive();
+}
+
+void CommitDetailsPanel::setWorkingTreeLoading(bool loading) {
+    m_wip->setLoading(loading);
+    // Until the status arrives the panel may still be on its commit face; the
+    // skeleton goes on whichever face is up.
+    if (!m_workingTree || !loading) {
+        m_fileSkeleton->setActive(loading);
+    }
+}
+
+bool CommitDetailsPanel::workingTreeLoading() const {
+    return m_wip->loading();
 }
 
 } // namespace gk

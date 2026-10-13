@@ -4,6 +4,25 @@ All notable changes to GitMycelium are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Lag on large repositories.** Switching tabs and finishing any action could
+  freeze the window for seconds. The GUI thread waited for the repository lock
+  while a background history page held it, and every refresh re-read refs, status,
+  stashes, worktrees, submodules and remotes on the GUI thread. A refresh now reads
+  all of that in one pass on a worker, and the window answers from that snapshot
+  until the next write. A commit's files and a file's diff load in the background
+  too. On a 200k-commit, 100k-file, 3000-branch repository, opening it stalls the
+  window for at most ~15 ms; switching to it takes ~100 ms.
+
+### Changed
+
+- What has not been read yet shows as skeleton rows (branches, the graph before
+  its first page, the Commit Panel, a commit's files, the diff, the branch label)
+  instead of an empty or stale view.
+
 ## [1.1.0] - 2026-10-13
 
 ### Added

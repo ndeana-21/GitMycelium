@@ -979,6 +979,7 @@ void CommitModel::fetchMore(const QModelIndex& parent) {
         return;
     }
     m_loading = true;
+    emit loadingChanged();
     m_session->requestCommits(m_generation, static_cast<quint64>(realRowCount()),
                               RepoSession::kPageSize,
                               m_historyFilter);
@@ -992,6 +993,7 @@ void CommitModel::onPage(CommitPage page) {
         return;
     }
     m_loading = false;
+    emit loadingChanged();
     if (!page.error.isEmpty()) {
         onFailed(page.error);
         return;
@@ -1054,6 +1056,7 @@ void CommitModel::onPage(CommitPage page) {
 
 void CommitModel::onFailed(QString message) {
     m_loading = false;
+    emit loadingChanged();
     m_hasMore = false;
     emit headerDataChanged(Qt::Vertical, 0, 0);
     Q_UNUSED(message);
@@ -1090,6 +1093,7 @@ void CommitModel::reset() {
     m_timelineCount = 0;
     m_hasMore = true;
     m_loading = false;
+    emit loadingChanged();
     // The rows are gone, so the highlight set is meaningless until they reload.
     // The branch stays remembered and `onPage` rebuilds it.
     m_highlightSet.clear();

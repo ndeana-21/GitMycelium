@@ -55,6 +55,9 @@ public:
     explicit CommitModel(RepoSession* session, QObject* parent = nullptr);
 
 signals:
+    /// A page request started or finished (`isLoading`).
+    void loadingChanged();
+
     /// Emitted when the graph lane layout changed and the graph column must be
     /// repainted (the commit rows themselves did not change).
     void graphChanged();
@@ -87,6 +90,8 @@ public:
     /// Another page can be asked for now: there is more history and none is in flight.
     bool canLoadMore() const;
 
+    /// Commits loaded so far, without the working-tree rows and date separators.
+    int realRowCount() const;
     /// True while a page is in flight. `canLoadMore` is false then, which is not
     /// the same as "no more history" — a caller paging on its own behalf has to
     /// tell the two apart.
@@ -237,7 +242,6 @@ private:
     /// HEAD's commit id read from the refs themselves, so the synthetic WIP row can
     /// point at the branch before the commit it sits on has been paged in.
     Oid headTipFromRefs() const;
-    int realRowCount() const;
     /// The newest loaded commit, skipping separators and working-tree rows; null
     /// when nothing but those are loaded.
     const CommitInfo* lastRealCommit() const;

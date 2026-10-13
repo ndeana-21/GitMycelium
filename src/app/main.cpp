@@ -403,6 +403,8 @@ void printUsage() {
                  "                      print the commits that touched a path, newest first\n"
                  "  --ui-preflight <enable|disable>\n"
                  "  --ui-prevention <check|enable|disable>\n"
+                 "                      turn the check-for-conflicts-before-merging step\n"
+                 "                      on or off for this repository\n"
                  "  --ui-load-trace <seconds>  open the window as an interactive launch\n"
                  "                             does (background indexing included), leave\n"
                  "                             it idle and print the rows loaded and the\n"
@@ -416,15 +418,13 @@ void printUsage() {
                  "  --ui-notifications [list|clear]  recent notifications\n"
                  "  --ui-lfs [show|init|track|untrack|status|prune|fetch|pull|push] [arg]  Git LFS\n"
                  "  --ui-date-format [iso|european|us|relative]  the Date column format\n"
-                 "  --version, -V  print the version and exit\n"
-                 "  --update-check  ask the release page for a newer build, print what an\n"
-                 "                  update would install, and exit (downloads nothing)\n"
-                 "                      turn the check-for-conflicts-before-merging step\n"
-                 "                      on or off for this repository\n"
                  "  --ui-rerere <enable|disable|autoupdate-on|autoupdate-off|status|\n"
                  "               apply|forget> [path]\n"
                  "                      turn rerere on/off, apply recorded resolutions,\n"
-                 "                      forget one, or report what it remembers\n");
+                 "                      forget one, or report what it remembers\n"
+                 "  --version, -V  print the version and exit\n"
+                 "  --update-check  ask the release page for a newer build, print what an\n"
+                 "                  update would install, and exit (downloads nothing)\n");
 }
 
 } // namespace
@@ -1106,6 +1106,7 @@ int main(int argc, char* argv[]) {
     window.setTabsPersistenceEnabled(!headlessRun && shotPath.empty() && uiLoadTraceSeconds == 0);
     window.setBackgroundIndexingEnabled(!headlessRun && shotPath.empty());
     window.setUpdateChecksEnabled(!headlessRun && shotPath.empty() && uiLoadTraceSeconds == 0);
+    window.setAsyncReadsEnabled(!headlessRun && shotPath.empty());
     if (!path.empty()) {
         window.openRepository(QString::fromStdString(path));
     } else if (!headlessRun && shotPath.empty()) {

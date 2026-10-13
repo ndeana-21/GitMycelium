@@ -83,9 +83,18 @@ libgit2 forbids concurrent calls on the same repository handle. Therefore:
 - `RepoSession` guards every libgit2 call with an internal `QMutex`.
 - Long reads (`requestCommits`) run on `QThreadPool::globalInstance()` and emit
   `commitsLoaded`, delivered as a queued signal to the receiver's thread.
-- Every check of "is there still a repository?" happens under that mutex, and
-  `~RepoSession` clears the handle before returning.
+- Every use of the handle happens under that mutex, and `~RepoSession` clears the
+  handle before returning. `isOpen()` and `paths()` are lock-free (an atomic and the
+  dirs captured at `open`): they are what the GUI asks most, and a locked answer waits
+  behind whatever page of history a worker is walking.
+- The GUI thread must not wait on that mutex either. A refresh reads one
+  `SessionSnapshot` on a worker (`requestSnapshot` → `snapshotReady`); while it is
+  current, `info`/`refs`/`status`/stashes/worktrees/… answer from it without the lock.
+  Every write moves the epoch on (the write helpers do it under the lock), which
+  retires the snapshot. File and commit reads the window needs go through
+  `RepoSession::readAsync`.
 - If you add a new git-backed read, route it through `RepoSession` and lock the mutex.
+  If the window reads it on every refresh, put it in `SessionSnapshot` as well.
   Do not create a second `git_repository*` for the same path.
 
 ## Performance rules
@@ -384,7 +393,7 @@ libgit2 forbids concurrent calls on the same repository handle. Therefore:
 
 - The status is the binary's: `Repository::status()` runs `git status --porcelain=v2 -z --untracked-files=all --renames --ignore-submodules=all`, parsed in `core/porcelain_status`. On a 100k-file tree 18–40 ms vs libgit2's 170 ms (~7 ms with `core.fsmonitor`). One deliberate difference: a path added with `git add -N` is an *unstaged* addition (libgit2 called
   it staged-added and unstaged-modified). Submodule pointer changes are appended separately. A refresh reads the status **once** and hands it to the WIP row, Commit Panel and status bar (`worktreeWip`, `showWorkingTreeChanges`, `refreshStatusBar`).
-- A refresh must stay cheap: ~120 ms on the GUI thread on a 100k-file/3000-branch repo (89 ms on the 1M synthetic, 33 ms on git/git). `glyphIcon` keeps the pixmaps it paints (the branch tree asked for the same three icons per row); `SubmoduleOps::list` returns at once without a `.gitmodules`; `refreshPanels` reloads the merge editor only when the status
+- A refresh must stay cheap: in async mode its reads are off the GUI thread and applying a snapshot is ~100 ms on a 100k-file/3000-branch repo (ref tree rebuild, labels, palette commands); synchronously it was ~120 ms on the GUI thread on a 100k-file/3000-branch repo (89 ms on the 1M synthetic, 33 ms on git/git). `glyphIcon` keeps the pixmaps it paints (the branch tree asked for the same three icons per row); `SubmoduleOps::list` returns at once without a `.gitmodules`; `refreshPanels` reloads the merge editor only when the status
   shows a conflict, an operation is open, or the editor is on screen or holds something. The reads are still synchronous; moving them to a worker remains.
 - The watcher is the only *push* signal (libgit2 1.9 has no fsmonitor): `ui/repo_watcher` watches the work tree's directories (non-recursive in Qt, added explicitly, capped 512) and the git dir's `index`/`HEAD`, debounces, and asks for a refresh. A watched directory reports entries added/removed, not a file's content changing; window activation covers the
   rest.
@@ -432,6 +441,12 @@ libgit2 forbids concurrent calls on the same repository handle. Therefore:
 - An operation that stops on a conflict is recorded only when it finishes; its start is a pending state, so an abort (which lands back on that start) records nothing.
 
 ### Session and workers
+
+- The window stalled for seconds on a large repository not on its own reads but on the session lock: `isOpen()`/`info()` locked `m_mutex` while a worker held it for a whole history page (0.7 s on 200k commits without a commit-graph), and the GUI asked dozens of times per action. Measure GUI-thread lock waits, not just the cost of each read; `--ui-load-trace` shows the stall, a stack at the long wait shows the caller.
+- `SessionSnapshot` is valid while `snapshot->epoch == m_snapshotEpoch`. A write increments the epoch *inside* the lock (`guarded`, `recorded`, `runStash`/`runWorktree`/`runSubmodule`, the direct stage/discard/undo writes, `open`/`close`); `withDirectory` and the git-binary operations (`*Blocking`: fetch, push, LFS, maintenance) also bump after their work, since it runs outside the lock. `installSnapshot` compares under the lock, so a snapshot read across a write is thrown away (and read again, up to four times). A new write path that forgets the bump serves stale data until the next refresh.
+- Async reads are a window mode, not a session mode: `MainWindow::setAsyncReadsEnabled` is on only for the interactive launch (and `--ui-load-trace`). Tests and `--ui-*` checks refresh synchronously (`primeSnapshot` then `applyPanels`) so they see what they just did; `test_async_reads` covers the other path. In async mode `refreshPanels()` only asks; `applyPanels()` runs on `snapshotReady` for the active tab, and a snapshot retired by a write since is not applied (that write asked for its own).
+- In async mode a refresh does not retire the old snapshot first: reads keep answering from it (instantly, slightly stale) until the new one is installed. A tab switch applies the cached snapshot at once, then reads again. `repositoryFingerprint` reads HEAD and file times itself, never the session (it runs on every window activation), and is taken when a refresh is *requested*, or an activation during the first read starts a second one.
+- What is not read yet shows as skeleton rows (`ui/skeleton`, an overlay on the view's viewport, still when headless): the branch tree, the graph before its first page (`CommitModel::loadingChanged`), the Commit Panel or the commit's files, the diff, the branch label. `loadingStateForDiagnostics` reports each. A request carries a token (`m_documentToken`, `m_commitFilesToken`); an answer for an older one is dropped, and a tab switch moves both on.
 
 - A session read must not throw into the window: synchronous reads (`info`, `status`, the diffs, `blame`, `commitsBlocking`) go through `RepoSession::readOr`; a failure returns the empty answer and emits `readFailed` (shown as a tab error notification). Emit after the session lock is released, or a receiver that reads the session again deadlocks on the
   non-recursive mutex.

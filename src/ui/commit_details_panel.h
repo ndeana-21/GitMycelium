@@ -20,6 +20,8 @@ class QTreeView;
 
 namespace gk {
 
+class Skeleton;
+
 class CommitFilesModel;
 class WorkingTreePanel;
 
@@ -50,6 +52,13 @@ public:
     void showComparison(const QString& base, const QString& target,
                         const std::vector<ChangedFile>& files, const QString& label = {});
     void showWorkingTree(const std::vector<FileChange>& changes);
+    /// The commit's header is known before its files are: the list shows skeleton
+    /// rows until `showCommit` brings them.
+    void setFilesLoading(bool loading);
+    bool filesLoading() const;
+    /// Skeleton rows in the Commit Panel while the status is being read.
+    void setWorkingTreeLoading(bool loading);
+    bool workingTreeLoading() const;
     void setWorkingTreeBranch(const QString& name, const QColor& color);
     void clear();
     /// Reports the selected commit's signature. `status` is git's `%G?` letter;
@@ -140,6 +149,7 @@ private:
 
     CommitFilesModel* m_files = nullptr;
     QTreeView* m_fileView = nullptr;
+    Skeleton* m_fileSkeleton = nullptr;
 
     QStackedWidget* m_pages = nullptr;
     WorkingTreePanel* m_wip = nullptr;

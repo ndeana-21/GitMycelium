@@ -18,6 +18,8 @@ class QTextEdit;
 class QToolButton;
 
 namespace gk {
+
+class Skeleton;
 class DiffMinimap;
 
 /// One file's changes, and the file they happened to.
@@ -58,6 +60,10 @@ public:
     explicit DiffView(QWidget* parent = nullptr);
 
     void show(const Document& document);
+    /// Skeleton rows over the text while the next document is being read; `show`
+    /// takes them down.
+    void setLoading(bool loading);
+    bool loading() const;
     void clear();
 
     /// Re-renders the shown document after a theme or zoom change: the markup
@@ -180,6 +186,7 @@ private:
     QToolButton* m_next = nullptr;
     /// Holds the single browser (unified or file) or the splitter (side by side).
     QStackedWidget* m_pages = nullptr;
+    Skeleton* m_skeleton = nullptr;
     QSplitter* m_splitter = nullptr;
     /// The overview beside the viewer; hidden when there is nothing to mark.
     DiffMinimap* m_minimap = nullptr;

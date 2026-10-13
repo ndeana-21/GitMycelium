@@ -1,4 +1,5 @@
 #include "ui/diff_view.h"
+#include "ui/skeleton.h"
 
 #include "core/diff_rows.h"
 #include "ui/diff_minimap.h"
@@ -223,6 +224,8 @@ void DiffView::buildUi() {
 
     m_pages = new QStackedWidget(this);
 
+    m_skeleton = new Skeleton(m_pages, Skeleton::Shape::List);
+
     m_text = makeBrowser(QStringLiteral("Select a file to see its changes"));
     m_pages->addWidget(m_text);
 
@@ -443,6 +446,7 @@ void DiffView::requestLineDiscard(int hunkIndex, int lineIndex) {
 }
 
 void DiffView::show(const Document& document) {
+    m_skeleton->setActive(false);
     m_document = document;
     m_currentHunk = -1;
     rebuild();
@@ -1077,6 +1081,14 @@ void DiffView::emitDiscard(int hunkIndex, const QVector<int>& lines) {
         return;
     }
     emit discardRequested(m_document.path, hunkIndex, lines);
+}
+
+void DiffView::setLoading(bool loading) {
+    m_skeleton->setActive(loading);
+}
+
+bool DiffView::loading() const {
+    return m_skeleton->isActive();
 }
 
 } // namespace gk

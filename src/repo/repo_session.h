@@ -12,7 +12,9 @@
 #include "git/hooks.h"
 #include "repo/oplog.h"
 
+#include <QHash>
 #include <QMutex>
+#include <QPointer>
 #include <QThreadPool>
 #include <QObject>
 #include <QString>
@@ -21,10 +23,11 @@
 #include <QWaitCondition>
 
 #include <atomic>
+#include <functional>
 #include <memory>
+#include <unordered_map>
 
 namespace gk {
-
 enum class SyncKind { Fetch, FetchAll, Pull, Push, PushForce, PushTags };
 
 struct CommitPage {
@@ -50,6 +53,50 @@ struct CommitSearchResults {
 /// repository with thousands of branches that must not sit on the GUI thread.
 struct RefMetaSnapshot {
     std::vector<RefMeta> meta;
+};
+
+/// Where the repository lives. Fixed for the life of a session, so it is read
+/// without the session lock: settings keys and the watcher's roots must not wait
+/// behind a history page.
+struct RepoPaths {
+    std::string gitDir;
+    std::string commonDir;
+    std::string workDir;
+    bool bare = false;
+};
+
+/// Everything a window refresh reads, taken in one pass on a worker.
+///
+/// While it is current, the reads it covers answer from it without taking the
+/// session lock — a GUI thread that asks for the status while a page of history is
+/// being walked gets an answer at once instead of waiting for the walk. Every write
+/// moves the session's epoch on, which retires the snapshot; a snapshot whose epoch
+/// moved while it was being read is thrown away rather than installed.
+struct SessionSnapshot {
+    quint64 epoch = 0;
+    RepoInfo info;
+    std::vector<RefInfo> refs;
+    /// Every ref, grouped by commit; `refsByCommit` filters it per request.
+    std::unordered_map<std::string, std::vector<RefInfo>> refsByCommit;
+    std::vector<FileChange> status;
+    std::vector<StashEntry> stashes;
+    std::vector<WorktreeEntry> worktrees;
+    std::vector<SubmoduleEntry> submodules;
+    std::vector<RemoteInfo> remotes;
+    UpstreamInfo upstream;
+    bool merging = false;
+    bool rebasing = false;
+    bool squashing = false;
+    QString targetBranch;
+    bool canUndo = false;
+    bool canRedo = false;
+    QString undoLabel;
+    QString redoLabel;
+    bool rerereEnabled = false;
+    bool rerereAutoupdate = false;
+    bool signCommits = false;
+    QString commitTemplate;
+    QHash<QString, QString> config;
 };
 
 /// Single point of access to one repository.
@@ -82,7 +129,50 @@ public:
                                  const QString& initialBranch = QStringLiteral("main"),
                                  QString* errorOut = nullptr);
     void close();
-    bool isOpen() const;
+    /// Lock-free: true from a successful `open` until `close`.
+    bool isOpen() const { return m_isOpen.load(); }
+    /// Lock-free; empty paths while nothing is open.
+    RepoPaths paths() const;
+
+    /// Reads a `SessionSnapshot` on a worker and emits `snapshotReady` once it is
+    /// installed. Requests made while one is being read are folded into one more
+    /// read after it, so a burst of refreshes costs at most two passes.
+    void requestSnapshot();
+    /// The same read on the calling thread, for a caller that needs the answer now
+    /// (a headless run, a test).
+    void primeSnapshot();
+    /// The installed snapshot while no write has happened since, else null.
+    std::shared_ptr<const SessionSnapshot> snapshot() const;
+    /// Retires the snapshot: something outside the session (the watcher, another
+    /// client) may have changed the repository.
+    void invalidateSnapshot() const;
+
+    /// Runs `work` on a worker and hands its result to `done` on `receiver`'s
+    /// thread, unless the receiver is gone by then. For reads the window must not
+    /// wait on (a commit's files, a diff): the session methods `work` calls take the
+    /// lock themselves.
+    template <typename T>
+    void readAsync(QObject* receiver, std::function<T(RepoSession&)> work,
+                   std::function<void(T)> done) {
+        QPointer<QObject> target(receiver);
+        startWorker([this, target, work = std::move(work), done = std::move(done)] {
+            if (!m_alive.load()) {
+                return;
+            }
+            T result = work(*this);
+            if (!m_alive.load() || !target) {
+                return;
+            }
+            QMetaObject::invokeMethod(
+                target.data(),
+                [target, done, result = std::move(result)]() mutable {
+                    if (target) {
+                        done(std::move(result));
+                    }
+                },
+                Qt::QueuedConnection);
+        });
+    }
 
     /// Lets the session write the repository's commit-graph in the background when
     /// the history walk shows it is missing or far behind. Off by default: a test
@@ -670,6 +760,8 @@ public:
     void invalidateCommitWalk() const;
 
 signals:
+    /// A snapshot is installed; `snapshot()` answers until the next write.
+    void snapshotReady();
     void commitsLoaded(gk::CommitPage page);
     void commitSearchFinished(gk::CommitSearchResults results);
     void refMetaLoaded(gk::RefMetaSnapshot snapshot);
@@ -730,6 +822,9 @@ private:
             if (!m_repo) {
                 return fallback;
             }
+            if (m_walkStale.exchange(false)) {
+                m_repo->invalidateCommitWalk();
+            }
             try {
                 return read(*m_repo);
             } catch (const std::exception& e) {
@@ -744,8 +839,25 @@ private:
     /// had to read enough commits outside the graph to be worth indexing.
     void indexHistoryIfWorthIt(std::size_t readOutsideGraph, const std::string& dir);
 
+    /// Reads one snapshot on the calling thread; installing it is separate.
+    std::shared_ptr<SessionSnapshot> readSnapshot() const;
+    bool installSnapshot(std::shared_ptr<SessionSnapshot> snapshot);
+    void runSnapshotWorker();
+
     mutable QMutex m_mutex;
     std::unique_ptr<Repository> m_repo;
+    std::atomic<bool> m_isOpen{false};
+    mutable QMutex m_pathsMutex;
+    RepoPaths m_paths;
+    /// Moved on by every write, under `m_mutex`; see `SessionSnapshot`.
+    mutable std::atomic<quint64> m_snapshotEpoch{1};
+    mutable QMutex m_snapshotMutex;
+    std::shared_ptr<const SessionSnapshot> m_snapshot;
+    /// Guarded by `m_snapshotMutex`.
+    bool m_snapshotRunning = false;
+    bool m_snapshotAgain = false;
+    /// Set lock-free by `invalidateCommitWalk`, consumed by the next page under the lock.
+    mutable std::atomic<bool> m_walkStale{false};
     std::atomic<bool> m_autoCommitGraph{false};
     std::atomic<bool> m_commitGraphWriteStarted{false};
     std::atomic<bool> m_alive{true};
