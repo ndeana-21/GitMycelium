@@ -109,6 +109,23 @@ jobs:
           test -s ui.png
           sha256sum "$APPIMAGE" > "$APPIMAGE.sha256"
 
+      - name: Update a copy from the AppImage, as the app does
+        # The whole in-app path: manifest, download, checksum, replacing the file.
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          export APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=offscreen
+          work="$RUNNER_TEMP/update-check"
+          mkdir -p "$work"
+          cp "$APPIMAGE" "$work/old.AppImage"
+          printf 'stale' >> "$work/old.AppImage"
+          sha=$(cut -d' ' -f1 "$APPIMAGE.sha256")
+          size=$(stat -c%s "$APPIMAGE")
+          printf '{"version":"99.0.0","build":1,"assets":{"linux-x86_64":{"url":"file://%s","sha256":"%s","size":%s}}}' \
+            "$PWD/$APPIMAGE" "$sha" "$size" > "$work/update.json"
+          GMC_UPDATE_MANIFEST="file://$work/update.json" "$work/old.AppImage" --update-install
+          cmp "$work/old.AppImage" "$APPIMAGE"
+
       - name: Upload the build
         uses: actions/upload-artifact@v4
         with:
@@ -212,6 +229,26 @@ jobs:
           "$bin" --shot ui.png .
           test -s ui.png
           shasum -a 256 "$DMG" > "$DMG.sha256"
+
+      - name: Update a copy from the DMG, as the app does
+        # The whole in-app path: manifest, download, checksum, mounting the image,
+        # copying and verifying the bundle. A license agreement in the image made
+        # `hdiutil attach` wait for an answer, and the app with it.
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          hdiutil imageinfo "$DMG" | grep -q 'Software License Agreement: false'
+          work="$RUNNER_TEMP/update-check"
+          mkdir -p "$work"
+          ditto build/src/GitMycelium.app "$work/GitMycelium.app"
+          sha=$(cut -d' ' -f1 "$DMG.sha256")
+          size=$(stat -f%z "$DMG")
+          printf '{"version":"99.0.0","build":1,"assets":{"macos-arm64":{"url":"file://%s","sha256":"%s","size":%s}}}' \
+            "$PWD/$DMG" "$sha" "$size" > "$work/update.json"
+          GMC_UPDATE_MANIFEST="file://$work/update.json" QT_QPA_PLATFORM=offscreen \
+            "$work/GitMycelium.app/Contents/MacOS/GitMycelium" --update-install
+          codesign --verify --deep --strict "$work/.GitMycelium.app.update"
+          "$work/.GitMycelium.app.update/Contents/MacOS/GitMycelium" --version
 
       - name: Upload the build
         uses: actions/upload-artifact@v4

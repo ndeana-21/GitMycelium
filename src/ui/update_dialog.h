@@ -36,6 +36,7 @@ private:
     QPushButton* m_check = nullptr;
     QPushButton* m_releasePage = nullptr;
     QString m_error;
+    bool m_installing = false;
 };
 
 } // namespace gk

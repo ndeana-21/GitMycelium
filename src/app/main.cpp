@@ -155,7 +155,7 @@ const char* rebaseStatusName(gk::RebaseStatus status) {
 /// this reports what the window would show.
 /// One check against the release manifest, printed: what is installed, what is
 /// published, and whether this copy could put it in place.
-int updateCheckHeadless() {
+int updateCheckHeadless(bool install) {
     using namespace gk::update;
     Updater updater;
     QEventLoop loop;
@@ -182,6 +182,29 @@ int updateCheckHeadless() {
     std::printf("update: %s\n", updater.updateAvailable() ? "yes" : "no");
     const QString refusal = updater.installRefusal();
     std::printf("installable: %s\n", refusal.isEmpty() ? "yes" : refusal.toUtf8().constData());
+    if (!install) {
+        return 0;
+    }
+    if (!refusal.isEmpty()) {
+        return 1;
+    }
+    bool installed = false;
+    QObject::connect(&updater, &Updater::installFinished, &loop,
+                     [&](bool installedOk, const QString& why) {
+                         installed = installedOk;
+                         error = why;
+                         loop.quit();
+                     });
+    updater.install();
+    loop.exec();
+    if (!installed) {
+        std::printf("install: failed: %s\n", error.toUtf8().constData());
+        return 1;
+    }
+    std::printf("install: ok\n");
+    if (!updater.stagedBundle().isEmpty()) {
+        std::printf("staged: %s\n", updater.stagedBundle().toUtf8().constData());
+    }
     return 0;
 }
 
@@ -424,7 +447,9 @@ void printUsage() {
                  "                      forget one, or report what it remembers\n"
                  "  --version, -V  print the version and exit\n"
                  "  --update-check  ask the release page for a newer build, print what an\n"
-                 "                  update would install, and exit (downloads nothing)\n");
+                 "                  update would install, and exit (downloads nothing)\n"
+                 "  --update-install  the same, then download, verify and put the update in\n"
+                 "                  place without restarting (a bundle is left staged)\n");
 }
 
 } // namespace
@@ -434,6 +459,7 @@ int main(int argc, char* argv[]) {
 
     bool probeMode = false;
     bool updateCheck = false;
+    bool updateInstall = false;
     bool menuMode = false;
     std::string path;
     std::string shotPath;
@@ -1006,6 +1032,9 @@ int main(int argc, char* argv[]) {
             return 0;
         } else if (arg == "--update-check") {
             updateCheck = true;
+        } else if (arg == "--update-install") {
+            updateCheck = true;
+            updateInstall = true;
         } else if (arg == "--help" || arg == "-h") {
             printUsage();
             return 0;
@@ -1045,7 +1074,7 @@ int main(int argc, char* argv[]) {
     // the .desktop entry names the same icon for the launcher.
     app.setWindowIcon(QIcon(QStringLiteral(":/icons/gitmycelium.svg")));
     if (updateCheck) {
-        return updateCheckHeadless();
+        return updateCheckHeadless(updateInstall);
     }
     // The theme and the zoom are saved globally. The command line can override
     // them for one run — a light snapshot in CI must not rewrite the reader's

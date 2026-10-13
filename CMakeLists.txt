@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(gitmycelium VERSION 1.1.1
+project(gitmycelium VERSION 1.1.2
         DESCRIPTION "A fast, native Git client for large repositories"
         LANGUAGES CXX)
 
@@ -74,6 +74,9 @@ if(APPLE)
     set(CPACK_GENERATOR "DragNDrop")
     set(CPACK_DMG_VOLUME_NAME "GitMycelium")
     set(CPACK_DMG_FORMAT "UDBZ")
+    # The license travels in Licenses/. As a click-through agreement it also made
+    # `hdiutil attach` stop and wait for "Y", which hung the in-app update.
+    set(CPACK_DMG_SLA_USE_RESOURCE_FILE_LICENSE OFF)
     set(CPACK_STRIP_FILES OFF)
 else()
     # TGZ always works; DEB/RPM are one `cpack -G DEB|RPM` away where the tools exist.

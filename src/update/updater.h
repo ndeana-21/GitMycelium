@@ -61,6 +61,8 @@ public:
     /// Why `install()` cannot run, or empty when it can.
     QString installRefusal() const;
     bool installed() const { return m_installed; }
+    /// The new bundle waiting beside the running one (macOS), once installed.
+    const QString& stagedBundle() const { return m_stagedBundle; }
 
 signals:
     void checked(bool ok, const QString& error);

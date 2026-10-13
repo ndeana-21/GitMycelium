@@ -56,10 +56,15 @@ UpdateDialog::UpdateDialog(update::Updater* updater, QWidget* parent)
     connect(m_updater, &update::Updater::checked, this, &UpdateDialog::onChecked);
     connect(m_updater, &update::Updater::installFinished, this, &UpdateDialog::onInstallFinished);
     connect(m_updater, &update::Updater::progress, this, [this](qint64 received, qint64 total) {
-        if (total > 0) {
+        if (total > 0 && received < total) {
             m_progress->setRange(0, 1000);
             m_progress->setValue(static_cast<int>(received * 1000 / total));
+            return;
         }
+        // Downloaded: what follows (checksum, unpacking, signature) has no measure.
+        m_progress->setRange(0, 0);
+        m_installing = true;
+        showState();
     });
 
     auto* layout = new QVBoxLayout(this);
@@ -82,9 +87,13 @@ void UpdateDialog::showState() {
 
     QString text;
     if (m_updater->busy()) {
-        text = m_updater->manifest() && m_progress->isVisible()
-                   ? QStringLiteral("Downloading and verifying the update…")
-                   : QStringLiteral("Checking for updates…");
+        if (m_installing) {
+            text = QStringLiteral("Verifying and installing the update…");
+        } else if (m_updater->manifest() && m_progress->isVisible()) {
+            text = QStringLiteral("Downloading the update…");
+        } else {
+            text = QStringLiteral("Checking for updates…");
+        }
     } else if (!m_error.isEmpty()) {
         text = m_error.toHtmlEscaped();
     } else if (!m_updater->manifest()) {
@@ -113,6 +122,7 @@ void UpdateDialog::onChecked(bool ok, const QString& error) {
 
 void UpdateDialog::onInstallFinished(bool ok, const QString& error) {
     m_progress->setVisible(false);
+    m_installing = false;
     if (!ok) {
         m_error = error;
         showState();

@@ -32,10 +32,16 @@ bool directoryWritable(const QString& dir) {
     return QFileInfo(dir).isDir() && QFileInfo(dir).isWritable();
 }
 
-/// Runs a tool to completion; on failure returns its own words.
-QString runTool(const QString& program, const QStringList& args) {
+/// Runs a tool to completion; on failure returns its own words. `input` goes to its
+/// stdin, which is closed after it, so a tool that asks a question gets an answer
+/// (or end of input) instead of waiting forever.
+QString runTool(const QString& program, const QStringList& args, const QByteArray& input = {}) {
     QProcess process;
     process.start(program, args);
+    if (process.waitForStarted()) {
+        process.write(input);
+        process.closeWriteChannel();
+    }
     if (!process.waitForFinished(kToolTimeoutMs)) {
         process.kill();
         process.waitForFinished();
@@ -264,10 +270,12 @@ void Updater::stageMacBundle(const QString& diskImage) {
         if (!mount.isValid()) {
             error = QStringLiteral("Cannot create a mount point for the update.");
         } else {
+            // A disk image with a license agreement asks to accept it on stdin.
             error = runTool(QStringLiteral("hdiutil"),
                             {QStringLiteral("attach"), QStringLiteral("-nobrowse"),
                              QStringLiteral("-readonly"), QStringLiteral("-noautoopen"),
-                             QStringLiteral("-mountpoint"), mount.path(), diskImage});
+                             QStringLiteral("-mountpoint"), mount.path(), diskImage},
+                            "Y\n");
             if (error.isEmpty()) {
                 QDir(staged).removeRecursively();
                 const QString source = QDir(mount.path()).filePath(bundleName);

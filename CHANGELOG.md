@@ -4,6 +4,25 @@ All notable changes to GitMycelium are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.2] - 2026-10-13
+
+### Fixed
+
+- **The macOS update stopped at 100%.** The disk image carried a license
+  agreement, and mounting it waited for someone to accept it. The image no longer
+  has one, and the updater answers the question if an image ever asks it. The
+  update dialog now says when it is verifying and installing after the download.
+- The release checks the in-app update on both platforms against the package it
+  just built (`--update-install`).
+
+### Downloads
+
+- **Linux x86_64:** `GitMycelium-1.1.2-x86_64.AppImage`.
+- **macOS (Apple Silicon):** `GitMycelium-1.1.2-arm64.dmg`.
+
+1.1.0 and 1.1.1 can update to this release from inside the app: the agreement was
+in the image, not in their updater.
+
 ## [1.1.1] - 2026-10-13
 
 ### Fixed
