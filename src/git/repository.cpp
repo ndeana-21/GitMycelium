@@ -3700,10 +3700,11 @@ true
     // rather than the checked-out one. Both are what the badge-drop's "interactive rebase"
     // needs, and neither changes the ordinary current-branch path.
     // git runs an editor through the shell, so the path is quoted for it: a repository
-    // under a directory with a space in its name split it in two.
+    // under a directory with a space in its name split it in two. Forward slashes even
+    // on Windows: the sequence editor finds its plan beside itself with `${0%/*}`.
     std::vector<std::string> args = {
-        "-c", "sequence.editor=" + shellQuoted((temp / "sequence-editor").string()),
-        "-c", "core.editor=" + shellQuoted((temp / "message-editor").string()),
+        "-c", "sequence.editor=" + shellQuoted((temp / "sequence-editor").generic_string()),
+        "-c", "core.editor=" + shellQuoted((temp / "message-editor").generic_string()),
         "rebase", "-i"};
     if (!onto.empty()) {
         args.push_back("--onto");

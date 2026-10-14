@@ -184,7 +184,11 @@ void CloneTest::aBadUrlFailsWithGitsOwnMessage() {
     const CloneResult result = cloneRepository(missing, dest.toStdString());
     QVERIFY(!result.ok);
     QVERIFY(result.exitCode != 0);
-    QVERIFY2(result.output.find("does not exist") != std::string::npos, result.output.c_str());
+    // git's own words, which differ by platform: "does not exist" where the path is
+    // checked first, "does not appear to be a git repository" on Windows.
+    QVERIFY2(result.output.find("does not exist") != std::string::npos ||
+                 result.output.find("does not appear to be a git repository") != std::string::npos,
+             result.output.c_str());
 }
 
 QTEST_MAIN(CloneTest)

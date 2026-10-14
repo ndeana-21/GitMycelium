@@ -435,7 +435,12 @@ void InteractiveRebaseTest::anEditStepIsAmendedAndContinued() {
 void InteractiveRebaseTest::aRepositoryPathWithShellCharactersStillRewrites() {
     // git runs the editors and the todo's `exec` lines through the shell; an unquoted
     // path split at the space and the rewrite failed before it started.
+#ifdef Q_OS_WIN
+    // A quote cannot be part of a Windows file name.
+    m_path = m_dir->path() + QStringLiteral("/my repo $HOME 'q %PATH% &");
+#else
     m_path = m_dir->path() + QStringLiteral("/my repo $HOME 'q\"");
+#endif
     QVERIFY(QDir().mkpath(m_path));
     QVERIFY(git(m_path, {"init", "-q", "-b", "main"}));
     QVERIFY(git(m_path, {"config", "user.name", "Test"}));
