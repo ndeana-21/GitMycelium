@@ -181,6 +181,8 @@ private:
     bool isGraphHidden(const RefInfo& ref) const;
 
     std::vector<RefInfo> m_refs;
+    bool m_built = false;
+    QString m_builtHeadBranch;
     QStringList m_stashMessages;
     QStringList m_stashOids;
     std::vector<WorktreeEntry> m_worktrees;

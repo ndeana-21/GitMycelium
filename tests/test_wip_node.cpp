@@ -295,9 +295,12 @@ void WipNodeTest::aStashTipIsAStashNode() {
     const GraphNode* node = model->graphNodeAt(model->rowForCommit(stash));
     QVERIFY(node);
     QCOMPARE(node->type, GraphNodeType::Stash);
-    // The stash commit is a merge of HEAD and the index; the type is a label on
-    // top of that, not a replacement for the topology.
-    QVERIFY(node->isMerge);
+    // The stash commit is a merge of HEAD and the index, but the index commit is how
+    // git stores a stash, not a commit of anyone's: it hangs off HEAD alone.
+    QVERIFY(!node->isMerge);
+    const QString index = QString::fromStdString(
+        runGit({"rev-parse", "refs/stash^2"}, m_path.toStdString()).out).trimmed();
+    QCOMPARE(model->rowForCommit(index), -1);
 }
 
 void WipNodeTest::theWorktreeNodesWearTheirOwnBranchColours() {

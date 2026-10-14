@@ -5,10 +5,12 @@
 #include "git/repository.h"
 #include "ui/commit_details_panel.h"
 #include "ui/main_window.h"
+#include "ui/panel_splitter.h"
 
 #include <QDir>
 #include <QFile>
 #include <QSplitter>
+#include <QSplitterHandle>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -31,13 +33,9 @@ bool writeFile(const QString& path, const QString& content) {
            file.write(content.toUtf8()) == content.toUtf8().size();
 }
 
+/// The window's three columns, not the merge editor's three panes.
 QSplitter* columns(const QWidget& window) {
-    for (QSplitter* splitter : window.findChildren<QSplitter*>()) {
-        if (splitter->orientation() == Qt::Horizontal && splitter->count() == 3) {
-            return splitter;
-        }
-    }
-    return nullptr;
+    return window.findChild<PanelSplitter*>();
 }
 
 } // namespace
@@ -57,6 +55,7 @@ private slots:
 
     void aHiddenPageDoesNotWidenTheWindow();
     void openingALongPathKeepsTheWidth();
+    void aSidePanelFoldsAndComesBackFromItsHandle();
 };
 
 void WindowWidthTest::initTestCase() {
@@ -114,6 +113,44 @@ void WindowWidthTest::openingALongPathKeepsTheWidth() {
     QCOMPARE(window.minimumSizeHint().width(), before);
     QCOMPARE(window.width(), 1000);
     QCOMPARE(history->sizes(), sizesBefore);
+}
+
+void WindowWidthTest::aSidePanelFoldsAndComesBackFromItsHandle() {
+    MainWindow window;
+    window.setHeadless(true);
+    window.resize(1200, 700);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    QVERIFY(window.openRepository(m_repo));
+    QSplitter* history = columns(window);
+    QVERIFY(history);
+    QTRY_VERIFY(history->sizes().at(2) > 0);
+    const int detailsWidth = history->sizes().at(2);
+
+    // The handle before the details panel: its button sits halfway down.
+    QSplitterHandle* handle = history->handle(2);
+    QVERIFY(handle);
+    const QPoint button(handle->width() / 2, handle->height() / 2);
+    QTest::mouseClick(handle, Qt::LeftButton, {}, button);
+    QTRY_COMPARE(history->sizes().at(2), 0);
+    // Folded, not gone: the handle is still there to bring it back.
+    QVERIFY(!handle->isHidden());
+    QVERIFY(handle->width() > 0);
+
+    QTest::mouseClick(handle, Qt::LeftButton, {}, button);
+    QTRY_VERIFY(history->sizes().at(2) > 0);
+    QCOMPARE(history->sizes().at(2), detailsWidth);
+
+    // The branch rail answers the menu entry the same way, handle and all.
+    QVERIFY(window.refsPanelVisible());
+    window.setRefsPanelVisible(false);
+    QCOMPARE(history->sizes().at(0), 0);
+    QVERIFY(!window.refsPanelVisible());
+    QVERIFY(!history->handle(1)->isHidden());
+    QTest::mouseClick(history->handle(1), Qt::LeftButton, {},
+                      QPoint(history->handle(1)->width() / 2, history->handle(1)->height() / 2));
+    QTRY_VERIFY(history->sizes().at(0) > 0);
+    QVERIFY(window.refsPanelVisible());
 }
 
 QTEST_MAIN(WindowWidthTest)

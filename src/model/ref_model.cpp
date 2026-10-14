@@ -39,7 +39,21 @@ RefModel::RefModel(QObject* parent) : QStandardItemModel(parent) {
 }
 
 void RefModel::rebuild(const std::vector<RefInfo>& refs) {
+    // A refresh hands the same refs back far more often than not (a file saved in the
+    // work tree refreshes the window too), and on thousands of branches the tree
+    // takes tens of milliseconds to build.
+    const bool same =
+        m_built && m_builtHeadBranch == m_headBranch && refs.size() == m_refs.size() &&
+        std::equal(refs.begin(), refs.end(), m_refs.begin(),
+                   [](const RefInfo& a, const RefInfo& b) {
+                       return a.kind == b.kind && a.target == b.target && a.fullName == b.fullName;
+                   });
+    if (same) {
+        return;
+    }
     m_refs = refs;
+    m_built = true;
+    m_builtHeadBranch = m_headBranch;
     refresh();
 }
 

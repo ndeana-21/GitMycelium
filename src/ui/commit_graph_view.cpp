@@ -808,62 +808,29 @@ void CommitGraphView::leaveEvent(QEvent* event) {
 
 int CommitGraphView::nearestLabelledChildRow(int row) const {
     const auto* model = qobject_cast<const CommitModel*>(this->model());
-    if (!model || row < 0) {
+    const GraphNode* start = model && row >= 0 ? model->graphNodeAt(row) : nullptr;
+    if (!start) {
         return -1;
     }
 
-    // Walk the chain of children, one commit at a time, until one wearing a label is
-    // reached. Children rather than rows: a row above may belong to a different branch,
-    // and its label would name the wrong one. Among several children the one in the same
-    // lane continues this commit's own line, so it is preferred — a shared ancestor is
-    // named after the line it is drawn on.
-    int current = row;
-    for (int step = 0; step < 500; ++step) {
-        const QString id =
-            model->data(model->index(current, 0), CommitModel::CommitIdRole).toString();
-        if (id.isEmpty()) {
-            return -1;
+    // A commit belongs to the line it is drawn on, and that line is named by the
+    // topmost label on it: up the commit's lane for as long as the lane runs on above.
+    // A line born as a merge's extra parent starts at the merge, so a branch that was
+    // merged and deleted is no one's — the merge's branch is not its name.
+    const int lane = start->lane;
+    int owner = -1;
+    for (int above = row - 1; above >= 0; --above) {
+        const GraphNode* below = model->graphNodeAt(above + 1);
+        if (!below || !below->activeLanesAbove.find(lane)) {
+            break;
         }
-        const GraphNode* node = model->graphNodeAt(current);
-        const int lane = node ? node->lane : -1;
-        int sameLane = -1;
-        int anyChild = -1;
-        for (int candidate = current - 1; candidate >= 0; --candidate) {
-            const auto* commit = model->commitAt(candidate);
-            if (!commit) {
-                continue;
-            }
-            bool isChild = false;
-            for (const std::string& parent : commit->parents) {
-                if (QString::fromStdString(parent) == id) {
-                    isChild = true;
-                    break;
-                }
-            }
-            if (!isChild) {
-                continue;
-            }
-            if (anyChild < 0) {
-                anyChild = candidate;
-            }
-            const GraphNode* childNode = model->graphNodeAt(candidate);
-            if (lane >= 0 && childNode && childNode->lane == lane) {
-                sameLane = candidate;
-                break;
-            }
+        const GraphNode* candidate = model->graphNodeAt(above);
+        if (candidate && candidate->type != GraphNodeType::Timeline && candidate->lane == lane &&
+            !model->refsAt(above).empty()) {
+            owner = above;
         }
-        const int child = sameLane >= 0 ? sameLane : anyChild;
-        if (child < 0) {
-            // Nothing above descends from it: a branch tip with no label, or the oldest
-            // commit loaded. There is no branch to name.
-            return -1;
-        }
-        if (!model->refsAt(child).empty()) {
-            return child;
-        }
-        current = child;
     }
-    return -1;
+    return owner;
 }
 
 CommitGraphView::HoverLabel CommitGraphView::hoverLabelAt(int row) const {
@@ -876,9 +843,9 @@ CommitGraphView::HoverLabel CommitGraphView::hoverLabelAt(int row) const {
         return label;
     }
 
-    // The branch that owns the commit's line: the nearest labelled commit above it,
-    // following the child drawn in the same lane. A shared ancestor is named after the line
-    // it is drawn on, not after whichever branch passes nearer.
+    // The branch that owns the commit's line: the topmost labelled commit on it. A shared
+    // ancestor is named after the line it is drawn on, not after whichever branch passes
+    // nearer.
     const int labelled = nearestLabelledChildRow(row);
     if (labelled < 0) {
         return label;
@@ -1009,13 +976,14 @@ void CommitGraphView::updateHoverExpansion(const QPoint& pos) {
     const int iconRoom = 14;
     const int pillH = std::max(14, metrics.height() + 6);
 
+    const int remoteRoom = source.collapsedWithRemote.isEmpty() ? 0 : 13;
     int width = 0;
     for (const QString& name : source.collapsedNames) {
         const QString tracking =
             RefPillLayout::trackingText(model ? model->refTrackingFlags(name) : 0);
         const int badgeRoom = tracking.isEmpty() ? 0 : metrics.horizontalAdvance(tracking) + 4;
-        width = std::max(width,
-                         metrics.horizontalAdvance(name) + 2 * pad + iconRoom + badgeRoom);
+        width = std::max(width, metrics.horizontalAdvance(name) + 2 * pad + iconRoom +
+                                    remoteRoom + badgeRoom);
     }
     width += 2;
     // At least as wide as the pill it opens from, so the stack lines up with it and the
@@ -1052,18 +1020,24 @@ void CommitGraphView::updateHoverExpansion(const QPoint& pos) {
 
         RefPill pill;
         pill.shortName = name;
-        pill.text = metrics.elidedText(name, Qt::ElideRight,
-                                       width - 2 * pad - iconRoom - badgeRoom);
+        pill.hasRemote = source.collapsedWithRemote.contains(name);
+        const int icons = iconRoom + (pill.hasRemote ? remoteRoom : 0);
+        pill.text = metrics.elidedText(name, Qt::ElideRight, width - 2 * pad - icons - badgeRoom);
         pill.colorIndex = colorIndex;
         pill.kind = kind;
         pill.rect = QRect(x, y, width, pillH);
-        pill.textRect = QRect(x + pad, y, width - 2 * pad - iconRoom - badgeRoom, pillH);
+        pill.textRect = QRect(x + pad, y, width - 2 * pad - icons - badgeRoom, pillH);
+        int right = x + width - pad;
+        if (pill.hasRemote) {
+            pill.remoteRect =
+                QRect(right - iconSide, y + (pillH - iconSide) / 2, iconSide, iconSide);
+            right -= iconSide + 2;
+        }
         if (hasKindIcon) {
-            pill.iconRect = QRect(x + width - pad - iconSide, y + (pillH - iconSide) / 2, iconSide,
-                                  iconSide);
+            pill.iconRect = QRect(right - iconSide, y + (pillH - iconSide) / 2, iconSide, iconSide);
+            right -= iconSide + 2;
         }
         if (badgeW > 0) {
-            const int right = hasKindIcon ? x + width - pad - iconSide - 2 : x + width - pad;
             pill.trackingText = tracking;
             pill.badgeRect = QRect(right - badgeW, y, badgeW, pillH);
         }

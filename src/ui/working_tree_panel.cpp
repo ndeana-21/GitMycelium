@@ -564,6 +564,18 @@ QWidget* WorkingTreePanel::buildStashForm() {
 }
 
 void WorkingTreePanel::setChanges(const std::vector<FileChange>& changes) {
+    // The file the reader is on stays chosen across a refresh, and choosing it again
+    // re-reads its diff: an edit saved in another program shows up where it is read.
+    QString keptPath;
+    bool keptStaged = false;
+    for (Section* section : {&m_unstaged, &m_staged}) {
+        const QModelIndex current = section->view->currentIndex();
+        if (current.isValid() && CommitFilesModel::isFile(current) &&
+            section->view->selectionModel()->isSelected(current)) {
+            keptPath = CommitFilesModel::pathOf(current);
+            keptStaged = section->staged;
+        }
+    }
     m_unstaged.model->setWorkingTreeSide(changes, false);
     m_staged.model->setWorkingTreeSide(changes, true);
     std::set<std::string> paths;
@@ -575,7 +587,10 @@ void WorkingTreePanel::setChanges(const std::vector<FileChange>& changes) {
         section->view->expandAll();
     }
     refreshCounts();
-    selectFirstFile();
+    if (keptPath.isEmpty() ||
+        (!selectPath(keptPath, keptStaged) && !selectPath(keptPath, !keptStaged))) {
+        selectFirstFile();
+    }
 }
 
 void WorkingTreePanel::setBranch(const QString& name, const QColor& color) {

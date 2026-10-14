@@ -317,6 +317,7 @@ void CommitModel::setWorktreeWip(const std::vector<WorktreeWip>& list) {
         if (parentMoved) {
             // The branch the node hangs from moved, so its colour may have.
             rebuildTipColors();
+            rebuildTipPriority();
             m_graph.setNodeTypeHints(nodeTypeHints());
             m_graph.setCommits(asVector(m_rows));
             m_pathDirty = true;
@@ -355,6 +356,7 @@ void CommitModel::setWorktreeWip(const std::vector<WorktreeWip>& list) {
     // The rows changed, so the working-tree nodes' colours do too: each inherits its
     // branch's, which is what keeps it on that branch's line.
     rebuildTipColors();
+    rebuildTipPriority();
     m_graph.setNodeTypeHints(nodeTypeHints());
     m_graph.setCommits(asVector(m_rows));
     m_pathDirty = true;
@@ -585,7 +587,9 @@ void CommitModel::refreshRefs() {
         return;
     }
 
-    m_headBranch = QString::fromStdString(m_session->info().headBranch);
+    const RepoInfo info = m_session->info();
+    m_headBranch = QString::fromStdString(info.headBranch);
+    m_trunkBranch = QString::fromStdString(info.trunkBranch);
     m_refsByCommit = m_session->refsByCommit(m_historyFilter);
     // Ahead/behind is not something the ref walk answers, and `for-each-ref` over
     // every branch must not run here: this is the GUI thread. The labels show the
@@ -655,30 +659,68 @@ void CommitModel::rebuildTipColors() {
     m_pathDirty = true;
 }
 
+namespace {
+/// Below everything else, unlabelled lines included.
+constexpr int kStashPriority = 2000;
+} // namespace
+
+bool CommitModel::isTrunk(const RefInfo& ref) const {
+    if (m_trunkBranch.isEmpty()) {
+        return false;
+    }
+    const QString name = QString::fromStdString(ref.shortName);
+    if (ref.kind == RefKind::LocalBranch) {
+        return name == m_trunkBranch;
+    }
+    const qsizetype slash = name.size() - m_trunkBranch.size() - 1;
+    return ref.kind == RefKind::RemoteBranch && slash > 0 && name.endsWith(m_trunkBranch) &&
+           name.at(slash) == QLatin1Char('/') && !name.left(slash).contains(QLatin1Char('/'));
+}
+
 void CommitModel::rebuildTipPriority() {
-    // 0 = the branch you are on, 1 = a branch pinned to the left, 2 = the branch
-    // you last clicked, 3 = a labelled branch, and everything unlisted keeps the
-    // walk order, which the layout preserves.
+    // 0 = the trunk, 1 = the branch you are on, 2 = a branch pinned to the left,
+    // 3 = the branch you last clicked, 4 = a labelled branch, and everything
+    // unlisted keeps the walk order, which the layout preserves. The trunk comes
+    // first so that it is the straight line the other branches are cut from.
     std::unordered_map<std::string, int> priority;
     for (const auto& [commitId, bucket] : m_refsByCommit) {
         if (bucket.empty()) {
             continue;
         }
-        int best = 3;
+        // A stash alone ranks below everything: a branch never continues on it.
+        int best = kStashPriority;
         for (const RefInfo& ref : bucket) {
+            if (ref.fullName == "refs/stash") {
+                continue;
+            }
+            best = std::min(best, 4);
             const QString name = QString::fromStdString(ref.shortName);
-            if (!m_headBranch.isEmpty() && name == m_headBranch) {
+            if (isTrunk(ref)) {
                 best = 0;
                 break;
             }
-            if (m_pinnedBranches.contains(name)) {
+            if (!m_headBranch.isEmpty() && name == m_headBranch) {
                 best = std::min(best, 1);
             }
-            if (!m_focusedBranch.isEmpty() && name == m_focusedBranch) {
+            if (m_pinnedBranches.contains(name)) {
                 best = std::min(best, 2);
+            }
+            if (!m_focusedBranch.isEmpty() && name == m_focusedBranch) {
+                best = std::min(best, 3);
             }
         }
         priority[commitId] = best;
+    }
+    // A working-tree row is the tip of the branch it sits on, so it ranks as that
+    // branch does; otherwise the commit below it would leave for any other line.
+    for (int i = 0; i < m_wipCount; ++i) {
+        const CommitInfo& wip = m_rows.at(i);
+        const auto parent =
+            wip.parents.empty() ? priority.end() : priority.find(wip.parents.front());
+        if (parent != priority.end()) {
+            const int parentPriority = parent->second;
+            priority[wip.id] = parentPriority;
+        }
     }
     m_graph.setTipPriority(std::move(priority));
     m_pathDirty = true;

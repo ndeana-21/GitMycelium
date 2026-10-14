@@ -13,11 +13,22 @@ All notable changes to GitMycelium are recorded here. The format follows
   halo. Below the point where the branch was cut the trace follows the branch it
   came from, and from there that branch's own origin, so each ancestor branch is
   lit only from its fork down.
+- **Side panels fold from a button.** The handle beside each side panel carries an
+  arrow that folds the panel away and brings it back; a folded panel leaves its
+  handle at the window edge. View → Details panel joins View → Branches panel.
 
 ### Changed
 
 - The graph column opens at most five lanes wide; drag the header for more.
 - Commit circles are larger, and their initials are sized to fit inside them.
+- **The trunk is the straight line.** The default branch (`origin/HEAD`, else
+  `main`/`master`/`trunk`) takes the leftmost lane and keeps it where branches
+  meet; a branch cut from it bends into it at the fork instead of the trunk
+  appearing to branch off the checked-out line.
+- A stash is one node in the graph: the commits git keeps the index and the
+  untracked files in are no longer drawn beside it.
+- The hover list behind `+N` names a local branch once, with the cloud, instead of
+  listing its `origin/` twin as another branch.
 
 ### Fixed
 
@@ -34,6 +45,22 @@ All notable changes to GitMycelium are recorded here. The format follows
   its words when narrow, the merge editor's buttons wrap, and a hidden page no
   longer sets the window's minimum width. The side panels can now be widened as
   far as the window allows.
+- **Changes made outside the window did not show up** until the repository was
+  reopened. The watcher saw at most 512 directories and never a file's content
+  changing; it now watches the whole work tree (inotify on Linux, FSEvents on
+  macOS), leaves out what git ignores, and the refresh reloads the graph whenever
+  a ref or HEAD moved — a stash, a commit or a checkout made in a terminal, and
+  the stash commands inside the window, which left the graph stale. The file open
+  in the diff is read again when it changes on disk.
+- A refresh no longer throws the reader off the commit or comparison they are
+  reading, nor off the working-tree file they chose. A refresh caused by a saved
+  file costs about 10 ms of the window's time on 7000 refs (it was about 90): the
+  branch tree and the labels are rebuilt only when the refs moved, and a linked
+  worktree's status is read on the worker.
+- Switching tabs kept the previous tab's file in the diff.
+- A hover badge on a commit of a merged (and deleted) branch named the branch it
+  was merged into; it now names only the line the commit is drawn on.
+- The selection halo of a commit in the first lane was cut off on the left.
 
 ## [1.1.2] - 2026-10-13
 

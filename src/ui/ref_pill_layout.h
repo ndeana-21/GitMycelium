@@ -41,6 +41,8 @@ struct RefPill {
     /// The names folded behind "name +N", in order; empty unless this pill stands
     /// for several branches, and revealed under the pill on hover.
     QStringList collapsedNames;
+    /// Those of `collapsedNames` whose remote-tracking twin sits on the same commit.
+    QStringList collapsedWithRemote;
 };
 
 /// Geometry of the label column, shared by painting and by hit-testing.

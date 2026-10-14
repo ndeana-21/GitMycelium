@@ -6,6 +6,8 @@
 #include "git/repository.h"
 #include "repo/repo_session.h"
 #include "ui/commit_graph_view.h"
+#include "ui/diff_view.h"
+#include "ui/working_tree_panel.h"
 #include "ui/main_window.h"
 
 #include <QDir>
@@ -72,6 +74,10 @@ private slots:
     void aTabShownBeforeComesBackWithoutSkeletons();
     void aCheckoutRunsOnAWorker();
     void anUntrackedFileDiffsWithoutWalkingTheTree();
+    void anEditMadeOutsideReachesTheOpenDiff();
+    void aStashMadeOutsideReloadsTheGraph();
+    void aStashMadeInTheWindowReloadsTheGraph();
+    void aTabSwitchDoesNotKeepTheOtherTabsFile();
 };
 
 void AsyncReadsTest::initTestCase() {
@@ -243,6 +249,115 @@ void AsyncReadsTest::anUntrackedFileDiffsWithoutWalkingTheTree() {
     QCOMPARE(diff.hunks.front().lines.back().text, std::string("beta"));
     QVERIFY(diff.hunks.front().lines.back().noNewline);
     QCOMPARE(diff.newMode, 0100644);
+}
+
+namespace {
+
+CommitModel* modelOf(MainWindow& window) {
+    auto* view = window.findChild<CommitGraphView*>();
+    return view ? qobject_cast<CommitModel*>(view->model()) : nullptr;
+}
+
+QString revParse(const QString& dir, const QString& revision) {
+    return QString::fromStdString(
+               runGit({"rev-parse", revision.toStdString()}, dir.toStdString()).out)
+        .trimmed();
+}
+
+bool diffShows(const DiffView* view, const std::string& text) {
+    for (const DiffHunk& hunk : view->document().diff.hunks) {
+        for (const DiffLine& line : hunk.lines) {
+            if (line.text == text) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+} // namespace
+
+void AsyncReadsTest::anEditMadeOutsideReachesTheOpenDiff() {
+    MainWindow window;
+    window.setHeadless(true);
+    window.setAsyncReadsEnabled(true);
+    QVERIFY(window.openRepository(m_repo));
+    QTRY_VERIFY_WITH_TIMEOUT(allReady(window.loadingStateForDiagnostics()), 5000);
+    auto* diff = window.findChild<DiffView*>();
+    QVERIFY(diff);
+    // The working tree's one change is chosen and shown.
+    QTRY_VERIFY_WITH_TIMEOUT(diffShows(diff, "dirty"), 5000);
+
+    // Saved by another program, in place: the watcher sees the content change, the
+    // refresh keeps the file chosen and reads its diff again.
+    QVERIFY(writeFile(QDir(m_repo).filePath(QStringLiteral("f.txt")),
+                      QStringLiteral("edited elsewhere\n")));
+    QTRY_VERIFY_WITH_TIMEOUT(diffShows(diff, "edited elsewhere"), 8000);
+    QCOMPARE(diff->document().path, QStringLiteral("f.txt"));
+}
+
+void AsyncReadsTest::aStashMadeOutsideReloadsTheGraph() {
+    MainWindow window;
+    window.setHeadless(true);
+    window.setAsyncReadsEnabled(true);
+    QVERIFY(window.openRepository(m_repo));
+    QTRY_VERIFY_WITH_TIMEOUT(allReady(window.loadingStateForDiagnostics()), 5000);
+    CommitModel* model = modelOf(window);
+    QVERIFY(model);
+    QTRY_VERIFY_WITH_TIMEOUT(model->rowForCommit(revParse(m_repo, QStringLiteral("HEAD"))) >= 0,
+                             5000);
+
+    QVERIFY(git(m_repo, {"stash", "push", "-q"}));
+    const QString stash = revParse(m_repo, QStringLiteral("refs/stash"));
+    QVERIFY(!stash.isEmpty());
+    QTRY_VERIFY_WITH_TIMEOUT(model->rowForCommit(stash) >= 0, 8000);
+    // The working tree is clean now, so its row has gone with the change.
+    QTRY_COMPARE_WITH_TIMEOUT(model->wipRow(), -1, 5000);
+}
+
+void AsyncReadsTest::aStashMadeInTheWindowReloadsTheGraph() {
+    MainWindow window;
+    window.setHeadless(true);
+    QVERIFY(window.openRepository(m_repo));
+    CommitModel* model = modelOf(window);
+    QVERIFY(model);
+    QTRY_VERIFY_WITH_TIMEOUT(model->rowForCommit(revParse(m_repo, QStringLiteral("HEAD"))) >= 0,
+                             5000);
+
+    // The Commit Panel's stash form, as its button sends it.
+    auto* panel = window.findChild<WorkingTreePanel*>();
+    QVERIFY(panel);
+    emit panel->stashAllRequested(QStringLiteral("from the window"));
+    const QString stash = revParse(m_repo, QStringLiteral("refs/stash"));
+    QVERIFY(!stash.isEmpty());
+    QTRY_VERIFY_WITH_TIMEOUT(model->rowForCommit(stash) >= 0, 5000);
+}
+
+void AsyncReadsTest::aTabSwitchDoesNotKeepTheOtherTabsFile() {
+    const QString other = QDir(m_dir->path()).filePath(QStringLiteral("other"));
+    QVERIFY(QDir().mkpath(other));
+    QVERIFY(git(other, {"init", "-q", "-b", "main"}));
+    QVERIFY(writeFile(QDir(other).filePath(QStringLiteral("g.txt")), QStringLiteral("g\n")));
+    QVERIFY(git(other, {"add", "-A"}));
+    QVERIFY(git(other, {"commit", "-qm", "only"}));
+
+    MainWindow window;
+    window.setHeadless(true);
+    QVERIFY(window.openRepository(m_repo));
+    auto* diff = window.findChild<DiffView*>();
+    QVERIFY(diff);
+    QTRY_COMPARE_WITH_TIMEOUT(diff->document().path, QStringLiteral("f.txt"), 5000);
+
+    // The second repository is clean: nothing of its own to show, and certainly not
+    // the first one's file.
+    QVERIFY(window.openRepository(other));
+    QTRY_VERIFY_WITH_TIMEOUT(diff->document().path != QStringLiteral("f.txt"), 5000);
+    QVERIFY(diff->document().diff.hunks.empty());
+
+    // Back on the first tab, its file is there again.
+    window.tabsForDiagnostics(QStringLiteral("activate"), {QStringLiteral("0")});
+    QTRY_COMPARE_WITH_TIMEOUT(diff->document().path, QStringLiteral("f.txt"), 5000);
+    QVERIFY(diffShows(diff, "dirty"));
 }
 
 QTEST_MAIN(AsyncReadsTest)

@@ -140,6 +140,23 @@ private slots:
         QCOMPARE(layout.node(0).colorIndex, color);
     }
 
+    void aForkStaysOnTheMoreImportantLine() {
+        // `feature` (checked out, newest) was cut from `main` at `base`. Both lines
+        // await `base`; it continues `main`'s, and `feature` bends into it.
+        GraphLayout layout;
+        layout.setTipPriority({{"main2", 0}, {"feat2", 1}});
+        layout.setCommits({mk("feat2", {"feat1"}), mk("main2", {"main1"}), mk("feat1", {"base"}),
+                           mk("main1", {"base"}), mk("base", {})});
+
+        const int mainLane = layout.node(1).lane;
+        const int featureLane = layout.node(0).lane;
+        QCOMPARE(mainLane, 0);
+        QVERIFY(featureLane != mainLane);
+        QCOMPARE(layout.node(4).lane, mainLane);
+        QCOMPARE(layout.node(4).converging.size(), static_cast<std::size_t>(1));
+        QCOMPARE(layout.node(4).converging.front().lane, featureLane);
+    }
+
     void aHintIsAppliedToRowsPagedInLater() {
         GraphLayout layout;
         layout.append({mk("m", {"a", "b"}), mk("a", {"r"})});

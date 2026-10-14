@@ -676,7 +676,32 @@ RepoInfo Repository::info() const {
         out.headId = oidToString(git_reference_target(head));
         git_reference_free(head);
     }
+    out.trunkBranch = trunkBranch();
     return out;
+}
+
+std::string Repository::trunkBranch() const {
+    git_reference* remoteHead = nullptr;
+    if (git_reference_lookup(&remoteHead, m_repo, "refs/remotes/origin/HEAD") == 0) {
+        const char* target = git_reference_symbolic_target(remoteHead);
+        const std::string name = target ? target : "";
+        git_reference_free(remoteHead);
+        const std::string prefix = "refs/remotes/origin/";
+        if (name.rfind(prefix, 0) == 0 && name.size() > prefix.size()) {
+            return name.substr(prefix.size());
+        }
+    }
+    for (const char* candidate : {"main", "master", "trunk"}) {
+        for (const std::string& ref : {std::string("refs/heads/") + candidate,
+                                       std::string("refs/remotes/origin/") + candidate}) {
+            git_reference* found = nullptr;
+            if (git_reference_lookup(&found, m_repo, ref.c_str()) == 0) {
+                git_reference_free(found);
+                return candidate;
+            }
+        }
+    }
+    return {};
 }
 
 std::vector<RefInfo> Repository::refs() const {
@@ -915,7 +940,14 @@ std::vector<CommitInfo> Repository::commits(std::size_t skip, std::size_t limit,
         }
         ci.author = toSignature(git_commit_author(commit));
         ci.committer = toSignature(git_commit_committer(commit));
-        const unsigned parents = git_commit_parentcount(commit);
+        unsigned parents = git_commit_parentcount(commit);
+        if (parents > 1 && std::any_of(m_walkStashes.begin(), m_walkStashes.end(),
+                                       [&oid](const TopoWalk::RawOid& stash) {
+                                           return std::memcmp(stash.data(), oid.id,
+                                                              stash.size()) == 0;
+                                       })) {
+            parents = 1;
+        }
         ci.parents.reserve(parents);
         for (unsigned i = 0; i < parents; ++i) {
             ci.parents.push_back(oidToString(git_commit_parent_id(commit, i)));
@@ -993,6 +1025,9 @@ std::vector<TopoWalk::RawOid> Repository::walkStarts(const HistoryFilter& filter
                 std::string name = git_reference_name(ref);
                 TopoWalk::RawOid id;
                 if (isWalked(name) && peel(ref, id)) {
+                    if (name == "refs/stash") {
+                        m_walkStashes.push_back(id);
+                    }
                     named.emplace_back(std::move(name), id);
                 }
                 git_reference_free(ref);
@@ -1020,6 +1055,7 @@ std::vector<TopoWalk::RawOid> Repository::walkStarts(const HistoryFilter& filter
 }
 
 bool Repository::buildCommitWalk(const HistoryFilter& filter) const {
+    m_walkStashes.clear();
     const std::vector<TopoWalk::RawOid> tips = walkStarts(filter);
     if (tips.empty()) {
         return false;
@@ -1054,7 +1090,7 @@ bool Repository::buildCommitWalk(const HistoryFilter& filter) const {
             git_odb_object_free(object);
             return parsed;
         });
-    m_walk->start(tips);
+    m_walk->start(tips, m_walkStashes);
     return true;
 }
 
@@ -1163,6 +1199,31 @@ std::vector<FileChange> Repository::worktreeStatus(const std::string& workDir) {
         fail("cannot read status: " + failureText(run));
     }
     return parsePorcelainStatus(run.out);
+}
+
+std::vector<std::string> Repository::ignoredPaths(const std::string& workDir) {
+    std::vector<std::string> out;
+    if (workDir.empty()) {
+        return out;
+    }
+    const ProcessResult run =
+        runGit({"ls-files", "--others", "--ignored", "--directory", "--exclude-standard", "-z"},
+               workDir);
+    if (run.exitCode != 0) {
+        return out;
+    }
+    std::size_t start = 0;
+    while (start < run.out.size()) {
+        std::size_t end = run.out.find('\0', start);
+        if (end == std::string::npos) {
+            end = run.out.size();
+        }
+        if (end > start) {
+            out.emplace_back(run.out, start, end - start);
+        }
+        start = end + 1;
+    }
+    return out;
 }
 
 void Repository::stageFile(const std::string& path) {

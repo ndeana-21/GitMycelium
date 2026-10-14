@@ -134,6 +134,16 @@ std::int64_t TopoWalk::timeOf(std::uint32_t node) const {
 }
 
 const std::vector<std::uint32_t>& TopoWalk::parentsOf(std::uint32_t node) {
+    allParentsOf(node);
+    if (m_parentScratch.size() > 1 &&
+        std::find(m_firstParentOnly.begin(), m_firstParentOnly.end(), node) !=
+            m_firstParentOnly.end()) {
+        m_parentScratch.resize(1);
+    }
+    return m_parentScratch;
+}
+
+const std::vector<std::uint32_t>& TopoWalk::allParentsOf(std::uint32_t node) {
     if (node < m_graphSize) {
         m_graph->parents(node, m_parentScratch);
         return m_parentScratch;
@@ -187,7 +197,13 @@ void TopoWalk::computeIndegreesToDepth(std::uint64_t cutoff) {
     }
 }
 
-void TopoWalk::start(const std::vector<RawOid>& tips) {
+void TopoWalk::start(const std::vector<RawOid>& tips,
+                     const std::vector<RawOid>& firstParentOnly) {
+    for (const RawOid& id : firstParentOnly) {
+        if (const std::uint32_t node = nodeFor(id); node != kMissing) {
+            m_firstParentOnly.push_back(node);
+        }
+    }
     std::vector<std::uint32_t> starts;
     starts.reserve(tips.size());
     for (const RawOid& tip : tips) {

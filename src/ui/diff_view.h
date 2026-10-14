@@ -61,6 +61,8 @@ public:
     explicit DiffView(QWidget* parent = nullptr);
 
     void show(const Document& document);
+    /// What is on screen: the document's path (empty when cleared) and its diff.
+    const Document& document() const { return m_document; }
     /// Skeleton rows over the text while the next document is being read; `show`
     /// takes them down.
     void setLoading(bool loading);

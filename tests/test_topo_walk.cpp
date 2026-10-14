@@ -150,8 +150,11 @@ void TopoWalkTest::buildHistory() {
 }
 
 void TopoWalkTest::compareWithGit(const QString& what) {
-    const QStringList expected =
+    // A stash is drawn with its first parent only: the commits holding the index and
+    // the untracked files are how git stores it, not history.
+    QStringList expected =
         gitOut(m_path, {"rev-list", "--topo-order", "--all"}).split(QLatin1Char('\n'));
+    expected.removeAll(gitOut(m_path, {"rev-parse", "refs/stash^2"}));
     for (const quint32 pageSize : {quint32{1}, quint32{3}, quint32{1000}}) {
         RepoSession session;
         QVERIFY(session.open(m_path));

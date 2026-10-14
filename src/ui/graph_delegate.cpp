@@ -328,9 +328,9 @@ void GraphDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
     if (path.hasNode(index.row())) {
         QColor halo = color.lighter(140);
         halo.setAlpha(110);
-        painter->setPen(QPen(halo, 3.0));
+        painter->setPen(QPen(halo, 2.5));
         painter->setBrush(Qt::NoBrush);
-        painter->drawEllipse(center, radius + 2.5, radius + 2.5);
+        painter->drawEllipse(center, radius + 2.0, radius + 2.0);
     }
 
     const auto ringNode = [&](const QColor& pen) {

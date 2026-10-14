@@ -253,6 +253,23 @@ void GraphLayout::processRows(std::size_t from, std::size_t to) {
         const auto it = m_awaited.find(oid);
         return it == m_awaited.end() || it->second.empty() ? -1 : it->second.front();
     };
+    // Where branches meet, the commit stays on the most important line and the
+    // others bend into it: a branch cut from `main` reads as cut from `main`, not
+    // as `main` cut from it. Equal importance keeps the leftmost.
+    const auto mostImportantLaneAwaiting = [this](const std::string& oid) -> int {
+        const auto it = m_awaited.find(oid);
+        if (it == m_awaited.end() || it->second.empty()) {
+            return -1;
+        }
+        int best = it->second.front();
+        for (const int k : it->second) {
+            if (m_lanePriorities[static_cast<std::size_t>(k)] <
+                m_lanePriorities[static_cast<std::size_t>(best)]) {
+                best = k;
+            }
+        }
+        return best;
+    };
     // A lane that just ended at this row must not be handed straight to another
     // line in the same row: the two overlap at the same x and read as one line.
     // Testing the handful burned this row is cheaper than a flag per lane.
@@ -300,7 +317,7 @@ void GraphLayout::processRows(std::size_t from, std::size_t to) {
         }
 
         std::vector<int> burnedThisRow;
-        int lane = laneAwaiting(commit.id);
+        int lane = mostImportantLaneAwaiting(commit.id);
         // Whether the set of live lanes below differs from the one above. A commit
         // that continues the lane it was awaited on, into its first parent, leaves
         // it as it was — that is most rows, and those share the row above's set.

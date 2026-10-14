@@ -1,4 +1,5 @@
 #include "ui/main_window.h"
+#include "ui/panel_splitter.h"
 
 #include "ui/badge_flight.h"
 #include "ui/drop_point.h"
@@ -281,6 +282,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_autoFetchTimer->setInterval(5 * 60 * 1000);
     connect(m_autoFetchTimer, &QTimer::timeout, this, &MainWindow::onAutoFetchTick);
     m_watcher = new RepoWatcher(this);
+    m_watcher->setIgnoredLister(&RepoSession::ignoredPaths);
     connect(m_watcher, &RepoWatcher::changed, this, &MainWindow::onRepositoryFilesChanged);
     buildUi();
     bindViews();
@@ -429,6 +431,7 @@ void MainWindow::wireContext(RepoContext* context) {
     connect(model, &QAbstractItemModel::rowsInserted, this,
             [this, context](const QModelIndex&, int, int) {
                 if (active() == context) {
+                    restoreSelectionAfterReload();
                     tryRevealCommit();
                 }
             });
@@ -519,6 +522,7 @@ void MainWindow::saveActiveState() {
     context->columnMode = m_columnMode;
     context->timelinePeriod = m_timelinePeriod;
     context->conflictPageDismissed = m_conflictPageDismissed;
+    context->diffPageShown = diffPageVisible();
     // Flush a column drag the debounce timer has not written yet. Only for a
     // context that was already on screen: opening a repository into the empty
     // starting context also lands here, and flushing then would save the default
@@ -575,8 +579,23 @@ void MainWindow::activateContext(int index) {
     ++m_documentToken;
     ++m_commitFilesToken;
     m_documentPending = false;
+    m_restoreCommit.clear();
+    m_restoreWip = false;
+    // The diff on screen is the tab being left's. The one coming back shows its own
+    // file again (read anew below) and its own page, or nothing.
+    const QString shownFile = m_renderedPath;
+    const QString shownContext = m_renderedContext;
+    const bool shownStaged = m_renderedStaged;
+    m_renderedPath.clear();
+    m_renderedContext.clear();
     if (m_diffView) {
+        m_diffView->clear();
         m_diffView->setLoading(false);
+    }
+    if (context->diffPageShown && !shownFile.isEmpty()) {
+        showDiffPage();
+    } else {
+        showGraphPage();
     }
     if (m_details) {
         m_details->setFilesLoading(false);
@@ -636,6 +655,11 @@ void MainWindow::activateContext(int index) {
     loadCommitColumns();
     loadCommitDateFormat();
     loadTimeline();
+    // The panels describe the tab's selected commit only if it can be selected again;
+    // otherwise they would go on describing the tab that was left.
+    if (!m_selectedCommitId.isEmpty() && m_commitModel->rowForCommit(m_selectedCommitId) < 0) {
+        m_selectedCommitId.clear();
+    }
     // A tab shown before comes back at once with what it last read; the fresh read
     // replaces it when it lands. A tab never shown has nothing to show yet.
     if (m_asyncReads) {
@@ -647,7 +671,8 @@ void MainWindow::activateContext(int index) {
     }
     refreshPanels();
     const RepoPaths paths = m_session->paths();
-    m_watcher->setRoots(QString::fromStdString(paths.workDir), QString::fromStdString(paths.gitDir));
+    m_watcher->setRoots(QString::fromStdString(paths.workDir), QString::fromStdString(paths.gitDir),
+                        QString::fromStdString(paths.commonDir));
     loadAutoFetch();
     loadPreflight();
     loadPrevention();
@@ -655,6 +680,11 @@ void MainWindow::activateContext(int index) {
     // A selection made before the switch comes back with its diff.
     if (!m_selectedCommitId.isEmpty()) {
         selectCommit(m_selectedCommitId);
+    }
+    const bool workingTreeFile =
+        shownContext == QStringLiteral("staged") || shownContext == QStringLiteral("unstaged");
+    if (!shownFile.isEmpty() && (workingTreeFile || shownContext == m_selectedCommitId)) {
+        renderFile(shownFile, workingTreeFile, shownStaged);
     }
     // A tab was opened or brought forward, which is the "last used" the start
     // page shows.
@@ -1123,6 +1153,14 @@ void MainWindow::buildUi() {
     m_refsAction->setChecked(true);
     m_refsAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+B")));
     connect(m_refsAction, &QAction::toggled, this, &MainWindow::setRefsPanelVisible);
+    m_detailsAction = viewMenu->addAction(QStringLiteral("&Details panel"));
+    m_detailsAction->setCheckable(true);
+    m_detailsAction->setChecked(true);
+    connect(m_detailsAction, &QAction::toggled, this, [this](bool visible) {
+        if (m_history) {
+            m_history->setPanelCollapsed(m_history->count() - 1, !visible);
+        }
+    });
 
     // The graph's motion is pleasant and, for a reader who does not want it, the
     // first thing they look for a switch for.
@@ -1311,10 +1349,28 @@ void MainWindow::buildUi() {
     m_centerStack->addWidget(m_diffView);
     sizeToCurrentPage(m_centerStack);
 
-    auto* history = new QSplitter(Qt::Horizontal, this);
+    auto* history = new PanelSplitter(this);
+    m_history = history;
     history->addWidget(m_refPanel);
     history->addWidget(m_centerStack);
     history->addWidget(m_details);
+    history->setCollapsible(1, false);
+    connect(history, &PanelSplitter::panelCollapsedChanged, this, [this](int index, bool collapsed) {
+        if (m_foldingPanel) {
+            return;
+        }
+        if (index == 0) {
+            m_refsVisible = !collapsed;
+            m_refsHiddenForDiff = false;
+            if (m_refsAction && m_refsAction->isChecked() == collapsed) {
+                const QSignalBlocker block(m_refsAction);
+                m_refsAction->setChecked(!collapsed);
+            }
+        } else if (m_detailsAction && m_detailsAction->isChecked() == collapsed) {
+            const QSignalBlocker block(m_detailsAction);
+            m_detailsAction->setChecked(!collapsed);
+        }
+    });
     history->setStretchFactor(0, 1);
     history->setStretchFactor(1, 4);
     history->setStretchFactor(2, 3);
@@ -2027,11 +2083,12 @@ void MainWindow::applyPanels() {
     m_lastFingerprint = repositoryFingerprint();
 
     const RepoInfo info = m_session->info();
+    const std::vector<RefInfo> refs = m_session->refs();
     m_refModel->setHeadBranch(QString::fromStdString(info.headBranch));
     refreshStashes();
     refreshWorktrees();
     refreshSubmodules();
-    m_refModel->rebuild(m_session->refs());
+    m_refModel->rebuild(refs);
 
     // Visibility decides which commits the walk reaches, so it has to be handed
     // to the model before the labels are read back off the refs.
@@ -2041,8 +2098,13 @@ void MainWindow::applyPanels() {
     updateRemotePicker();
     updateSyncActions();
     // Labels and their colours follow the refs, and the refs change on every
-    // fetch, merge and branch operation.
-    m_commitModel->refreshRefs();
+    // fetch, merge and branch operation. A move nobody reloaded the history for —
+    // a stash, a commit or checkout made in a terminal — reloads it here.
+    const quint64 generation = m_commitModel->generation();
+    const bool refsMoved = syncHistoryWithRefs(info, refs);
+    if (refsMoved && m_commitModel->generation() == generation) {
+        m_commitModel->refreshRefs();
+    }
     // The working tree rides at the top of the graph as a "// WIP" row: a
     // synthetic row, rebuilt from status every time the refs are. Every dirty
     // worktree gets one, so a change waiting in another checkout is visible here.
@@ -2121,7 +2183,11 @@ void MainWindow::applyPanels() {
         }
     } else {
         m_stack->setCurrentIndex(kHistoryPage);
-        showWorkingTreeChanges(changes);
+        // A refresh brings the working tree up to date, but does not take the reader
+        // away from the commit or comparison they are reading.
+        if (m_selectedCommitId.isEmpty() && m_compareBase.isEmpty()) {
+            showWorkingTreeChanges(changes);
+        }
         refreshStatusBar(changes);
     }
     // The branch commands are per-branch, so the palette's list and the keymap's
@@ -3298,8 +3364,10 @@ void MainWindow::showDiffPage() {
         return;
     }
     m_centerStack->setCurrentWidget(m_diffView);
-    if (m_refsVisible && m_refPanel && !m_refPanel->isHidden()) {
-        m_refPanel->setVisible(false);
+    if (m_refsVisible && m_history && !m_history->isPanelCollapsed(0)) {
+        m_foldingPanel = true;
+        m_history->setPanelCollapsed(0, true);
+        m_foldingPanel = false;
         m_refsHiddenForDiff = true;
     }
 }
@@ -3311,7 +3379,9 @@ void MainWindow::showGraphPage() {
     m_centerStack->setCurrentWidget(m_commitView);
     if (m_refsHiddenForDiff) {
         // Only undo what the diff did: a rail the reader hid stays hidden.
-        m_refPanel->setVisible(m_refsVisible);
+        m_foldingPanel = true;
+        m_history->setPanelCollapsed(0, !m_refsVisible);
+        m_foldingPanel = false;
         m_refsHiddenForDiff = false;
     }
 }
@@ -3324,14 +3394,16 @@ bool MainWindow::refsPanelVisible() const {
     // isHidden(), not isVisible(): a widget in a window that has not been shown yet
     // reports "not visible" while being perfectly present, and this answer is about
     // whether the rail is up, not about whether the window is on screen.
-    return m_refPanel && !m_refPanel->isHidden();
+    return m_refPanel && !m_refPanel->isHidden() && !(m_history && m_history->isPanelCollapsed(0));
 }
 
 void MainWindow::setRefsPanelVisible(bool visible) {
     m_refsVisible = visible;
     m_refsHiddenForDiff = false;
-    if (m_refPanel) {
-        m_refPanel->setVisible(visible);
+    if (m_history) {
+        m_foldingPanel = true;
+        m_history->setPanelCollapsed(0, !visible);
+        m_foldingPanel = false;
     }
     if (m_refsAction && m_refsAction->isChecked() != visible) {
         m_refsAction->setChecked(visible);
@@ -3406,26 +3478,86 @@ void MainWindow::refreshIfRepositoryChanged() {
         return;
     }
     m_lastFingerprint = fingerprint;
-
-    const QString shownFile = m_renderedPath;
-    const QString keep = m_selectedCommitId;
-    m_commitModel->reset();
+    // The refresh decides whether the history moved (`syncHistoryWithRefs`).
     refreshPanels();
-    if (!keep.isEmpty()) {
-        selectCommit(keep);
-    }
-    if (!shownFile.isEmpty()) {
-        renderFile(shownFile, m_details && m_details->showingWorkingTree(), m_renderedStaged);
-    }
     setStatus(QStringLiteral("Repository changed — refreshed."));
 }
 
-void MainWindow::onRepositoryFilesChanged() {
-    if (!m_session->isOpen() || m_syncRunning || m_maintenanceRunning) {
+bool MainWindow::syncHistoryWithRefs(const RepoInfo& info, const std::vector<RefInfo>& refs) {
+    RepoContext* context = active();
+    if (!context || !m_session->isOpen()) {
+        return true;
+    }
+    std::uint64_t digest = 1469598103934665603ULL;
+    const auto mix = [&digest](const std::string& text) {
+        for (const unsigned char c : text) {
+            digest = (digest ^ c) * 1099511628211ULL;
+        }
+        digest = (digest ^ 0xffU) * 1099511628211ULL;
+    };
+    mix(info.headBranch);
+    mix(info.headId);
+    for (const RefInfo& ref : refs) {
+        mix(ref.fullName);
+        mix(ref.target);
+    }
+    const bool known = context->historyDigestKnown;
+    const bool moved = known && context->historyDigest != digest;
+    const bool reloadedSince = context->historyGeneration != m_commitModel->generation();
+    context->historyDigest = digest;
+    context->historyDigestKnown = true;
+    if (moved && !reloadedSince) {
+        reloadHistory();
+    }
+    context->historyGeneration = m_commitModel->generation();
+    return !known || moved;
+}
+
+void MainWindow::reloadHistory() {
+    m_restoreCommit = m_selectedCommitId;
+    m_restoreWip = m_selectedCommitId.isEmpty() && m_details && m_details->showingWorkingTree();
+    m_commitModel->reset();
+    restoreSelectionAfterReload();
+}
+
+void MainWindow::restoreSelectionAfterReload() {
+    if (m_restoreCommit.isEmpty() && !m_restoreWip) {
         return;
     }
+    const int row = m_restoreWip ? m_commitModel->wipRow()
+                                 : m_commitModel->rowForCommit(m_restoreCommit);
+    if (row < 0) {
+        // Only the first page is waited for: a commit that is not on it any more
+        // (amended away, or far down) is not worth paging the history for.
+        if (!m_commitModel->isLoading() && m_commitModel->realRowCount() > 0) {
+            m_restoreCommit.clear();
+            m_restoreWip = false;
+        }
+        return;
+    }
+    m_restoreCommit.clear();
+    m_restoreWip = false;
+    // Put back quietly: the panels already describe this commit, and selecting it
+    // through the signal would reload its files and its diff for nothing.
+    const QModelIndex index = m_commitModel->index(row, CommitModel::Message);
+    {
+        const QSignalBlocker block(m_commitView->selectionModel());
+        m_commitView->selectionModel()->setCurrentIndex(
+            index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    }
+    m_commitModel->setPathAnchorRow(row);
+    m_commitView->viewport()->update();
+}
+
+void MainWindow::onRepositoryFilesChanged(bool gitState) {
+    if (!m_session->isOpen() || m_syncRunning || m_maintenanceRunning || m_checkoutRunning) {
+        return;
+    }
+    // The refresh compares the refs with what the history was read for, and reloads
+    // the graph when they moved; a file saved in the work tree changes only the panels.
     refreshPanels();
-    setStatus(QStringLiteral("Working tree changed — refreshed."));
+    setStatus(gitState ? QStringLiteral("Repository changed — refreshed.")
+                       : QStringLiteral("Working tree changed — refreshed."));
 }
 
 void MainWindow::setStatus(const QString& text) {
@@ -3902,6 +4034,9 @@ void MainWindow::buildCommands() {
     add(QStringLiteral("view.branches"), QStringLiteral("Toggle Branches Panel"),
         QStringLiteral("View"), QKeySequence(QStringLiteral("Ctrl+B")), {},
         [this] { m_refsAction->setChecked(!m_refsAction->isChecked()); });
+    add(QStringLiteral("view.details"), QStringLiteral("Toggle Details Panel"),
+        QStringLiteral("View"), {}, {},
+        [this] { m_detailsAction->setChecked(!m_detailsAction->isChecked()); });
     add(QStringLiteral("view.graph"), QStringLiteral("Show Commit Graph"), QStringLiteral("View"),
         {}, {}, [this] { showGraphPage(); });
     add(QStringLiteral("view.conflicts"), QStringLiteral("Show Conflicts"), QStringLiteral("View"), {},

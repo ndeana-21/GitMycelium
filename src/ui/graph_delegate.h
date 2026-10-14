@@ -22,7 +22,7 @@ public:
     static int laneWidth() { return 26; }
     /// Inset of the first lane from the cell's left edge. A fixed distance, not a
     /// share of the cell: lane 0 must not move when the column is resized.
-    static int lanePadding() { return 12; }
+    static int lanePadding() { return 16; }
     static int nodeRadius() { return 11; }
 
     static int widthForLanes(int lanes);

@@ -208,6 +208,8 @@ public:
     int refTrackingFlags(const QString& shortName) const;
 
     QString headBranchName() const { return m_headBranch; }
+    /// Moves on with every `reset`: a page or a decision taken for an older history.
+    quint64 generation() const { return m_generation; }
 
     /// The id the checked-out branch points at, empty when that commit is not loaded.
     Oid headTipId() const;
@@ -239,6 +241,7 @@ private slots:
 private:
     void rebuildTipColors();
     void rebuildTipPriority();
+    bool isTrunk(const RefInfo& ref) const;
     void rebuildHighlight();
     /// Relabels the graph nodes the commit list cannot classify on its own: the
     /// working-tree rows, date separators and the tip of `refs/stash`.
@@ -279,6 +282,7 @@ private:
     QHash<QString, int> m_refTracking;
     std::unordered_map<std::string, int> m_tipColors;
     QString m_headBranch;
+    QString m_trunkBranch;
     QString m_focusedBranch;
     bool m_refIcons = true;
     CommitDateFormat m_dateFormat = CommitDateFormat::Iso;

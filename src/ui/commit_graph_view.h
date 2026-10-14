@@ -209,7 +209,7 @@ private:
     bool ghostBadgePill(int row, RefPill* out) const;
     void setHoveredRef(const QString& name);
     int rowAtViewportPos(const QPoint& pos) const;
-    /// The nearest row above `row` whose commit descends from it and carries labels, or -1.
+    /// The topmost labelled row on the line `row` is drawn on, or -1.
     int nearestLabelledChildRow(int row) const;
     void setHoveredRow(int row);
 

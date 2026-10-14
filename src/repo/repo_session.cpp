@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
 #include <iterator>
 #include <sstream>
 
@@ -199,6 +200,12 @@ std::shared_ptr<SessionSnapshot> RepoSession::readSnapshot() const {
         const std::string worktreeDir = workDir.empty() ? out->info.gitDir : workDir;
         if (!worktreeDir.empty()) {
             out->worktrees = WorktreeOps(worktreeDir).list(workDir);
+            for (const WorktreeEntry& entry : out->worktrees) {
+                WorktreeWip wip;
+                if (!entry.current && !entry.bare && linkedWorktreeWip(entry, &wip)) {
+                    out->linkedWip.push_back(std::move(wip));
+                }
+            }
         }
     } catch (const std::exception&) {
         return nullptr;
@@ -2234,56 +2241,84 @@ std::vector<WorktreeWip> RepoSession::worktreeWip(
                          return a.current && !b.current;
                      });
 
+    const auto cached = snapshot();
     for (const WorktreeEntry& entry : list) {
         if (entry.bare) {
             continue;
         }
         WorktreeWip wip;
-        wip.path = entry.path;
-        wip.name = entry.name;
-        wip.head = entry.head;
-        wip.current = entry.current;
         if (entry.current) {
+            wip.path = entry.path;
+            wip.name = entry.name;
+            wip.head = entry.head;
+            wip.current = true;
             wip.staged = currentStaged;
             wip.unstaged = currentUnstaged;
             wip.conflicted = currentConflicted;
             wip.rebaseOpen = rebaseOpen;
-        } else {
-            const ProcessResult result = runGit({"status", "--porcelain"}, entry.path);
-            if (result.exitCode != 0) {
+            if (wip.staged == 0 && wip.unstaged == 0 && !wip.rebaseOpen) {
                 continue;
             }
-            std::istringstream stream(result.out);
-            std::string line;
-            while (std::getline(stream, line)) {
-                if (line.size() < 2) {
-                    continue;
-                }
-                // XY: X is the index, Y the working tree. `??` is untracked, which
-                // libgit2 reports as an unstaged change.
-                const char x = line[0];
-                const char y = line[1];
-                if (x == '?' && y == '?') {
-                    wip.unstaged += 1;
-                    continue;
-                }
-                if (x != ' ') {
-                    wip.staged += 1;
-                }
-                if (y != ' ') {
-                    wip.unstaged += 1;
-                }
-                if (x == 'U' || y == 'U' || (x == 'A' && y == 'A') || (x == 'D' && y == 'D')) {
-                    wip.conflicted += 1;
-                }
+        } else if (cached) {
+            const auto found =
+                std::find_if(cached->linkedWip.begin(), cached->linkedWip.end(),
+                             [&entry](const WorktreeWip& linked) { return linked.path == entry.path; });
+            if (found == cached->linkedWip.end()) {
+                continue;
             }
-        }
-        if (wip.staged == 0 && wip.unstaged == 0 && !(entry.current && wip.rebaseOpen)) {
+            wip = *found;
+        } else if (!linkedWorktreeWip(entry, &wip)) {
             continue;
         }
         out.push_back(std::move(wip));
     }
     return out;
+}
+
+bool RepoSession::linkedWorktreeWip(const WorktreeEntry& entry, WorktreeWip* out) {
+    // A prunable entry's directory is gone (or on another machine): there is no
+    // working tree to ask, and spawning git there only fails.
+    std::error_code missing;
+    if (entry.prunable || !std::filesystem::is_directory(entry.path, missing)) {
+        return false;
+    }
+    WorktreeWip wip;
+    wip.path = entry.path;
+    wip.name = entry.name;
+    wip.head = entry.head;
+    const ProcessResult result = runGit({"status", "--porcelain"}, entry.path);
+    if (result.exitCode != 0) {
+        return false;
+    }
+    std::istringstream stream(result.out);
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (line.size() < 2) {
+            continue;
+        }
+        // XY: X is the index, Y the working tree. `??` is untracked, which
+        // libgit2 reports as an unstaged change.
+        const char x = line[0];
+        const char y = line[1];
+        if (x == '?' && y == '?') {
+            wip.unstaged += 1;
+            continue;
+        }
+        if (x != ' ') {
+            wip.staged += 1;
+        }
+        if (y != ' ') {
+            wip.unstaged += 1;
+        }
+        if (x == 'U' || y == 'U' || (x == 'A' && y == 'A') || (x == 'D' && y == 'D')) {
+            wip.conflicted += 1;
+        }
+    }
+    if (wip.staged == 0 && wip.unstaged == 0) {
+        return false;
+    }
+    *out = std::move(wip);
+    return true;
 }
 
 namespace {
@@ -3127,6 +3162,18 @@ void RepoSession::requestCommitSearch(const QString& query, CommitSearchField fi
         }
         emit commitSearchFinished(result);
     });
+}
+
+QStringList RepoSession::ignoredPaths(const QString& workDir) {
+    QStringList out;
+    try {
+        for (const std::string& path : Repository::ignoredPaths(workDir.toStdString())) {
+            out << QString::fromStdString(path);
+        }
+    } catch (const std::exception&) {
+        // A failed spawn is "nothing known to be ignored": the watcher watches more.
+    }
+    return out;
 }
 
 } // namespace gk

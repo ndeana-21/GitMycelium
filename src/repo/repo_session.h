@@ -81,6 +81,9 @@ struct SessionSnapshot {
     std::vector<FileChange> status;
     std::vector<StashEntry> stashes;
     std::vector<WorktreeEntry> worktrees;
+    /// The linked worktrees' changes, one `git status` each, read here rather than
+    /// on every refresh the window applies.
+    std::vector<WorktreeWip> linkedWip;
     std::vector<SubmoduleEntry> submodules;
     std::vector<RemoteInfo> remotes;
     UpstreamInfo upstream;
@@ -109,6 +112,14 @@ class RepoSession : public QObject {
     Q_OBJECT
 
 public:
+    /// What git ignores in a work tree (`Repository::ignoredPaths`). Static: it runs
+    /// the binary in the directory and touches no session, so a watcher's worker can
+    /// ask it while the session is busy or gone.
+    static QStringList ignoredPaths(const QString& workDir);
+    /// A linked worktree's change counts (`git status` in it); false when it has
+    /// none, or its directory is not there to ask.
+    static bool linkedWorktreeWip(const WorktreeEntry& entry, WorktreeWip* out);
+
     static constexpr quint32 kPageSize = 500;
 
     explicit RepoSession(QObject* parent = nullptr);

@@ -65,6 +65,9 @@ public:
     /// The two halves of `status()`. The work tree's comes from the binary and needs
     /// no handle, so a caller holding the session lock can run it after releasing it.
     static std::vector<FileChange> worktreeStatus(const std::string& workDir);
+    /// What git ignores in the work tree, relative to it; a directory ignored whole
+    /// is one entry ending in '/'. Empty when git cannot say.
+    static std::vector<std::string> ignoredPaths(const std::string& workDir);
     std::vector<FileChange> submoduleStatus() const;
 
     /// Walks history newest-first. `skip` commits are dropped first.
@@ -488,6 +491,7 @@ private:
     /// The tips the history walk starts from, in the order git lists them for
     /// `--all`: every ref by name, then HEAD.
     std::vector<std::array<unsigned char, 20>> walkStarts(const HistoryFilter& filter) const;
+    std::string trunkBranch() const;
     /// The history walk kept between pages. Building one re-pushes every ref and
     /// counts children down to the depth it needs, which on a monorepo costs more
     /// than the page it returns; reusing it while the caller keeps asking from
@@ -496,6 +500,8 @@ private:
     mutable std::unique_ptr<TopoWalk> m_walk;
     /// The commit-graph the walk reads, kept with it: the walk holds positions in it.
     mutable std::unique_ptr<CommitGraph> m_walkGraph;
+    /// The stash tips the walk started from, drawn with their first parent only.
+    mutable std::vector<std::array<unsigned char, 20>> m_walkStashes;
     mutable HistoryFilter m_walkFilter;
     mutable std::size_t m_walkDelivered = 0;
     mutable bool m_walkValid = false;

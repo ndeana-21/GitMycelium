@@ -141,12 +141,24 @@ std::vector<RefPill> RefPillLayout::arrange(const QStringList& labels, const QVa
         }
     }
     const int branchCount = static_cast<int>(groups.size());
+    // One name per other branch: a local branch stands for its remote-tracking twin
+    // on the same commit (marked with the cloud), and the shown branch's twin is
+    // already the cloud on its own pill.
     QStringList collapsed;
+    QStringList collapsedWithRemote;
     for (const Group& group : groups) {
+        if (group.members.contains(bestBranch)) {
+            continue;
+        }
+        const int local = group.members.front();
+        const bool paired = kindAt(local) == RefKind::LocalBranch && group.members.size() > 1;
+        if (paired) {
+            collapsed << labels.at(local);
+            collapsedWithRemote << labels.at(local);
+            continue;
+        }
         for (const int index : group.members) {
-            if (index != bestBranch) {
-                collapsed << labels.at(index);
-            }
+            collapsed << labels.at(index);
         }
     }
 
@@ -157,6 +169,7 @@ std::vector<RefPill> RefPillLayout::arrange(const QStringList& labels, const QVa
     QVector<int> others;
     QVector<bool> shownRemote;
     QList<QStringList> shownCollapsed;
+    QList<QStringList> shownCollapsedRemote;
     for (int i = 0; i < labels.size(); ++i) {
         if (isBranchKind(kindAt(i))) {
             if (i != bestBranch) {
@@ -169,6 +182,7 @@ std::vector<RefPill> RefPillLayout::arrange(const QStringList& labels, const QVa
             others << (branchCount - 1);
             shownRemote << bestHasRemote;
             shownCollapsed << collapsed;
+            shownCollapsedRemote << collapsedWithRemote;
             continue;
         }
         shown << labels.at(i);
@@ -178,6 +192,7 @@ std::vector<RefPill> RefPillLayout::arrange(const QStringList& labels, const QVa
         others << 0;
         shownRemote << false;
         shownCollapsed << QStringList{};
+        shownCollapsedRemote << QStringList{};
     }
 
     const int total = shown.size();
@@ -207,6 +222,7 @@ std::vector<RefPill> RefPillLayout::arrange(const QStringList& labels, const QVa
         pill.kind = static_cast<RefKind>(shownKinds.at(i).toInt());
         pill.hasRemote = shownRemote.at(i);
         pill.collapsedNames = shownCollapsed.at(i);
+        pill.collapsedWithRemote = shownCollapsedRemote.at(i);
 
         pill.isHead = !headBranch.isEmpty() && pill.shortName == headBranch;
 

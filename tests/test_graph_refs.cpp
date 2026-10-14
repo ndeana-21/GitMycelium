@@ -55,6 +55,7 @@ private slots:
     void anIconlessArrangementGivesTheWidthBackToTheName();
     void branchesOnOneCommitCollapseIntoOnePill();
     void aLocalBranchAndItsRemoteShareOnePill();
+    void aFoldedBranchStandsForItsRemoteTwin();
     void theCheckedOutBranchNamesThePill();
     void theFocusedBranchNamesThePill();
     void aLocalBranchBeatsARemoteOne();
@@ -229,9 +230,9 @@ void GraphAndRefsTest::branchesOnOneCommitCollapseIntoOnePill() {
     QVERIFY(pills.at(0).hasRemote);
     // The name itself stays whole: it is what a drag carries and a click resolves.
     QCOMPARE(pills.at(0).shortName, QStringLiteral("main"));
-    // Both folded names are there for the hover expansion.
-    QCOMPARE(pills.at(0).collapsedNames,
-             QStringList({QStringLiteral("origin/main"), QStringLiteral("feature/x")}));
+    // The other branch is there for the hover expansion; `origin/main` is not, it is
+    // the cloud on this pill.
+    QCOMPARE(pills.at(0).collapsedNames, QStringList({QStringLiteral("feature/x")}));
 }
 
 void GraphAndRefsTest::aLocalBranchAndItsRemoteShareOnePill() {
@@ -245,7 +246,21 @@ void GraphAndRefsTest::aLocalBranchAndItsRemoteShareOnePill() {
     QVERIFY(pills.at(0).hasRemote);
     QVERIFY(pills.at(0).iconRect.isValid());
     QVERIFY(pills.at(0).remoteRect.isValid());
-    QCOMPARE(pills.at(0).collapsedNames, QStringList({QStringLiteral("origin/main")}));
+    QVERIFY(pills.at(0).collapsedNames.isEmpty());
+}
+
+void GraphAndRefsTest::aFoldedBranchStandsForItsRemoteTwin() {
+    const QRect cell(0, 0, 220, 30);
+    const auto pills = RefPillLayout::arrange(
+        {QStringLiteral("main"), QStringLiteral("feature/x"), QStringLiteral("origin/feature/x"),
+         QStringLiteral("origin/other")},
+        {0, 1, 1, 2}, {0, 0, 1, 1}, {}, cell, QStringLiteral("main"));
+
+    QCOMPARE(pills.size(), static_cast<std::size_t>(1));
+    QCOMPARE(pills.at(0).text, QStringLiteral("main +2"));
+    QCOMPARE(pills.at(0).collapsedNames,
+             QStringList({QStringLiteral("feature/x"), QStringLiteral("origin/other")}));
+    QCOMPARE(pills.at(0).collapsedWithRemote, QStringList({QStringLiteral("feature/x")}));
 }
 
 void GraphAndRefsTest::theCheckedOutBranchNamesThePill() {

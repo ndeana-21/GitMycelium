@@ -44,6 +44,9 @@ class QComboBox;
 class QMenu;
 class QTimer;
 class QTabBar;
+namespace gk {
+class PanelSplitter;
+}
 
 namespace gk {
 class Skeleton;
@@ -454,6 +457,11 @@ private:
     /// deep commit does not spin the GUI.
     void revealCommit(const QString& oid);
     void tryRevealCommit();
+    /// Re-reads the history and puts the selection back once its row is loaded again.
+    void reloadHistory();
+    void restoreSelectionAfterReload();
+    /// True when the refs or HEAD moved since the last refresh (or nothing was known).
+    bool syncHistoryWithRefs(const RepoInfo& info, const std::vector<RefInfo>& refs);
     QWidget* buildReferencePanel();
     void buildCommitPanel();
     void buildChangesPanel();
@@ -661,7 +669,7 @@ private:
     /// Runs on a worker thread; the graph shows the busy sweep.
     void runMaintenance(MaintenanceTask task);
     void onMaintenanceFinished(bool ok, const QString& task, const QString& output);
-    void onRepositoryFilesChanged();
+    void onRepositoryFilesChanged(bool gitState);
     void copyTextToClipboard(const QString& text, const QString& what);
 
     void startSync(SyncKind kind, bool silent = false);
@@ -768,6 +776,13 @@ private:
         bool opened = false;
         bool primed = false; ///< the first page has been requested already
         bool panelsShown = false; ///< a refresh has been applied to the window at least once
+        /// The refs and HEAD the history was last read for, and the model generation
+        /// that read had: a refresh that finds them moved reloads the graph, unless the
+        /// model was reset since (the operation that moved them already did).
+        std::uint64_t historyDigest = 0;
+        bool historyDigestKnown = false;
+        bool diffPageShown = false; ///< the file view was up when the tab was left
+        quint64 historyGeneration = 0;
         /// The page is sticky while an operation is unfinished, so leaving it has to be
         /// remembered or the next refresh drags the reader back.
         bool conflictPageDismissed = false;
@@ -885,6 +900,11 @@ private:
     /// The middle column: the graph, or the diff that replaces it.
     QStackedWidget* m_centerStack = nullptr;
     QAction* m_refsAction = nullptr;
+    QAction* m_detailsAction = nullptr;
+    PanelSplitter* m_history = nullptr;
+    /// Set while the window folds or unfolds a panel itself (the diff page hides the
+    /// branch rail), so that is not mistaken for the reader's choice.
+    bool m_foldingPanel = false;
     /// Whether the reader wants the rail, as opposed to whether it is showing: opening a
     /// diff hides it without changing the preference.
     bool m_refsVisible = true;
@@ -903,6 +923,10 @@ private:
     QDockWidget* m_searchDock = nullptr;
     /// Cleared once the target is found or the history is exhausted.
     QString m_revealTarget;
+    /// What `reloadHistory` is waiting to select again: a commit id, or the
+    /// working-tree row when `m_restoreWip` is set.
+    QString m_restoreCommit;
+    bool m_restoreWip = false;
     int m_revealPages = 0;
 
     RefTreeView* m_refView = nullptr;

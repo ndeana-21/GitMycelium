@@ -133,6 +133,8 @@ add_library(gmc_ui STATIC
     ui/working_tree_panel.h
     ui/grip_splitter.cpp
     ui/grip_splitter.h
+    ui/panel_splitter.cpp
+    ui/panel_splitter.h
     ui/file_history_dialog.cpp
     ui/reflog_dialog.cpp
     ui/reflog_dialog.h
@@ -213,6 +215,10 @@ add_library(gmc_ui STATIC
     ui/update_dialog.h
 )
 target_link_libraries(gmc_ui PUBLIC gmc_model gmc_repo gmc_theme gmc_update Qt6::Widgets)
+if(APPLE)
+    # FSEvents, for the repository watcher.
+    target_link_libraries(gmc_ui PUBLIC "-framework CoreServices")
+endif()
 
 add_executable(gitmycelium app/main.cpp theme/icons.qrc
     ${CMAKE_SOURCE_DIR}/packaging/app_icon.qrc)

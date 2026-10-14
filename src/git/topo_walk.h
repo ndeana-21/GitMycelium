@@ -38,7 +38,10 @@ public:
 
     TopoWalk(const CommitGraph* graph, Lookup lookup);
 
-    void start(const std::vector<RawOid>& tips);
+    /// `firstParentOnly` are commits whose other parents are not history: a stash
+    /// is a merge of HEAD with the index (and the untracked files), and those
+    /// helper commits are not drawn.
+    void start(const std::vector<RawOid>& tips, const std::vector<RawOid>& firstParentOnly = {});
     bool next(RawOid& id);
 
     /// Commits the graph did not hold, which the walk had to read one by one.
@@ -71,6 +74,7 @@ private:
     std::uint64_t generationOf(std::uint32_t node) const;
     std::int64_t timeOf(std::uint32_t node) const;
     const std::vector<std::uint32_t>& parentsOf(std::uint32_t node);
+    const std::vector<std::uint32_t>& allParentsOf(std::uint32_t node);
     void pushIndegree(std::uint32_t node);
     void computeIndegreesToDepth(std::uint64_t cutoff);
     void expand(std::uint32_t node);
@@ -91,6 +95,7 @@ private:
     std::vector<std::uint32_t> m_topo;
     std::uint64_t m_minGeneration = kInfinity;
     std::vector<std::uint32_t> m_parentScratch;
+    std::vector<std::uint32_t> m_firstParentOnly;
 };
 
 } // namespace gk

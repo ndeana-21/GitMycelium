@@ -173,6 +173,9 @@ struct RepoInfo {
     std::string commonDir;
     std::string workDir; ///< empty for bare repositories
     std::string headBranch;
+    /// The branch the others are cut from: what `origin/HEAD` names, else the first
+    /// of `main`, `master`, `trunk` that exists. A short local name, empty if none.
+    std::string trunkBranch;
     Oid headId;
     bool detached = false;
     bool bare = false;
