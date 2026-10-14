@@ -87,7 +87,6 @@ bool parseHunkHeader(const std::string& line, DiffHunk& hunk) {
     return true;
 }
 
-/// Strips the diff separator and returns the path, or empty when the marker is absent.
 std::string pathAfter(const std::string& line, const char* marker, const std::string& prefix) {
     if (!startsWith(line, marker)) {
         return {};

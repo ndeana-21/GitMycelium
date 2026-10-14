@@ -6,9 +6,6 @@ class QLineEdit;
 
 namespace gk {
 
-/// Collects where a new repository should live and what its first branch is called.
-/// It only gathers the answers — the window creates the repository, because the
-/// dialog has no session.
 class CreateRepositoryDialog : public QDialog {
     Q_OBJECT
 

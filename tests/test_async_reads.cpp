@@ -115,7 +115,6 @@ void AsyncReadsTest::theSnapshotAnswersUntilAWrite() {
     QString error;
     QVERIFY2(session.createBranch(QStringLiteral("topic"), QStringLiteral("HEAD"), &error),
              qPrintable(error));
-    // The write retired it: the next read goes to the repository, not the snapshot.
     QVERIFY(!session.snapshot());
     QVERIFY(hasBranch(session.refs(), "topic"));
     session.primeSnapshot();
@@ -128,7 +127,6 @@ void AsyncReadsTest::aRetiredSnapshotIsNotServed() {
     QVERIFY(session.open(m_repo));
     session.primeSnapshot();
     QVERIFY(session.snapshot());
-    // Another client commits; the session only learns of it when asked to forget.
     QVERIFY(git(m_repo, {"commit", "-qam", "third"}));
     QCOMPARE(session.status().size(), std::size_t{1});
     session.invalidateSnapshot();
@@ -173,7 +171,6 @@ void AsyncReadsTest::aNewTabShowsSkeletonsUntilItsSnapshotLands() {
     window.setHeadless(true);
     window.setAsyncReadsEnabled(true);
     QVERIFY(window.openRepository(m_repo));
-    // Nothing has been read on the GUI thread yet: every panel still waits.
     const QStringList before = window.loadingStateForDiagnostics();
     QVERIFY2(before.contains(QStringLiteral("refs: loading")), qPrintable(before.join(", ")));
     QVERIFY2(before.contains(QStringLiteral("branch: loading")), qPrintable(before.join(", ")));
@@ -195,7 +192,6 @@ void AsyncReadsTest::aCommitsFilesLoadBehindASkeleton() {
 
     auto* graph = window.findChild<CommitGraphView*>();
     QVERIFY(graph && graph->model());
-    // Row 0 is the working tree; row 1 the newest commit.
     graph->setCurrentIndex(graph->model()->index(1, 0));
     QVERIFY2(window.loadingStateForDiagnostics().contains(QStringLiteral("files: loading")),
              qPrintable(window.loadingStateForDiagnostics().join(", ")));
@@ -285,7 +281,6 @@ void AsyncReadsTest::anEditMadeOutsideReachesTheOpenDiff() {
     QTRY_VERIFY_WITH_TIMEOUT(allReady(window.loadingStateForDiagnostics()), 5000);
     auto* diff = window.findChild<DiffView*>();
     QVERIFY(diff);
-    // The working tree's one change is chosen and shown.
     QTRY_VERIFY_WITH_TIMEOUT(diffShows(diff, "dirty"), 5000);
 
     // Saved by another program, in place: the watcher sees the content change, the
@@ -311,7 +306,6 @@ void AsyncReadsTest::aStashMadeOutsideReloadsTheGraph() {
     const QString stash = revParse(m_repo, QStringLiteral("refs/stash"));
     QVERIFY(!stash.isEmpty());
     QTRY_VERIFY_WITH_TIMEOUT(model->rowForCommit(stash) >= 0, 8000);
-    // The working tree is clean now, so its row has gone with the change.
     QTRY_COMPARE_WITH_TIMEOUT(model->wipRow(), -1, 5000);
 }
 
@@ -324,7 +318,6 @@ void AsyncReadsTest::aStashMadeInTheWindowReloadsTheGraph() {
     QTRY_VERIFY_WITH_TIMEOUT(model->rowForCommit(revParse(m_repo, QStringLiteral("HEAD"))) >= 0,
                              5000);
 
-    // The Commit Panel's stash form, as its button sends it.
     auto* panel = window.findChild<WorkingTreePanel*>();
     QVERIFY(panel);
     emit panel->stashAllRequested(QStringLiteral("from the window"));
@@ -348,13 +341,10 @@ void AsyncReadsTest::aTabSwitchDoesNotKeepTheOtherTabsFile() {
     QVERIFY(diff);
     QTRY_COMPARE_WITH_TIMEOUT(diff->document().path, QStringLiteral("f.txt"), 5000);
 
-    // The second repository is clean: nothing of its own to show, and certainly not
-    // the first one's file.
     QVERIFY(window.openRepository(other));
     QTRY_VERIFY_WITH_TIMEOUT(diff->document().path != QStringLiteral("f.txt"), 5000);
     QVERIFY(diff->document().diff.hunks.empty());
 
-    // Back on the first tab, its file is there again.
     window.tabsForDiagnostics(QStringLiteral("activate"), {QStringLiteral("0")});
     QTRY_COMPARE_WITH_TIMEOUT(diff->document().path, QStringLiteral("f.txt"), 5000);
     QVERIFY(diffShows(diff, "dirty"));

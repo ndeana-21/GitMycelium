@@ -33,9 +33,6 @@ const QStringList kIdentity{"-c", "user.name=Test", "-c", "user.email=test@local
 
 } // namespace
 
-/// Conflict prevention against the branch's base: which branch that is, and whether
-/// merging it in would conflict. Read-only throughout — the check runs before the
-/// reader has decided anything.
 class ConflictPreventionTest : public QObject {
     Q_OBJECT
 
@@ -122,7 +119,6 @@ void ConflictPreventionTest::aDivergedBaseIsReportedAsAConflict() {
     QCOMPARE(preview.conflictedPaths.size(), std::size_t(1));
     QCOMPARE(QString::fromStdString(preview.conflictedPaths.front()), QStringLiteral("f.txt"));
 
-    // The check is advisory: it must not have touched the index or the working tree.
     QCOMPARE(session.conflicts().size(), std::size_t(0));
 }
 

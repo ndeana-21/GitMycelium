@@ -6,7 +6,6 @@
 
 namespace gk {
 
-/// One repository the reader used recently, and when.
 struct RecentRepository {
     QString path;       ///< canonical checkout path
     QString name;       ///< directory name, for display
@@ -25,14 +24,10 @@ public:
 
     RecentRepositories();
 
-    /// Reads the stored list. A missing or unreadable value is not an error: it
-    /// means nothing has been opened yet.
     void load();
 
     const QVector<RecentRepository>& entries() const { return m_entries; }
 
-    /// Records that `path` was used at `when` (now by default): moves it to the
-    /// front and drops the oldest beyond the cap.
     void touch(const QString& path, const QString& name,
                const QDateTime& when = QDateTime::currentDateTime());
 

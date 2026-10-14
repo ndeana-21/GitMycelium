@@ -33,7 +33,6 @@ namespace gk {
 namespace {
 
 constexpr int kSettleMs = 300;
-/// A file written without pause (a log, a build) still refreshes this often.
 constexpr int kMaxWaitMs = 2000;
 constexpr int kMaxFallbackDirectories = 512;
 
@@ -66,7 +65,6 @@ QString canonicalOr(const QString& path) {
     return canonical.isEmpty() ? QDir::cleanPath(path) : canonical;
 }
 
-/// What git ignores, as absolute paths: whole directories (prefixes) and files.
 struct IgnoredSet {
     QStringList directories; ///< each ending in '/'
     QSet<QString> files;
@@ -163,7 +161,6 @@ struct RepoWatcher::Native {
         return true;
     }
 
-    /// Every directory under `root`, `.git` and what git ignores left out.
     static void addTree(State& state, const std::string& root, bool git) {
         std::vector<std::string> pending{root};
         while (!pending.empty() && !state.cancelled.load()) {
@@ -538,7 +535,6 @@ void RepoWatcher::setRoots(const QString& workDir, const QString& gitDir,
     const QString work = canonicalOr(workDir);
     const QString git = canonicalOr(gitDir);
     const QString common = canonicalOr(commonDir.isEmpty() ? gitDir : commonDir);
-    // A tab switch hands the same roots back; the scan is not worth repeating.
     if ((m_native || m_usingFallback) && work == m_workDir && git == m_gitDir &&
         common == m_commonDir) {
         return;

@@ -7,19 +7,12 @@ class QMouseEvent;
 
 namespace gk {
 
-/// A slim overview of a diff, beside the viewer: one tick per changed line, and a
-/// translucent band for the part currently on screen. Clicking or dragging scrolls the
-/// viewer to that place.
-///
-/// It holds no document; the viewer hands it the marks and the viewport band, and it
-/// reports where the reader scrubbed. That keeps the painting and the diff model apart.
 class DiffMinimap : public QWidget {
     Q_OBJECT
 
 public:
     explicit DiffMinimap(QWidget* parent = nullptr);
 
-    /// One entry per rendered diff line: true where the line is a change.
     void setMarks(const QVector<bool>& changed);
     /// The visible band, as fractions of the whole: `start` from the top, `size` its
     /// length. Both in 0..1.
@@ -29,7 +22,6 @@ public:
     QSize sizeHint() const override;
 
 signals:
-    /// The reader scrubbed to this fraction (0 at the top, 1 at the bottom).
     void scrubbed(qreal fraction);
 
 protected:

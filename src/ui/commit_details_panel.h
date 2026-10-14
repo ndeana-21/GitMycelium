@@ -25,19 +25,6 @@ class Skeleton;
 class CommitFilesModel;
 class WorkingTreePanel;
 
-/// One commit, in full: what it says, who wrote it and when, how much it changed,
-/// and the files it touched — as a flat list of paths or as a folder tree.
-///
-/// The message is editable only where editing it is honest: on the commit HEAD
-/// points at, where a change is an amend. Rewording an older commit rebuilds
-/// everything after it, and a text field that silently rewrites history is worse
-/// than one that says it cannot.
-///
-/// In working-tree mode the panel becomes the Commit Panel (`WorkingTreePanel`): the
-/// unstaged and staged lists, and the Commit and Stash forms. Both faces share one
-/// stack, so the panel has one minimum size whichever is showing.
-/// It never touches the repository itself — it says what the reader asked for and
-/// the window, which owns the session, carries it out.
 class CommitDetailsPanel : public QWidget {
     Q_OBJECT
 
@@ -52,11 +39,8 @@ public:
     void showComparison(const QString& base, const QString& target,
                         const std::vector<ChangedFile>& files, const QString& label = {});
     void showWorkingTree(const std::vector<FileChange>& changes);
-    /// The commit's header is known before its files are: the list shows skeleton
-    /// rows until `showCommit` brings them.
     void setFilesLoading(bool loading);
     bool filesLoading() const;
-    /// Skeleton rows in the Commit Panel while the status is being read.
     void setWorkingTreeLoading(bool loading);
     bool workingTreeLoading() const;
     void setWorkingTreeBranch(const QString& name, const QColor& color);
@@ -68,14 +52,9 @@ public:
     bool showingWorkingTree() const { return m_workingTree; }
     bool comparing() const { return m_comparing; }
 
-    /// Re-applies the theme's sizes and colours to the bits that are not styled
-    /// by the global stylesheet: the avatar's side and the dim labels. Called by
-    /// the window after a theme or zoom change.
     void refreshTheme();
 
-    /// Path of the selected file, or empty when a folder or nothing is selected.
     QString selectedPath() const;
-    /// Every selected file row's path, for staging a multi-selection at once.
     QStringList selectedPaths() const;
     void clearCommitMessage();
 
@@ -88,15 +67,9 @@ public:
     bool pushAfterCommit() const;
     void clearStashMessage();
     QStringList stagedPaths() const;
-    /// The "Sign this commit" switch, and its value. The panel only reports it; the
-    /// window persists the choice and reads it back when the commit is made.
     bool signCommit() const;
     void setSignCommit(bool on);
-    /// Puts the caret in the message field, for the command palette's "Go to
-    /// Commit Message" — a keyboard way to start writing without a mouse.
     void focusCommitMessage();
-    /// Selects the first file, which is what the diff viewer should show when a
-    /// commit is picked in the graph.
     void selectFirstFile();
     QString firstFilePath() const;
     /// Whether that first row is a staged change; a working-tree path can sit in
@@ -126,13 +99,8 @@ signals:
     void discardAllRequested();
     void commitRequested(QString message);
     void amendToggled(bool on);
-    /// The Stash form: stash every change, untracked files too, under `message`.
     void stashAllRequested(QString message);
-    /// The reader toggled "Sign". The window writes `commit.gpgsign`, so the choice
-    /// survives the commit and is visible in Preferences too.
     void signChanged(bool on);
-    /// The reader asked to credit co-authors: the window opens the picker and writes
-    /// the result back through setCommitMessage, so the panel stays free of git.
     void coauthorsRequested();
     /// The file context menu asked to ignore the selection. `scope` is "gitignore"
     /// or "exclude"; `kind` is "file", "ext" or "dir".

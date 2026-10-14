@@ -99,7 +99,6 @@ void SquashMergeTest::buildConflict() {
     QVERIFY(git(m_path, {"add", "a.txt"}));
     QVERIFY(git(m_path, identity() + QStringList{"commit", "-q", "-m", "feature"}));
 
-    // Main advances too, so feature and main truly diverge and squash conflicts.
     QVERIFY(git(m_path, {"checkout", "-q", "main"}));
     QVERIFY(writeFile(m_path, "a.txt", "line1\nMAIN\nline3\n"));
     QVERIFY(git(m_path, {"add", "a.txt"}));
@@ -172,12 +171,10 @@ void SquashMergeTest::theConflictPageFinishesASquashAsAnOrdinaryCommit() {
     // conflict is on screen and refuses to finish.
     view.reload();
 
-    // The page's own finish path, driven as the button would.
     QVERIFY(QMetaObject::invokeMethod(&view, "completeMerge"));
     QVERIFY(!session.squashInProgress());
     QVERIFY(!session.mergeInProgress());
 
-    // One parent — a squash is not a merge commit — and the branch moved forward.
     const QString parents = gitOut(m_path, {"rev-list", "--parents", "-n1", "HEAD"});
     QCOMPARE(parents.split(QLatin1Char(' '), Qt::SkipEmptyParts).size(), 2); // HEAD + one parent
     QVERIFY(gitOut(m_path, {"rev-parse", "HEAD"}) != headBefore);
@@ -204,14 +201,12 @@ void SquashMergeTest::abortingASquashResetsAndClearsTheMarker() {
 }
 
 void SquashMergeTest::squashingAnUpToDateBranchStagesNothing() {
-    // main already has feature's tip? No — make a branch whose tip is an ancestor.
     QVERIFY(git(m_path, {"checkout", "-q", "main"}));
     RepoSession session;
     QVERIFY(session.open(m_path));
 
     SquashResult result;
     QString error;
-    // Squashing HEAD's own branch is a no-op git refuses to make a change for.
     QVERIFY2(session.squashMerge(QStringLiteral("main"), &result, &error), qPrintable(error));
     QCOMPARE(result.status, SquashStatus::UpToDate);
     QVERIFY(!session.squashInProgress());

@@ -11,7 +11,6 @@ struct RemoteInfo {
     std::string pushUrl;
 };
 
-/// Outcome of a network operation run through the `git` binary.
 struct SyncResult {
     bool ok = false;
     int exitCode = -1;
@@ -44,7 +43,6 @@ public:
     std::vector<RemoteInfo> remotes() const;
 
     SyncResult fetch(const std::string& remote, bool prune) const;
-    /// Every remote in one call (`git fetch --all`).
     SyncResult fetchAll(bool prune) const;
     SyncResult pull(const std::string& remote, const std::string& branch, PullMode mode) const;
     SyncResult push(const std::string& remote, const std::string& branch, bool setUpstream,
@@ -53,8 +51,6 @@ public:
     /// name when a branch and a tag share it.
     SyncResult pushTag(const std::string& remote, const std::string& tag) const;
     SyncResult pushTags(const std::string& remote) const;
-    /// `git push <remote> :refs/tags/<tag>` — the colon form deletes the ref on the
-    /// remote.
     SyncResult deleteRemoteTag(const std::string& remote, const std::string& tag) const;
 
     const std::string& workDir() const { return m_workDir; }

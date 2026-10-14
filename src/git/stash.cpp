@@ -22,7 +22,6 @@ SyncResult toSyncResult(const ProcessResult& process) {
     return result;
 }
 
-/// `stash@{4}` -> 4, or `fallback` when the selector is not one.
 int indexFromSelector(const std::string& selector, int fallback) {
     const std::size_t open = selector.find('{');
     const std::size_t close = selector.find('}');

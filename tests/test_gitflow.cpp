@@ -107,7 +107,6 @@ void GitFlowTest::startFeatureBranchesFromDevelop() {
              qPrintable(error));
 
     QCOMPARE(gitOut(m_path, {"rev-parse", "--abbrev-ref", "HEAD"}), QStringLiteral("feature/login"));
-    // No commit made yet, so the topic branch sits exactly on develop.
     QCOMPARE(gitOut(m_path, {"rev-parse", "HEAD"}),
              gitOut(m_path, {"rev-parse", "develop"}));
 }
@@ -129,7 +128,6 @@ void GitFlowTest::finishFeatureMergesIntoDevelopAndDeletesTheBranch() {
     QCOMPARE(gitOut(m_path, {"rev-parse", "--abbrev-ref", "HEAD"}), QStringLiteral("develop"));
     QVERIFY(!git(m_path, {"rev-parse", "--verify", "--quiet", "refs/heads/feature/login"}));
     QVERIFY(git(m_path, {"merge-base", "--is-ancestor", "HEAD", "develop"}));
-    // A merge commit, not a fast-forward: the branch point is kept.
     QVERIFY(gitOut(m_path, {"log", "-1", "--format=%P", "develop"}).contains(QLatin1Char(' ')));
 }
 

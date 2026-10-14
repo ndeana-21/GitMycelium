@@ -23,7 +23,6 @@ struct RefMeta {
     bool local = true; ///< false for a remote-tracking branch
 };
 
-/// Branch tip metadata, delegated to the `git` binary in one call.
 class RefMetaOps {
 public:
     explicit RefMetaOps(std::string workDir);

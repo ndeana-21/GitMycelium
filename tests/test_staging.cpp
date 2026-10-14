@@ -145,7 +145,6 @@ void StagingTest::stagingAModifiedFileShowsItAsStaged() {
     QVERIFY2(m_session->stageFile(QStringLiteral("a.txt"), &error), qPrintable(error));
 
     QVERIFY(hasStatus(QStringLiteral("a.txt"), true, ChangeKind::Modified));
-    // git must agree, or "staged" is only our opinion.
     QCOMPARE(gitOut(m_path, {"diff", "--cached", "--name-only"}).trimmed(),
              QStringLiteral("a.txt"));
 }
@@ -202,7 +201,6 @@ void StagingTest::unstagingAModifiedFileReturnsItToUnstaged() {
 
     QVERIFY(hasStatus(QStringLiteral("a.txt"), false, ChangeKind::Modified));
     QCOMPARE(gitOut(m_path, {"diff", "--cached", "--name-only"}).trimmed(), QString());
-    // The working-tree content survives an unstage: it was never the index's to lose.
     QCOMPARE(readFile(m_path, QStringLiteral("a.txt")), QStringLiteral("two\n"));
 }
 
@@ -233,7 +231,6 @@ void StagingTest::stageAllTakesNewModifiedAndDeletedAtOnce() {
     QVERIFY2(m_session->stageAll(&error), qPrintable(error));
 
     QCOMPARE(gitOut(m_path, {"status", "--porcelain"}).trimmed().isEmpty(), false);
-    // Every change is staged, so the unstaged side of status is empty.
     QCOMPARE(gitOut(m_path, {"diff", "--name-only"}).trimmed(), QString());
     const QString staged = gitOut(m_path, {"diff", "--cached", "--name-status"});
     QVERIFY(staged.contains(QStringLiteral("added.txt")));
@@ -282,7 +279,6 @@ void StagingTest::committingTheIndexCreatesACommitGitAgreesWith() {
     QCOMPARE(QString::fromStdString(m_session->info().headId), newId);
     QVERIFY(newId != base);
     QCOMPARE(gitOut(m_path, {"log", "-1", "--format=%s"}).trimmed(), QStringLiteral("add b"));
-    // The parent is the base commit, and b.txt is really in the new tree.
     QCOMPARE(gitOut(m_path, {"rev-parse", "HEAD~1"}).trimmed(), base);
     QCOMPARE(gitOut(m_path, {"show", "--name-only", "--format=", "HEAD"}).trimmed(),
              QStringLiteral("b.txt"));
@@ -290,7 +286,6 @@ void StagingTest::committingTheIndexCreatesACommitGitAgreesWith() {
 }
 
 void StagingTest::aCommitOnAnUnbornHeadIsARootCommit() {
-    // No commits yet: HEAD is unborn and the commit has no parent.
     QVERIFY(writeFile(m_path, QStringLiteral("first.txt"), QStringLiteral("hello\n")));
     QString error;
     QVERIFY2(m_session->stageAll(&error), qPrintable(error));
@@ -300,7 +295,6 @@ void StagingTest::aCommitOnAnUnbornHeadIsARootCommit() {
 
     QVERIFY(!newId.isEmpty());
     QCOMPARE(gitOut(m_path, {"rev-list", "--count", "HEAD"}).trimmed(), QStringLiteral("1"));
-    // A root commit's object has no parent line at all.
     QVERIFY(!gitOut(m_path, {"cat-file", "-p", "HEAD"}).contains(QStringLiteral("parent ")));
     QCOMPARE(git(m_path, {"rev-parse", "--verify", "HEAD^"}), false);
 }
@@ -390,7 +384,6 @@ void StagingTest::amendingFoldsTheIndexIntoHead() {
                                   &error),
              qPrintable(error));
 
-    // The same parent, a new tip carrying the staged file and the new message.
     QCOMPARE(gitOut(m_path, {"rev-parse", "HEAD"}).trimmed(), newId);
     QCOMPARE(gitOut(m_path, {"rev-parse", "HEAD^"}).trimmed(), parent);
     QCOMPARE(gitOut(m_path, {"ls-tree", "--name-only", "HEAD"}).split(QLatin1Char('\n'),

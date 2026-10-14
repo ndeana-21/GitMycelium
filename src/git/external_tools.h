@@ -16,8 +16,6 @@ class ExternalToolOps {
 public:
     explicit ExternalToolOps(std::string workDir);
 
-    /// The effective `diff.tool`/`merge.tool`, empty when unset (git then picks its
-    /// own default).
     std::string tool(bool merge) const;
 
     /// Writes the choice into the repository's own config (`git config --local`). An

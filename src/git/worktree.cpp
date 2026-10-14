@@ -21,8 +21,6 @@ SyncResult toSyncResult(const ProcessResult& process) {
     return result;
 }
 
-/// The last path component, without a trailing separator. The display name of a
-/// worktree is its directory, because that is the part a reader recognises.
 std::string baseName(const std::string& path) {
     std::string trimmed = path;
     while (trimmed.size() > 1 && trimmed.back() == '/') {

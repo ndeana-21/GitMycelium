@@ -66,8 +66,6 @@ private slots:
 };
 
 void GraphAndRefsTest::everyBranchTipGetsItsOwnLaneAndColour() {
-    // Two branches from one base, newest-first, the way a revwalk over all refs
-    // returns them: tipA, tipB, base.
     std::vector<CommitInfo> commits{
         commit("a1", "tip of branch A", {"base"}),
         commit("b1", "tip of branch B", {"base"}),
@@ -99,7 +97,6 @@ void GraphAndRefsTest::importantBranchGetsTheLeftmostLane() {
     };
 
     GraphLayout layout;
-    // B is the current branch, C is focused, A is nobody's favourite.
     layout.setTipPriority({{"b1", 0}, {"c1", 1}, {"a1", 2}});
     layout.setCommits(commits);
 
@@ -127,8 +124,6 @@ void GraphAndRefsTest::tipColourIsCarriedDownTheBranchLine() {
     layout.setTipColors({{"tip", 7}});
     layout.setCommits(commits);
 
-    // A straight branch keeps one colour all the way down; a line that changed
-    // colour halfway would not match its label.
     for (std::size_t i = 0; i < layout.size(); ++i) {
         QCOMPARE(layout.node(i).colorIndex, 7);
     }
@@ -181,7 +176,6 @@ void GraphAndRefsTest::mergeCommitSpansTwoLanesInDifferentColours() {
 
 void GraphAndRefsTest::pillsStayInsideTheCell() {
     const QRect cell(0, 0, 220, 30);
-    // A branch and a tag: two pills, so the stacking geometry is exercised.
     const auto pills = RefPillLayout::arrange({QStringLiteral("main"), QStringLiteral("v1.0")},
                                               {0, 2}, {0, 2}, {}, cell);
 
@@ -213,7 +207,6 @@ void GraphAndRefsTest::anIconlessArrangementGivesTheWidthBackToTheName() {
     QVERIFY(!withIcons.empty() && !withoutIcons.empty());
     QVERIFY(!withIcons.front().iconRect.isNull());
     QVERIFY(withoutIcons.front().iconRect.isNull());
-    // The room the glyph held went to the name, so more of it survives the cell.
     QVERIFY(withoutIcons.front().textRect.width() > withIcons.front().textRect.width());
 }
 
@@ -228,10 +221,7 @@ void GraphAndRefsTest::branchesOnOneCommitCollapseIntoOnePill() {
     QCOMPARE(pills.size(), static_cast<std::size_t>(1));
     QCOMPARE(pills.at(0).text, QStringLiteral("main +1"));
     QVERIFY(pills.at(0).hasRemote);
-    // The name itself stays whole: it is what a drag carries and a click resolves.
     QCOMPARE(pills.at(0).shortName, QStringLiteral("main"));
-    // The other branch is there for the hover expansion; `origin/main` is not, it is
-    // the cloud on this pill.
     QCOMPARE(pills.at(0).collapsedNames, QStringList({QStringLiteral("feature/x")}));
 }
 
@@ -308,7 +298,6 @@ void GraphAndRefsTest::tagsKeepTheirOwnPill() {
         {QStringLiteral("main"), QStringLiteral("origin/main"), QStringLiteral("v1.0")}, {0, 1, 2},
         {0, 1, 2}, {}, cell);
 
-    // The local branch and its remote fold into one; the tag keeps saying what it says.
     QCOMPARE(pills.size(), static_cast<std::size_t>(2));
     QCOMPARE(pills.at(0).text, QStringLiteral("main"));
     QVERIFY(pills.at(0).hasRemote);
@@ -333,7 +322,6 @@ void GraphAndRefsTest::tooManyLabelsCollapseIntoABadge() {
 
 void GraphAndRefsTest::hitTestFindsTheGrabbedLabel() {
     const QRect cell(0, 0, 220, 30);
-    // A branch and a tag, so there really are two pills to tell apart.
     const auto pills = RefPillLayout::arrange({QStringLiteral("main"), QStringLiteral("v1.0")},
                                               {0, 2}, {0, 2}, {}, cell);
     QVERIFY(pills.size() == 2);
@@ -373,7 +361,6 @@ void GraphAndRefsTest::dragChipIsActuallyDrawn() {
             }
         }
     }
-    // Fill, border and text: a blank chip would yield at most one colour.
     QVERIFY2(opaqueColours.size() > 1,
              qPrintable(QStringLiteral("чип перетаскивания пустой, цветов: %1")
                             .arg(opaqueColours.size())));

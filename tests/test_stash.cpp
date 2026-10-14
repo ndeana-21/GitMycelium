@@ -143,7 +143,6 @@ void StashTest::pushCanIncludeUntracked() {
     QVERIFY2(session.stashPush("with untracked", true, {}, &error), qPrintable(error));
     QCOMPARE(session.stashList().size(), std::size_t(1));
     QVERIFY(!QFile::exists(QDir(m_path).filePath("brand-new.txt")));
-    // Restoring it puts the untracked file back.
     QVERIFY2(session.stashPop(qs(session.stashList().front().oid), &error), qPrintable(error));
     QVERIFY(QFile::exists(QDir(m_path).filePath("brand-new.txt")));
 }
@@ -212,7 +211,6 @@ void StashTest::dropRemovesOneEntry() {
 
     std::vector<StashEntry> entries = session.stashList();
     QCOMPARE(entries.size(), std::size_t(2));
-    // Newest first: entries[0] is "second", entries[1] is "first".
     const std::string keeper = entries.front().oid;
     QVERIFY2(session.stashDrop(qs(entries.back().oid), &error), qPrintable(error));
 

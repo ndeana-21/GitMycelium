@@ -149,8 +149,6 @@ std::vector<SubmoduleEntry> SubmoduleOps::list() const {
         return out;
     }
 
-    // The status lines' paths tell us which `.gitmodules` to read and who contains
-    // whom.
     struct Status {
         SubmoduleState state = SubmoduleState::InSync;
         std::string oid;
@@ -265,7 +263,6 @@ std::vector<SubmoduleEntry> SubmoduleOps::list() const {
         entry.nested = !parentDir.empty();
         entry.parentPath = parentDir;
 
-        // The config path is relative to the containing directory; ours is full.
         std::string rel = status.path;
         if (!parentDir.empty() && rel.rfind(parentDir + "/", 0) == 0) {
             rel = rel.substr(parentDir.size() + 1);

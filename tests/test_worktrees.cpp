@@ -118,7 +118,6 @@ void WorktreeTest::addingANewBranchStartsItWhereAsked() {
     QVERIFY(session.open(m_path));
 
     QString error;
-    // A branch that does not exist yet: created at `feature`, not at HEAD.
     QVERIFY2(session.addWorktree(m_wtPath, QStringLiteral("fresh"), true,
                                  QStringLiteral("feature"), &error),
              qPrintable(error));
@@ -130,7 +129,6 @@ void WorktreeTest::addingANewBranchStartsItWhereAsked() {
     QVERIFY(wt);
     QCOMPARE(QString::fromStdString(wt->branch), QStringLiteral("refs/heads/fresh"));
 
-    // Its own session lands on the new branch at feature's tip.
     RepoSession wtSession;
     QVERIFY(wtSession.open(m_wtPath));
     QCOMPARE(QString::fromStdString(wtSession.info().headBranch), QStringLiteral("fresh"));
@@ -191,7 +189,6 @@ void WorktreeTest::removeRefusesADirtyWorktreeWithoutForce() {
 
     QVERIFY2(session.removeWorktree(m_wtPath, true, &error), qPrintable(error));
     QVERIFY(!QDir(m_wtPath).exists());
-    // The branch survives the worktree.
     QVERIFY(!gitOut(m_path, {"rev-parse", "--verify", "wt-branch"}).isEmpty());
 }
 
@@ -247,7 +244,6 @@ void WorktreeTest::aConflictInAWorktreeIsSeenByItsOwnSession() {
     QVERIFY(wtSession.mergeInProgress());
     QVERIFY(!wtSession.conflicts().empty());
 
-    // The main checkout is not mid-merge: the marker belongs to the worktree.
     QVERIFY(!session.mergeInProgress());
     QVERIFY(session.conflicts().empty());
 }
@@ -296,7 +292,6 @@ void WorktreeTest::worktreeWipFollowsEachCheckoutsChanges() {
     QVERIFY(wips.front().unstaged >= 1);
     QVERIFY(wips.back().unstaged >= 1);
 
-    // A clean checkout drops out; the dirty one stays.
     QVERIFY(QFile::remove(QDir(m_path).filePath(QStringLiteral("main-dirty.txt"))));
     const std::vector<WorktreeWip> onlyWorktree = session.worktreeWip();
     QCOMPARE(onlyWorktree.size(), std::size_t(1));

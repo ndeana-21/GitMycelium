@@ -70,7 +70,6 @@ std::string resolve(const std::function<std::string(const std::string&)>& progra
     if (name.empty()) {
         return {};
     }
-    // An absolute or relative path is taken as given; a bare name is looked up.
     if (name.find('/') != std::string::npos) {
         return name;
     }

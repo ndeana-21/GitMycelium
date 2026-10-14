@@ -42,8 +42,6 @@ protected:
         painter.setBrush(m_hoverButton ? theme::surfaceAlt() : theme::panel());
         painter.drawRoundedRect(button.adjusted(0.5, 0.5, -0.5, -0.5), 3, 3);
 
-        // The arrow points the way the panel will move: out of sight when it is up,
-        // back into view when it is folded.
         const bool collapsed = m_splitter->isPanelCollapsed(panel);
         const bool first = panel == 0;
         const bool pointsLeft = first != collapsed;
@@ -163,7 +161,6 @@ void PanelSplitter::setPanelCollapsed(int index, bool collapsed) {
     }
     QList<int> current = sizes();
     m_restoreSizes.resize(static_cast<std::size_t>(count()), 0);
-    // The middle column takes what the panel gives up and pays for it on the way back.
     const int middle = index == 0 ? 1 : index - 1;
     if (collapsed) {
         m_restoreSizes[static_cast<std::size_t>(index)] = current.at(index);

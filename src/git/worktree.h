@@ -27,12 +27,9 @@ public:
     /// empty `branch` without `createBranch` makes a detached worktree.
     SyncResult add(const std::string& path, const std::string& branch, bool createBranch,
                    const std::string& startPoint) const;
-    /// `git worktree remove`. git refuses a worktree with modifications unless
-    /// `force` is set.
     SyncResult remove(const std::string& path, bool force) const;
     SyncResult lock(const std::string& path, const std::string& reason) const;
     SyncResult unlock(const std::string& path) const;
-    /// `git worktree prune`: forgets entries whose directory is gone.
     SyncResult prune() const;
 
     const std::string& workDir() const { return m_workDir; }

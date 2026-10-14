@@ -28,7 +28,6 @@ public:
         int toRow = kNotLoaded;
     };
 
-    /// What of the path a row draws.
     struct RowPiece {
         int fromRow = 0;  ///< the segment's start; its node's lane is the line's lane
         bool top = false;    ///< from the top of the row to its centre

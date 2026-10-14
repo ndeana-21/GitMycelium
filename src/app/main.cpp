@@ -151,10 +151,6 @@ const char* rebaseStatusName(gk::RebaseStatus status) {
     return "?";
 }
 
-/// Headless rebase: it cannot be driven through the window without a display, so
-/// this reports what the window would show.
-/// One check against the release manifest, printed: what is installed, what is
-/// published, and whether this copy could put it in place.
 int updateCheckHeadless(bool install) {
     using namespace gk::update;
     Updater updater;
@@ -865,7 +861,6 @@ int main(int argc, char* argv[]) {
                 uiComparePath = argv[++i];
             }
         } else if (arg == "--ui-compare-range" && i + 2 < argc) {
-            // The three-dot form: `merge-base(base, target)..target`.
             uiCompareMergeBase = true;
             uiCompareBase = argv[++i];
             uiCompareTarget = argv[++i];
@@ -1070,8 +1065,6 @@ int main(int argc, char* argv[]) {
     QCoreApplication::setApplicationName(QStringLiteral("gitmycelium"));
     app.setApplicationDisplayName(QStringLiteral("GitMycelium"));
     QCoreApplication::setApplicationVersion(QStringLiteral(GMC_VERSION));
-    // The icon is embedded (packaging/app_icon.qrc) so it travels with the binary;
-    // the .desktop entry names the same icon for the launcher.
     app.setWindowIcon(QIcon(QStringLiteral(":/icons/gitmycelium.svg")));
     if (updateCheck) {
         return updateCheckHeadless(updateInstall);
@@ -1090,8 +1083,6 @@ int main(int argc, char* argv[]) {
         gk::theme::setZoomPercent(zoomArg);
     }
 
-    // One call, shared with the window so a preference change cannot build the
-    // look a second way.
     app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
     gk::applyApplicationTheme(&app);
 
@@ -1131,7 +1122,6 @@ int main(int argc, char* argv[]) {
         !uiKeymapOp.empty() || !uiSearchQuery.empty();
 
     gk::MainWindow window;
-    // A snapshot or a headless check must not rewrite the reader's session.
     window.setTabsPersistenceEnabled(!headlessRun && shotPath.empty() && uiLoadTraceSeconds == 0);
     window.setBackgroundIndexingEnabled(!headlessRun && shotPath.empty());
     window.setUpdateChecksEnabled(!headlessRun && shotPath.empty() && uiLoadTraceSeconds == 0);
@@ -1139,14 +1129,11 @@ int main(int argc, char* argv[]) {
     if (!path.empty()) {
         window.openRepository(QString::fromStdString(path));
     } else if (!headlessRun && shotPath.empty()) {
-        // The interactive launch reopens what was open last time; a check does not.
         window.restoreTabs();
     }
     window.resize(1400, 880);
     window.show();
 
-    // The window's own rebase path, driven without a pointer. The engine agreeing
-    // with git is not the same as the window agreeing with the engine.
     if (!uiRebaseTarget.empty()) {
         QTimer::singleShot(1200, &window, [&window, uiRebaseTarget] {
             const QString branch = QString::fromStdString(window.currentBranchName());
@@ -1216,7 +1203,6 @@ int main(int argc, char* argv[]) {
         });
     }
 
-    // With a snapshot asked for as well, the overlay is built and the run continues.
     if (hoverExpandRow >= 0 && shotPath.empty()) {
         QTimer::singleShot(1200, &window, [&window, hoverExpandRow] {
             for (const QString& line : window.hoverExpandForDiagnostics(hoverExpandRow)) {
@@ -1226,8 +1212,6 @@ int main(int argc, char* argv[]) {
         });
     }
 
-    // Driven as the mouse would: the view emits the same checkout signal a real
-    // label's double-click does.
     if (uiHoverActRow >= 0) {
         QTimer::singleShot(1200, &window, [&window, uiHoverActRow] {
             for (const QString& line : window.activateHoverGhostForDiagnostics(uiHoverActRow)) {
@@ -1359,7 +1343,6 @@ int main(int argc, char* argv[]) {
         });
     }
 
-    // A local bare remote makes this runnable without a network.
     if (!uiSyncOp.empty()) {
         QTimer::singleShot(1200, &window, [&window, uiSyncOp, uiSyncArg] {
             const QStringList report = window.syncForDiagnostics(
@@ -1475,8 +1458,6 @@ int main(int argc, char* argv[]) {
     }
 
     if (!uiGraphAnimOp.empty()) {
-        // The operation first, then a second tick to let the model's page arrive and
-        // the view compute its transitions, then the report.
         QTimer::singleShot(1200, &window, [&window, uiGraphAnimOp, uiGraphAnimArg] {
             const QStringList report = window.runGraphAnimationOp(
                 QString::fromStdString(uiGraphAnimOp), QString::fromStdString(uiGraphAnimArg));

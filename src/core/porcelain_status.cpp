@@ -19,8 +19,6 @@ ChangeKind kindOf(char code) {
     }
 }
 
-/// The path after `fields` space-separated fields. A path may itself contain
-/// spaces, so it is everything that follows, never a field of its own.
 std::string_view pathAfterFields(std::string_view record, int fields) {
     std::size_t at = 0;
     for (int i = 0; i < fields; ++i) {

@@ -21,10 +21,8 @@ constexpr qreal kLineWidth = 2.4;
 /// they are there.
 constexpr int kStripAlpha = 150;
 
-/// Opacity for a node whose lane has gone behind that strip: dimmed, not hidden.
 constexpr qreal kCoveredNodeOpacity = 0.62;
 
-/// Faint enough to recede, solid enough that the history stays legible.
 constexpr qreal kDimmedRowOpacity = 0.32;
 
 constexpr qreal kMergeNodeScale = 0.5;
@@ -78,7 +76,6 @@ void strokeTraced(QPainter* painter, const QPainterPath& stroke, const QColor& c
     painter->drawPath(stroke);
 }
 
-/// Roughly half a lane, so a turn reads as a turn without swallowing the lane.
 qreal connectorRadius() {
     return GraphDelegate::laneWidth() * 0.45;
 }
@@ -306,7 +303,6 @@ void GraphDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
                           veil);
     }
 
-    // 5. The commit node: a filled circle carrying the author's initials.
     const QColor color = theme::branchColor(node->colorIndex);
     const QPointF center(nodeX(node->lane), centerY);
 
@@ -318,7 +314,6 @@ void GraphDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
         painter->setOpacity(kCoveredNodeOpacity);
     }
 
-    // Each node type gets its own shape so the row reads as the state it is.
     GraphNodeType type = node->type;
     if (type == GraphNodeType::Commit && model->data(index, CommitModel::WipRole).toBool()) {
         // A caller that paints without the model having run still gets a ring, not a disc.
@@ -350,7 +345,6 @@ void GraphDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
         return;
     }
     case GraphNodeType::MergeConflict: {
-        // A warning ring with a solid core, so it cannot be read as the working-tree ring.
         ringNode(theme::danger());
         painter->setPen(Qt::NoPen);
         painter->setBrush(theme::danger());
@@ -359,7 +353,6 @@ void GraphDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
         return;
     }
     case GraphNodeType::UnsupportedRebase: {
-        // A ring with a pause bar in it: "this wants you to continue or abort it".
         ringNode(theme::warning());
         painter->setPen(Qt::NoPen);
         painter->setBrush(theme::warning());
@@ -371,7 +364,6 @@ void GraphDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
         return;
     }
     case GraphNodeType::Stash: {
-        // A rounded square in the modified colour, as the stash section in the ref tree is.
         const qreal side = radius * 1.7;
         const QRectF box(center.x() - side / 2, center.y() - side / 2, side, side);
         painter->setPen(QPen(theme::modified().darker(150), 1.0));

@@ -34,7 +34,6 @@ QString gitOut(const QString& dir, const QStringList& args) {
     return QString::fromStdString(runGit(argv, dir.toStdString()).out).trimmed();
 }
 
-/// The raw diff text, with no trimming: the parser is what is under test.
 std::string gitRaw(const QString& dir, const QStringList& args) {
     std::vector<std::string> argv;
     argv.reserve(static_cast<std::size_t>(args.size()));
@@ -53,7 +52,6 @@ bool writeFile(const QString& dir, const QString& name, const std::string& conte
     return true;
 }
 
-/// Every field the app reads, compared one by one so a failure names the field.
 void expectSameFileDiff(const FileDiff& lib, const FileDiff& parsed, const QString& label) {
     QVERIFY2(lib.kind == parsed.kind, qPrintable(label + QStringLiteral(": kind")));
     QCOMPARE(QString::fromStdString(parsed.oldPath), QString::fromStdString(lib.oldPath));
@@ -127,7 +125,6 @@ void UnifiedDiffTest::init() {
     QVERIFY(writeFile(m_path, QStringLiteral("new.txt"), "n1\nn2\n"));
     QVERIFY(git(m_path, {"rm", "-q", "gone.txt"}));
     std::string multiChanged = multi;
-    // Change line 2 and line 18, far enough apart to be two hunks.
     multiChanged.replace(multiChanged.find("line 2\n"), 7, "LINE TWO\n");
     multiChanged.replace(multiChanged.find("line 18\n"), 8, "LINE EIGHTEEN\n");
     QVERIFY(writeFile(m_path, QStringLiteral("multi.txt"), multiChanged));
@@ -190,7 +187,6 @@ void UnifiedDiffTest::multipleFilesInOneDiffParseSeparately() {
     const std::string text = gitRaw(m_path, {"-c", "core.quotepath=false", "diff", "--no-color",
                                              "--no-renames", m_c1, m_c2});
     const std::vector<FileDiff> entries = parseUnifiedDiff(text);
-    // The fixture changed exactly six paths.
     QCOMPARE(entries.size(), std::size_t(6));
     QStringList names;
     for (const FileDiff& entry : entries) {

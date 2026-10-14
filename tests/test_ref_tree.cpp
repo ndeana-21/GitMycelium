@@ -19,8 +19,6 @@ RefInfo branch(const QString& name, RefKind kind = RefKind::LocalBranch) {
     return ref;
 }
 
-/// Walks the tree and collects "parent|label" for every row, so a test can state
-/// the shape it expects in one literal instead of chasing indexes.
 void collect(const QStandardItemModel& model, const QModelIndex& parent, const QString& trail,
              QStringList* out) {
     for (int row = 0; row < model.rowCount(parent); ++row) {
@@ -66,7 +64,6 @@ void RefTreeTest::namesSplitIntoFolders() {
     QVERIFY2(rows.contains(QStringLiteral("Local/feature/ui")), qPrintable(rows.join(QLatin1Char(' '))));
     QVERIFY2(rows.contains(QStringLiteral("Local/main")), qPrintable(rows.join(QLatin1Char(' '))));
 
-    // The leaf shows what is left of the name, not the whole of it.
     QVERIFY(!rows.contains(QStringLiteral("Local/feature/feature/login")));
 }
 
@@ -91,13 +88,10 @@ void RefTreeTest::filterKeepsOnlyMatchingBranches() {
     QVERIFY2(rows.contains(QStringLiteral("Local/feature/login")), qPrintable(rows.join(QLatin1Char(' '))));
     QVERIFY2(!rows.contains(QStringLiteral("Local/feature/ui")), qPrintable(rows.join(QLatin1Char(' '))));
     QVERIFY2(!rows.contains(QStringLiteral("Local/main")), qPrintable(rows.join(QLatin1Char(' '))));
-    // A section with nothing left must not be shown at all.
     QVERIFY2(!rows.contains(QStringLiteral("Remote")), qPrintable(rows.join(QLatin1Char(' '))));
     QVERIFY(model.filterError().isEmpty());
 
     model.setFilter(QString(), false);
-    // Remote comes back whole: two sections, the feature folder, two leaves and
-    // the two plain branches.
     QCOMPARE(shape(model).size(), 8);
 }
 
@@ -113,7 +107,6 @@ void RefTreeTest::filterUnderstandsRegex() {
     QVERIFY2(!rows.contains(QStringLiteral("Local/main")), qPrintable(rows.join(QLatin1Char(' '))));
     QVERIFY(model.filterError().isEmpty());
 
-    // Without the regex flag the same text is a plain substring and matches nothing.
     model.setFilter(QStringLiteral("^feature/(login|ui)$"), false);
     QCOMPARE(shape(model).size(), 0);
 }
@@ -124,7 +117,6 @@ void RefTreeTest::brokenRegexHidesEverythingAndSaysWhy() {
 
     model.setFilter(QStringLiteral("(["), true);
 
-    // Nothing matches, and the reason is available instead of a silent empty list.
     QCOMPARE(shape(model).size(), 0);
     QVERIFY(!model.filterError().isEmpty());
 }
@@ -138,7 +130,6 @@ void RefTreeTest::pinnedBranchMovesOutOfItsSection() {
     const QStringList rows = shape(model);
     QCOMPARE(rows.at(0), QStringLiteral("Pinned"));
     QCOMPARE(rows.at(1), QStringLiteral("Pinned/feature/login"));
-    // Moved, not copied: the branch is gone from Local.
     QVERIFY2(!rows.contains(QStringLiteral("Local/feature/login")), qPrintable(rows.join(QLatin1Char(' '))));
     QVERIFY2(rows.contains(QStringLiteral("Local/feature/ui")), qPrintable(rows.join(QLatin1Char(' '))));
 }
@@ -186,7 +177,6 @@ void RefTreeTest::pinsSurviveAReloadAndStayPerRepository() {
         QVERIFY(pins.names().isEmpty()); // another repository's pins are not ours
     }
 
-    // A fresh object reads what the last one wrote.
     RefPins reloaded(store);
     reloaded.load(QStringLiteral("/repos/one"));
     QCOMPARE(reloaded.names().size(), 2);
@@ -223,7 +213,6 @@ void RefTreeTest::pinsAreAdoptedFromTheOldCheckoutPathKey() {
                   QStringLiteral("/checkouts/project"));
     QCOMPARE(migrated.names(), QStringList{QStringLiteral("release")});
 
-    // The move is persisted: the new key now holds it, the old one is gone.
     RefPins fresh(store);
     fresh.load(QStringLiteral("/checkouts/project/.git"));
     QCOMPARE(fresh.names(), QStringList{QStringLiteral("release")});

@@ -26,8 +26,6 @@ QString joined(const std::vector<std::string>& lines) {
 
 } // namespace
 
-/// The region parser is pure text: it says what the regions are, and nothing about
-/// how to settle them. The editor leans on it for every card it draws.
 class ConflictRegionsTest : public QObject {
     Q_OBJECT
 
@@ -98,7 +96,6 @@ void ConflictRegionsTest::mergeStyleWithoutBaseStillParses() {
 }
 
 void ConflictRegionsTest::anAbsentSideIsEmpty() {
-    // A delete/modify conflict: one side has no lines at all.
     const ConflictDocument doc = parseConflictDocument(marked("", "base\n", "kept\n"));
 
     QCOMPARE(doc.regions.size(), std::size_t(1));
@@ -179,7 +176,6 @@ void ConflictRegionsTest::anEmptyLineSelectionLeavesTheRegionOpen() {
 
     QVERIFY(!take.anyTaken());
     QVERIFY(regionChosenLines(region, RegionLines, take).empty());
-    // Nothing taken is not an answer: the region must still be counted unresolved.
     QVERIFY(!regionResolved(region, RegionLines, take));
     QVERIFY(!regionResolved(region, RegionUnanswered, take));
 }

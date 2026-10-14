@@ -108,7 +108,6 @@ void ConflictBinaryTest::init() {
     QVERIFY(git(m_path, {"add", "-A"}));
     QVERIFY(commit(QStringLiteral("main")));
 
-    // The merge is expected to conflict; the exit code is the point.
     git(m_path, {"merge", "feature"});
     QCOMPARE(gitOut(m_path, {"ls-files", "-u"}).split(QLatin1Char('\n')).size(), 3);
 }

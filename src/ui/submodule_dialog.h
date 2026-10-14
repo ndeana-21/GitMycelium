@@ -7,10 +7,6 @@ class QLineEdit;
 
 namespace gk {
 
-/// Asks for the three things `git submodule add` needs: the repository URL, the
-/// path it lands at, and — optionally — the branch it should follow. The last one
-/// is what `submodule update --remote` reads, and leaving it empty is the usual
-/// answer, which is why it is a plain field and not a picker.
 class SubmoduleDialog : public QDialog {
     Q_OBJECT
 

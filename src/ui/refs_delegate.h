@@ -18,8 +18,6 @@ namespace gk {
 /// the same label cannot be drawn two different ways.
 void paintRefPill(QPainter* painter, const RefPill& pill, const QFont& font);
 
-/// Paints the graph's label column: one stack of rounded, branch-coloured labels per
-/// commit. Geometry comes from RefPillLayout so the view hit-tests the same rectangles.
 class RefsDelegate : public QStyledItemDelegate {
     Q_OBJECT
 
@@ -35,7 +33,6 @@ public:
     /// dragging without a pixmap, so the reader would drag an invisible thing.
     static QPixmap dragPixmap(const QString& name, int colorIndex, RefKind kind);
 
-    /// Opacity for a label pill by its short name; 1.0 when nothing is animating.
     void setLabelAlphaHook(std::function<double(const QString& name)> alpha);
 
 private:

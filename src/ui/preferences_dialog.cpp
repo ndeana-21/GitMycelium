@@ -71,8 +71,6 @@ PreferencesDialog::PreferencesDialog(const QString& repositoryPath, const QStrin
     layout->addWidget(tabs, 1);
     layout->addWidget(buttons);
 
-    // The write happens only once the choice is final: Cancel must leave the
-    // profile exactly as it was.
     connect(this, &QDialog::accepted, this, &PreferencesDialog::save);
 }
 
@@ -416,8 +414,6 @@ QWidget* PreferencesDialog::buildKeymapPage() {
 }
 
 QString PreferencesDialog::keymapProblem() {
-    // Pull the edited sequences in first: the rows are the dialog's own record, and
-    // the readers below are the widgets the editor left behind.
     for (int i = 0; i < m_keymapRows.size() && i < m_keymapEditors.size(); ++i) {
         m_keymapRows[i].sequence = m_keymapEditors.at(i)->keySequence();
     }

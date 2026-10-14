@@ -71,8 +71,6 @@ QString lineGutter(int oldLine, int newLine) {
         .arg(theme::textDim().name(), left.rightJustified(5), right.rightJustified(5));
 }
 
-/// One line of a diff, wrapped in its row colour. The words that changed are
-/// already wrapped by the caller, in a stronger shade of the same colour.
 QString rowFor(const QString& body, const QColor& background, const QColor& colour,
                const QString& marker) {
     if (background.isValid()) {
@@ -97,8 +95,6 @@ QString hunkChip(int hunkIndex, const QString& host, const QString& label) {
 DiffView::DiffView(QWidget* parent) : QWidget(parent) {
     buildUi();
     fitToolbar();
-    // A keyboard way to flip the diff, so the side-by-side view is reachable without
-    // hunting for the toolbar button.
     auto* split = new QShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+S")), this);
     connect(split, &QShortcut::activated, this, [this] { setSplitView(!m_split); });
 }
@@ -114,8 +110,6 @@ void DiffView::buildUi() {
     barLayout->setContentsMargins(6, 4, 6, 4);
     barLayout->setSpacing(6);
 
-    // The file's own name, where the tab would be: the diff is one file's, and the
-    // list below the commit can hold hundreds.
     m_pathLabel = new ElidedLabel(bar);
     m_pathLabel->setStyleSheet(QStringLiteral("color: %1;").arg(theme::text().name()));
     barLayout->addWidget(m_pathLabel);
@@ -163,7 +157,6 @@ void DiffView::buildUi() {
     barLayout->addWidget(m_previous);
     barLayout->addWidget(m_next);
 
-    // Word wrap is a toggle, not a mode: it applies to whichever view is showing.
     m_wrapMode = new QToolButton(bar);
     m_wrapMode->setText(QStringLiteral("Wrap"));
     setThemedIcon(m_wrapMode, Icon::Wrap);
@@ -172,8 +165,6 @@ void DiffView::buildUi() {
     m_wrapMode->setToolTip(QStringLiteral("Soft-wrap long lines"));
     barLayout->addWidget(m_wrapMode);
 
-    // The external tool is chosen in Preferences and configured in the git config;
-    // the viewer only says "open this one, with whatever pair I am showing".
     m_external = new QToolButton(bar);
     m_external->setText(QStringLiteral("External"));
     setThemedIcon(m_external, Icon::Monitor);
@@ -194,15 +185,11 @@ void DiffView::buildUi() {
         m_encoding->addItem(codec, codec);
     }
     m_encoding->setToolTip(QStringLiteral("Encoding of the file's bytes"));
-    // Compact: it names a codec, and a combo that spans the toolbar looks like a
-    // text field waiting for input.
     m_encoding->setSizeAdjustPolicy(QComboBox::AdjustToContents);
     m_encoding->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     m_encoding->setMinimumWidth(140);
     barLayout->addWidget(m_encoding);
 
-    // Closing the diff is how the graph comes back, and it sits at the right end
-    // where the way out of a pane is looked for.
     m_close = new QToolButton(bar);
     m_close->setObjectName(QStringLiteral("diffClose"));
     setThemedIcon(m_close, Icon::Close);
@@ -234,8 +221,6 @@ void DiffView::buildUi() {
     m_text = makeBrowser(QStringLiteral("Select a file to see its changes"));
     m_pages->addWidget(m_text);
 
-    // The side-by-side view: two browsers whose vertical scrollbars are kept in step.
-    // They are built from the same aligned rows, so a change sits on one row.
     m_splitter = new QSplitter(Qt::Horizontal, this);
     m_textLeft = makeBrowser(QStringLiteral("Select a file to see its changes"));
     m_textRight = makeBrowser(QString());
@@ -290,7 +275,6 @@ void DiffView::buildUi() {
     connect(m_textRight->verticalScrollBar(), &QScrollBar::valueChanged, this,
             [this] { syncScrollFrom(m_textRight); });
 
-    // The minimap: scrub to scroll, and follow whichever pane is showing.
     connect(m_minimap, &DiffMinimap::scrubbed, this, [this](qreal fraction) {
         QTextBrowser* active = m_split ? m_textLeft : m_text;
         QScrollBar* bar = active->verticalScrollBar();
@@ -339,7 +323,6 @@ void DiffView::buildUi() {
             m_blame = true;
             m_pages->setCurrentWidget(m_text);
             rebuild();
-            // The window holds the repository; it answers with the blame.
             emit blameRequested(m_document.path);
         }
     });
@@ -518,8 +501,6 @@ void DiffView::rebuild() {
         return;
     }
 
-    // What the bytes say they are, shown on the picker: an encoding the user never
-    // chose is still an encoding they need to be able to check.
     const std::string& probe = m_document.hasRevision ? m_document.revisionContent
                                                       : m_document.workingContent;
     const QString detected = TextEncoding::detect(probe, m_document.hasWorking
@@ -557,8 +538,6 @@ void DiffView::rebuild() {
     }
 
     if (m_blame) {
-        // The file with a provenance gutter. The blame itself is the window's to
-        // fetch; until it arrives the gutter is blank and the file still reads.
         m_pages->setCurrentWidget(m_text);
         updateHunkHeaders();
         m_lineMap.clear();
@@ -666,8 +645,6 @@ QString DiffView::renderDiff() {
                                      .arg(hunk.oldLines)
                                      .arg(hunk.newStart)
                                      .arg(hunk.newLines)));
-        // A working-tree diff offers the change; a commit's diff has no index side
-        // and so shows no control at all.
         if (stageable) {
             html += hunkChip(static_cast<int>(hi), QStringLiteral("hunk"), stageLabel);
             if (m_document.offerDiscard) {
@@ -827,8 +804,6 @@ QString DiffView::renderSplit(bool left) {
             break;
         }
         const DiffHunk& hunk = m_document.diff.hunks[hi];
-        // The same header on both sides, so the rows below it stay aligned. The stage
-        // control belongs on the left pane, where the reader's eye starts.
         html += QStringLiteral("<span style=\"background:%1; color:%2\">%3</span>")
                     .arg(over(theme::diffHeader(), theme::surface(), 0.14).name(),
                          theme::diffHeader().name(),
@@ -847,8 +822,6 @@ QString DiffView::renderSplit(bool left) {
         html += QLatin1Char('\n');
         map.push_back({static_cast<int>(hi), -1});
 
-        // A fresh state per hunk: the lines a hunk skips are the lines this renderer
-        // never sees.
         HighlightState state;
         for (const DiffRow& row : alignedRows(hunk)) {
             if (emitted >= kMaxLines) {
@@ -870,8 +843,6 @@ QString DiffView::renderSplit(bool left) {
                 ++emitted;
                 continue;
             }
-            // A change: emphasise the words against the other side of the same row, so
-            // the two panes underline what actually moved.
             const int counterpart = left ? row.right : row.left;
             QString body;
             if (counterpart >= 0) {
@@ -942,7 +913,6 @@ QString DiffView::renderBlame() const {
                              .arg(theme::textDim().name(),
                                   QStringLiteral("Not committed").leftJustified(22));
             } else {
-                // The short hash is a link, so a click selects the commit in the graph.
                 gutter = QStringLiteral("<a href=\"gk://blame/%1\" style=\"color:%2; "
                                         "text-decoration:none\">%3</a> %4 ")
                              .arg(QString::fromStdString(blame.commit), theme::accent().name(),

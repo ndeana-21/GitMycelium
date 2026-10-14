@@ -7,10 +7,6 @@
 
 namespace gk {
 
-/// The two things a lineage walk needs from a commit: which one it is, and what it says
-/// its parents are. The graph already holds both in every row, and the walk needs nothing
-/// else, so it asks for nothing else — copying whole commit messages to trace a line would
-/// be work for no reason, and would make the caller do it more often than it has to.
 struct LineageRow {
     Oid id;
     std::vector<Oid> parents;
@@ -37,15 +33,10 @@ struct SelectionPlan {
     bool canSquash = false;
     bool canCherryPick = false;
 
-    /// Commits of the checked-out branch in the selection, oldest first — the order a
-    /// rewrite replays them in.
     std::vector<Oid> branchCommits;
-    /// Commits from elsewhere in the selection, oldest first.
     std::vector<Oid> pickedCommits;
 
-    /// Why squash is not on offer, when it is not. Said out loud rather than hidden.
     std::string squashRefusal;
-    /// Why nothing at all can be done with this selection. Empty when something can.
     std::string refusal;
 };
 

@@ -16,13 +16,6 @@ class QTreeWidgetItem;
 
 namespace gk {
 
-/// The repository's hooks, as a list of switches.
-///
-/// A hook is a file git runs; the switch is the executable bit. This dialog only
-/// reports what the reader chose — the window owns the session and does the writing,
-/// the way every other panel works. Enabling a name that has only git's `.sample`
-/// is how a sample is adopted: the window copies it into place and marks it
-/// executable.
 class HooksDialog : public QDialog {
     Q_OBJECT
 
@@ -34,8 +27,6 @@ public:
     /// they run on the remote, not in a local repository.
     QStringList enabledNames() const;
 
-    /// Hook names whose text the reader saved, with the new content. Empty when
-    /// nobody edited a hook.
     QHash<QString, QString> editedContents() const { return m_edited; }
 
     QStringList knownNames() const;
@@ -56,7 +47,7 @@ private:
     QPlainTextEdit* m_editor = nullptr;
     QPushButton* m_saveButton = nullptr;
     QPushButton* m_editButton = nullptr;
-    QHash<QString, QString> m_contents; ///< as found, for the "is it changed" question
+    QHash<QString, QString> m_contents;
     QHash<QString, QString> m_edited;
     QString m_hooksPath;
 };

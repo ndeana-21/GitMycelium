@@ -9,9 +9,6 @@ class QSpinBox;
 
 namespace gk {
 
-/// Collects what `git clone` needs: where from, where to, and the two options a
-/// reader with a large repository reaches for. It only gathers the answers — the
-/// window runs the clone and opens the result, because the dialog has no session.
 class CloneDialog : public QDialog {
     Q_OBJECT
 

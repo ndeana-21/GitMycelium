@@ -15,10 +15,6 @@ class QTreeWidget;
 
 namespace gk {
 
-/// The commit search panel: a query, which field it looks at, and the commits that
-/// matched, newest first. It holds no repository of its own — the session runs the
-/// search on a worker and the panel fills in what comes back — and choosing a
-/// result only reports the id, because revealing it is the graph's job.
 class SearchPanel : public QWidget {
     Q_OBJECT
 
@@ -29,7 +25,6 @@ public:
     /// window's repository tabs, so a tab switch hands it a different session.
     void setSession(RepoSession* session);
 
-    /// Runs the current query through the session. An empty query clears the list.
     void runSearch();
     void focusQuery();
     void setQuery(const QString& query);
@@ -40,8 +35,6 @@ public:
     QString resultIdAt(int row) const;
     void clearResults();
 
-    /// Fills the list from a result set the caller already has, without a second
-    /// search — the headless path and the tests use this.
     void showResults(const QString& query, CommitSearchField field,
                      const std::vector<CommitInfo>& commits);
 

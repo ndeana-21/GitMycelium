@@ -52,7 +52,6 @@ private slots:
 
 void TextToolsTest::detectsPlainUtf8() {
     QCOMPARE(TextEncoding::detect("plain ascii\n"), QStringLiteral("UTF-8"));
-    // A multi-byte character settles it: this is not CP1251.
     QCOMPARE(TextEncoding::detect(bytesOf(QStringLiteral("привет\n").toUtf8())),
              QStringLiteral("UTF-8"));
 }
@@ -74,7 +73,6 @@ void TextToolsTest::fallsBackWhenUtf8IsImpossible() {
     if (!TextEncoding::isAvailable(QStringLiteral("windows-1251"))) {
         QSKIP("this build of Qt has no windows-1251 codec");
     }
-    // CP1251 for "Привет" — invalid UTF-8, so the fallback is what is left.
     const std::string cp1251 = bytesOf(QByteArray("\xCF\xF0\xE8\xE2\xE5\xF2"));
     QCOMPARE(TextEncoding::detect(cp1251, QStringLiteral("windows-1251")),
              QStringLiteral("windows-1251"));
@@ -88,7 +86,6 @@ void TextToolsTest::decodesRussianInTheChosenCodec() {
     QCOMPARE(TextEncoding::decode(cp1251, QStringLiteral("windows-1251")),
              QStringLiteral("Привет"));
 
-    // The same bytes read as UTF-8 are the noise this whole class exists to avoid.
     QVERIFY(TextEncoding::decode(cp1251, QStringLiteral("UTF-8")) != QStringLiteral("Привет"));
 }
 
@@ -99,7 +96,6 @@ void TextToolsTest::unknownCodecDegradesToUtf8RatherThanGarbage() {
 
 void TextToolsTest::decodesNothingFromNothing() {
     QVERIFY(TextEncoding::decode(std::string(), QStringLiteral("UTF-8")).isEmpty());
-    // A picker with no real choice would be worse than none: UTF-8 must be there.
     QVERIFY(TextEncoding::codecs().contains(QStringLiteral("UTF-8")));
 }
 
@@ -119,8 +115,6 @@ void TextToolsTest::oneRenamedWordIsOneChangedRun() {
 }
 
 void TextToolsTest::punctuationIsComparedToo() {
-    // One letter and one bracket: three tokens differ, and saying so is the point
-    // of comparing tokens instead of whole lines.
     const WordDiff diff = wordDiff(QStringLiteral("call(x)"), QStringLiteral("call(y)"));
     QCOMPARE(changedParts(diff.before), QStringList({QStringLiteral("x")}));
     QCOMPARE(changedParts(diff.after), QStringList({QStringLiteral("y")}));
@@ -131,15 +125,11 @@ void TextToolsTest::punctuationIsComparedToo() {
 }
 
 void TextToolsTest::aRewrittenLineIsWhollyDifferent() {
-    // Nothing but a space in common is not common ground: the line reads as
-    // rewritten, and the space between the words is not emphasised.
     const WordDiff diff = wordDiff(QStringLiteral("alpha beta"), QStringLiteral("gamma delta"));
     QVERIFY(diff.whollyDifferent());
     QCOMPARE(changedParts(diff.before),
              QStringList({QStringLiteral("alpha"), QStringLiteral("beta")}));
 
-    // Neighbouring runs of the same kind are merged: four tokens with nothing in
-    // common are one span each side, not four the painter has to draw.
     const WordDiff merged = wordDiff(QStringLiteral("a++b"), QStringLiteral("c--d"));
     QCOMPARE(merged.before.size(), std::size_t(1));
     QCOMPARE(merged.after.size(), std::size_t(1));

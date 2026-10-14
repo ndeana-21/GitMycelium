@@ -9,8 +9,6 @@
 namespace gk {
 namespace {
 
-/// The hairline plus grip. Geometry is shared by both orientations through
-/// `height()`/`width()`, so the grip splits along whichever axis it is dragged.
 class GripHandle : public QSplitterHandle {
 public:
     using QSplitterHandle::QSplitterHandle;

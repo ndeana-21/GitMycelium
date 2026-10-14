@@ -180,7 +180,6 @@ void GraphHoverTest::aLabelledRowHasNoGhost() {
 
     const int f2Row = model.rowForCommit(gitOut(m_path, {"rev-parse", "feature"}));
     QVERIFY(f2Row >= 0);
-    // A commit that already wears a label needs no invented one.
     QVERIFY(view.ghostBranchAt(f2Row).isEmpty());
 }
 
@@ -202,9 +201,7 @@ void GraphHoverTest::theHighlightLightsTheAncestry() {
 
     QVERIFY(!model.isDimmedRow(f2Row));
     QVERIFY(!model.isDimmedRow(f1Row));
-    // The shared base is part of feature's history and stays lit.
     QVERIFY(!model.isDimmedRow(baseRow));
-    // main's own tip is not behind feature and fades.
     QVERIFY(model.isDimmedRow(m2Row));
 }
 
@@ -260,7 +257,6 @@ void GraphHoverTest::theWindowReportsAndActsOnTheGhost() {
     const QString text = window.describeHoverRow(ghostRow).join(QLatin1Char('\n'));
     QVERIFY(text.contains(QStringLiteral("highlight: feature")));
 
-    // A row that already wears a label has no ghost to act on.
     bool foundLabelled = false;
     for (int row = 0; row < 6; ++row) {
         const QString t = window.describeHoverRow(row).join(QLatin1Char('\n'));
@@ -281,7 +277,6 @@ void GraphHoverTest::theWindowReportsAndActsOnTheGhost() {
 }
 
 void GraphHoverTest::collapsedBranchesAreRevealedForDiagnostics() {
-    // Two more branches land on main's tip, so its pill collapses them into "+2".
     QVERIFY(git(m_path, {"branch", "extra", "main"}));
     QVERIFY(git(m_path, {"branch", "third", "main"}));
 
@@ -302,8 +297,6 @@ void GraphHoverTest::collapsedBranchesAreRevealedForDiagnostics() {
     QVERIFY(collapsed.contains(QStringLiteral("extra")));
     QVERIFY(collapsed.contains(QStringLiteral("third")));
 
-    // The headless hover builds the same overlay a mouse would, revealing exactly
-    // those branches under the pill.
     view.setHoverExpansionForDiagnostics(tipRow);
     QStringList revealed = view.expandedBranchesForDiagnostics();
     revealed.sort();

@@ -41,7 +41,6 @@ bool writeFile(const QString& dir, const QString& name, const QByteArray& conten
     return file.write(content) == content.size();
 }
 
-/// Clones `bare` into `path`, with an identity so commits made there are allowed.
 bool cloneAt(const QString& bare, const QString& path) {
     return git(QFileInfo(path).absolutePath(), {"clone", "-q", bare, path}) &&
            git(path, {"config", "user.name", "Test"}) &&
@@ -49,7 +48,6 @@ bool cloneAt(const QString& bare, const QString& path) {
 }
 
 int parentCount(const QString& dir) {
-    // "rev-list --parents -n 1 HEAD" prints "<commit> <parent> <parent> ...".
     return gitOut(dir, {"rev-list", "--parents", "-n", "1", "HEAD"}).trimmed().split(' ').size() - 1;
 }
 
@@ -150,7 +148,6 @@ void RemotesTest::aRemoteTrackingBranchCanBeMerged() {
     QCOMPARE(gitOut(m_path, {"rev-parse", "HEAD^2"}).trimmed(), theirs);
     QCOMPARE(gitOut(m_path, {"symbolic-ref", "--short", "HEAD"}).trimmed(), QStringLiteral("main"));
 
-    // And the fast-forward case: nothing local since, so main simply advances.
     const QString side = m_dir->path() + "/side";
     QVERIFY(writeFile(side, "more.txt", "more\n"));
     QVERIFY(git(side, {"add", "-A"}));
@@ -188,7 +185,6 @@ void RemotesTest::pullFfOnlyRefusesDivergedHistory() {
     const RemoteOps ops(m_path.toStdString());
     const SyncResult result = ops.pull("origin", "main", PullMode::FfOnly);
     QVERIFY(!result.ok);
-    // Nothing moved: an ff-only pull that cannot fast-forward leaves the branch be.
     QCOMPARE(parentCount(m_path), 1);
     QCOMPARE(gitOut(m_path, {"rev-parse", "--abbrev-ref", "HEAD"}).trimmed(), QStringLiteral("main"));
 }
@@ -199,7 +195,6 @@ void RemotesTest::pullMergeJoinsDivergedHistory() {
     const RemoteOps ops(m_path.toStdString());
     const SyncResult result = ops.pull("origin", "main", PullMode::Merge);
     QVERIFY2(result.ok, result.output.c_str());
-    // A merge commit has two parents; that is what "--no-rebase" bought.
     QCOMPARE(parentCount(m_path), 2);
 }
 
@@ -209,7 +204,6 @@ void RemotesTest::pullRebaseReplaysLocalCommits() {
     const RemoteOps ops(m_path.toStdString());
     const SyncResult result = ops.pull("origin", "main", PullMode::Rebase);
     QVERIFY2(result.ok, result.output.c_str());
-    // Linear: one parent, and the local commit is still in the history.
     QCOMPARE(parentCount(m_path), 1);
     QVERIFY(gitOut(m_path, {"log", "--format=%s"}).contains(QStringLiteral("local change")));
 }
@@ -287,14 +281,12 @@ void RemotesTest::deleteRemoteTagRemovesItOnEveryRemote() {
     QCOMPARE(gitOut(m_bare, {"tag", "-l"}).trimmed(), QStringLiteral("v1"));
     QCOMPARE(gitOut(m_bare2, {"tag", "-l"}).trimmed(), QStringLiteral("v1"));
 
-    // One remote at a time…
     const SyncResult origin = session.deleteRemoteTagBlocking(QStringLiteral("origin"),
                                                               QStringLiteral("v1"));
     QVERIFY2(origin.ok, origin.output.c_str());
     QVERIFY(gitOut(m_bare, {"tag", "-l"}).trimmed().isEmpty());
     QCOMPARE(gitOut(m_bare2, {"tag", "-l"}).trimmed(), QStringLiteral("v1"));
 
-    // …and the local tag is untouched by a remote deletion.
     QCOMPARE(gitOut(m_path, {"tag", "-l"}).trimmed(), QStringLiteral("v1"));
 
     const SyncResult backup = session.deleteRemoteTagBlocking(QStringLiteral("backup"),
@@ -306,7 +298,6 @@ void RemotesTest::deleteRemoteTagRemovesItOnEveryRemote() {
 void RemotesTest::forceWithLeaseOverwritesARewrittenBranch() {
     const QString before = gitOut(m_bare, {"rev-parse", "refs/heads/main"}).trimmed();
 
-    // Amend the tip so a plain push cannot fast-forward.
     QVERIFY(writeFile(m_path, "f.txt", "amended\n"));
     QVERIFY(git(m_path, {"add", "-A"}));
     QVERIFY(git(m_path, {"commit", "--amend", "-qm", "amended"}));
@@ -399,7 +390,6 @@ void RemotesTest::theWindowForcePushesAndAutoFetches() {
     MainWindow window;
     QVERIFY(window.openRepository(m_path));
 
-    // Force push through the window's own path: amend, then rewrite with a lease.
     QVERIFY(writeFile(m_path, "f.txt", "amended\n"));
     QVERIFY(git(m_path, {"add", "-A"}));
     QVERIFY(git(m_path, {"commit", "--amend", "-qm", "amended"}));
@@ -411,7 +401,6 @@ void RemotesTest::theWindowForcePushesAndAutoFetches() {
     QVERIFY2(forcedText.contains(QStringLiteral("result: ok")), qPrintable(forcedText));
     QCOMPARE(gitOut(m_bare, {"rev-parse", "refs/heads/main"}).trimmed(), amended);
 
-    // Auto-fetch: it is off until asked, then a tick brings a pushed commit in.
     QVERIFY(!window.autoFetchEnabled());
     window.setAutoFetchIntervalMs(50);
     window.setAutoFetch(true);

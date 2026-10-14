@@ -70,7 +70,6 @@ private slots:
 
 private:
     void buildConflict();
-    /// Resolve, record, abort, and merge again so rerere applies from memory.
     void recordThenReplay();
 
     std::unique_ptr<QTemporaryDir> m_dir;

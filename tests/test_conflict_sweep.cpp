@@ -156,8 +156,6 @@ void ConflictSweepTest::theSameLineChangedTwiceStillNeedsAPerson() {
     QVERIFY(sweep.needsAPersonPaths.contains(QStringLiteral("f.txt")));
     QVERIFY(session.rebaseInProgress());
 
-    // The file still carries its markers: a conflict that quietly lost them is a
-    // conflict nobody knows to look at.
     const QString content = readFile(m_path, QStringLiteral("f.txt"));
     QVERIFY(content.contains(QStringLiteral("<<<<<<<")));
     QVERIFY(content.contains(QStringLiteral("feature")));
@@ -176,7 +174,6 @@ void ConflictSweepTest::anAlreadyResolvedRebaseIsNotCommittedForTheReader() {
              qPrintable(error));
     QCOMPARE(result.status, RebaseStatus::Conflicted);
 
-    // The reader resolves it themselves — exactly what the conflict editor does.
     QVERIFY(session.resolveConflict(QStringLiteral("f.txt"), QStringLiteral("a\nB\nC\n"), &error));
 
     const RepoSession::SweepOutcome sweep = session.sweepOperationConflicts();
@@ -201,8 +198,6 @@ void ConflictSweepTest::theAutoPassSaysWhyAConflictNeededNobody() {
     const RepoSession::AutoResolveOutcome pass = session.autoResolveTrivialConflicts();
     QVERIFY(pass.stagedFiles.contains(QStringLiteral("f.txt")));
     QVERIFY(pass.needsAPerson.isEmpty());
-    // The reason is named, not just counted: the reader can check "only theirs
-    // changed" instead of trusting a number.
     QCOMPARE(pass.resolvedDetail.size(), 1);
     QVERIFY2(pass.resolvedDetail.first().startsWith(QStringLiteral("f.txt:")),
              qPrintable(pass.resolvedDetail.first()));
@@ -231,7 +226,6 @@ void ConflictSweepTest::theAutoPassIsSilentWhenAPersonIsNeeded() {
 
     const RepoSession::AutoResolveOutcome pass = session.autoResolveTrivialConflicts();
     QVERIFY(pass.needsAPerson.contains(QStringLiteral("f.txt")));
-    // Nothing was settled, so there is no reason to report.
     QVERIFY(pass.resolvedDetail.isEmpty());
 }
 

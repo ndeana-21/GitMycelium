@@ -9,9 +9,6 @@ class QPushButton;
 
 namespace gk {
 
-/// Drives the gitflow workflow: initialize it, or start and finish a topic branch.
-/// The dialog knows nothing about the repository — it returns what the reader asked
-/// for and the window performs it, so a button can never act on a stale branch.
 class GitFlowDialog : public QDialog {
     Q_OBJECT
 

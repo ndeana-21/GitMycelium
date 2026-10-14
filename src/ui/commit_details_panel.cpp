@@ -111,9 +111,6 @@ int statusIconSide() {
     return theme::scaledPixels(kIconSideBase);
 }
 
-/// One "1 modified" pair: the glyph that says how, and the count that says how
-/// many. Built as widgets rather than rich text so the icon is the same glyph the
-/// file rows use, not a second drawing of it.
 QWidget* statusChip(Glyph glyph, const QColor& colour, int count, const QString& label) {
     auto* chip = new QWidget;
     auto* layout = new QHBoxLayout(chip);
@@ -161,8 +158,6 @@ void CommitDetailsPanel::buildUi() {
     m_pages->addWidget(m_wip);
     wireWorkingTree();
 
-    // The message and the amend control that belongs to it, in a widget of its own so
-    // that the handle below it changes this height and nothing else.
     m_messageArea = new QWidget(split);
     m_messageArea->setObjectName(QStringLiteral("commitMessageArea"));
     auto* messageLayout = new QVBoxLayout(m_messageArea);
@@ -185,10 +180,6 @@ void CommitDetailsPanel::buildUi() {
     messageButtons->addWidget(m_amend);
     messageLayout->addLayout(messageButtons);
 
-    // Everything below the grip, in one widget: who wrote it, how much changed, the
-    // controls for the file list, and the files themselves. The page has exactly one
-    // handle — the one between the message and the author — so the author block and
-    // the list share whatever height is left under the message.
     m_bodyArea = new QWidget(split);
     m_metaArea = new QWidget(m_bodyArea);
     m_metaArea->setObjectName(QStringLiteral("commitMetaArea"));
@@ -200,8 +191,6 @@ void CommitDetailsPanel::buildUi() {
     auto* body = topLayout;
     auto* bottom = top;
 
-    // Author row: avatar, name, and when it was authored; the parent on the far
-    // right, where it does not compete with the name.
     auto* authorRow = new QHBoxLayout;
     authorRow->setContentsMargins(0, 0, 0, 0);
     authorRow->setSpacing(8);
@@ -239,10 +228,6 @@ void CommitDetailsPanel::buildUi() {
     toolbar->setContentsMargins(0, 0, 0, 0);
     toolbar->setSpacing(6);
 
-    // The sort is a button with an icon, not a dropdown: one click moves to the next
-    // order and the tooltip says which one is showing. A menu listed three entries for
-    // one piece of state the reader cannot see, and it looked nothing like the Commit
-    // Panel's own sort control sitting a page away in the same panel.
     m_sort = new QToolButton(bottom);
     m_sort->setObjectName(QStringLiteral("commitSort"));
     m_sort->setAutoRaise(true);
@@ -298,8 +283,6 @@ void CommitDetailsPanel::buildUi() {
 
     split->addWidget(m_messageArea);
     split->addWidget(m_bodyArea);
-    // The message keeps the height the reader dragged it to, and everything under it —
-    // author block, controls and files — splits what is left.
     split->setStretchFactor(0, 0);
     split->setStretchFactor(1, 1);
     split->setSizes({120, 430});
@@ -308,8 +291,6 @@ void CommitDetailsPanel::buildUi() {
     connect(m_amend, &QPushButton::clicked, this, [this] {
         emit messageAmendRequested(m_message->toPlainText());
     });
-    // Ctrl+Enter saves, Escape puts the original back: the two things anyone tries
-    // in a text field they did not mean to be editing.
     auto* save = new QShortcut(QKeySequence(QStringLiteral("Ctrl+Return")), m_message);
     connect(save, &QShortcut::activated, this, [this] {
         if (m_amend->isVisible()) {
@@ -370,9 +351,6 @@ void CommitDetailsPanel::cycleSort() {
 void CommitDetailsPanel::applySort() {
     m_files->setSort(m_sortOrder);
     m_fileView->expandAll();
-    // The button is the whole control, so the icon and the tooltip are the only place
-    // the current order can be read. Grouping gets the folder glyph because that is
-    // what it draws — one group row per kind of change.
     switch (m_sortOrder) {
     case CommitFilesModel::PathDescending:
         setThemedIcon(m_sort, Icon::SortDescending);
@@ -425,8 +403,6 @@ void CommitDetailsPanel::showCommit(const CommitInfo& commit, const std::vector<
     m_originalMessage = messageText(commit);
 
     m_message->setPlainText(m_originalMessage);
-    // Older commits are shown, not edited. Saying why beats a greyed-out box with
-    // no explanation.
     m_message->setReadOnly(!amendable);
     m_message->setToolTip(amendable
                               ? QStringLiteral("HEAD — Ctrl+Enter amends the message")
@@ -480,9 +456,6 @@ void CommitDetailsPanel::clear() {
 }
 
 void CommitDetailsPanel::refreshTheme() {
-    // The avatar is the only thing here with a size of its own, and the two dim
-    // labels carry a literal colour — everything else is styled by the global
-    // stylesheet, which the window re-applies on the same call.
     m_wip->refreshTheme();
     m_avatar->setFixedSize(avatarSide(), avatarSide());
     if (!m_workingTree && !m_commitId.isEmpty()) {

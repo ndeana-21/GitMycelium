@@ -18,22 +18,12 @@ struct StashEntry {
     std::string message; ///< reflog subject, e.g. "WIP on main: ..."
 };
 
-/// Stash, delegated to the `git` binary.
-///
-/// libgit2 has no stash at all, so this is CLI-only. The binary also honours the
-/// user's hooks and configuration, which a reimplementation would silently ignore.
-///
-/// Entries are addressed by oid, not by `stash@{n}`: the index a reader clicked
-/// can be stale by the time the operation runs.
 class StashOps {
 public:
     explicit StashOps(std::string workDir);
 
-    /// Newest first, exactly as `git stash list` prints it.
     std::vector<StashEntry> list() const;
 
-    /// `git stash push`. `paths` empty means the whole working tree; otherwise
-    /// only those paths are stashed. `includeUntracked` adds `--include-untracked`.
     SyncResult push(const std::string& message, bool includeUntracked,
                     const std::vector<std::string>& paths) const;
 
@@ -43,8 +33,6 @@ public:
     SyncResult apply(const std::string& stash) const;
     SyncResult pop(const std::string& stash) const;
     SyncResult drop(const std::string& stash) const;
-    /// `git stash branch <name> <stash>`: a branch at the stash's base, with the
-    /// stash applied to it.
     SyncResult branch(const std::string& stash, const std::string& name) const;
 
     const std::string& workDir() const { return m_workDir; }

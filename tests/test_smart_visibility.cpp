@@ -52,8 +52,6 @@ QString report(MainWindow& window, const QString& operation) {
 
 } // namespace
 
-/// Focus on the current branch and the filter presets: the two things that decide
-/// *which* branches the graph walks, beyond hiding one by hand.
 class SmartVisibilityTest : public QObject {
     Q_OBJECT
 
@@ -230,7 +228,6 @@ void SmartVisibilityTest::smartKeepsHeadTargetAndUpstreams() {
     QVERIFY(text.contains(QStringLiteral("label: main")));
     QVERIFY(text.contains(QStringLiteral("label: origin/main")));
     QVERIFY(text.contains(QStringLiteral("label: origin/feature/nora")));
-    // Bob's branch and the one that only exists locally are not on the path.
     QVERIFY(!text.contains(QStringLiteral("label: feature/bob")));
     QVERIFY(!text.contains(QStringLiteral("label: ancient")));
 
@@ -294,7 +291,6 @@ void SmartVisibilityTest::aheadKeepsBranchesToPush() {
     const QString text = report(window, QStringLiteral("preset:ahead"));
 
     QVERIFY(text.contains(QStringLiteral("label: local-ahead")));
-    // main is exactly at origin/main, so it is neither ahead nor behind.
     QVERIFY(!text.contains(QStringLiteral("label: main")));
 
     window.visibilityForDiagnostics(QStringLiteral("show"), QString());
@@ -319,7 +315,6 @@ void SmartVisibilityTest::clearingDropsEveryMode() {
     QVERIFY(text.contains(QStringLiteral("preset: my branches")));
     text = report(window, QStringLiteral("smart"));
     QVERIFY(text.contains(QStringLiteral("smart: yes")));
-    // Smart wins over the earlier preset; the preset was cleared by turning it on.
     QVERIFY(text.contains(QStringLiteral("preset: (none)")));
 
     text = report(window, QStringLiteral("show"));

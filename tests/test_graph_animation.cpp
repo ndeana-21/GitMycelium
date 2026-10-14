@@ -43,7 +43,6 @@ void GraphAnimationTest::aNewCommitAppears() {
     QCOMPARE(appear->durationMs, GraphAnimation::kFadeMs);
     QCOMPARE(GraphAnimation::progress(*appear, 100), 0.0);
     QCOMPARE(GraphAnimation::progress(*appear, 100 + GraphAnimation::kFadeMs / 2), 0.5);
-    // a moved down a row, so it is a move, not a second appear.
     QVERIFY(animation.find("a", GraphMotion::Move));
 }
 
@@ -74,7 +73,6 @@ void GraphAnimationTest::aMovedHeadPulses() {
     animation.observe(rows({{"a", 0, 0}, {"b", 1, 0}}), {}, "a", 0);
     animation.observe(rows({{"a", 0, 0}, {"b", 1, 0}}), {}, "b", 0);
     QVERIFY(animation.find("b", GraphMotion::Pulse));
-    // The rows did not change, so nothing else moved.
     QVERIFY(animation.find("a", GraphMotion::Move) == nullptr);
 }
 
@@ -94,7 +92,6 @@ void GraphAnimationTest::transitionsExpireAndActiveStops() {
     QVERIFY(animation.active(1000));
     QVERIFY(animation.advance(1000));
     QVERIFY(animation.active(1000 + GraphAnimation::kFadeMs - 1));
-    // Past the longest transition held, everything is gone and the timer can stop.
     QVERIFY(!animation.advance(1000 + GraphAnimation::kMoveMs + 1));
     QVERIFY(animation.empty());
     QVERIFY(!animation.active(1000 + GraphAnimation::kMoveMs + 1));
@@ -104,7 +101,6 @@ void GraphAnimationTest::clearingForgetsTheBaseline() {
     GraphAnimation animation;
     animation.observe(rows({{"a", 0, 0}}), {}, "a", 0);
     animation.clear();
-    // The next observe is a fresh baseline again, so nothing fades in.
     animation.observe(rows({{"a", 0, 0}, {"b", 1, 0}}), {}, "a", 0);
     QVERIFY(animation.empty());
 }

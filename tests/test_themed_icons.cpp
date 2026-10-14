@@ -66,8 +66,6 @@ void ThemedIconsTest::aRegisteredActionIconIsRedrawnOnAThemeChange() {
     retintThemedIcons();
     const QColor light = strongestPixel(action.icon().pixmap(QSize(18, 18)).toImage());
 
-    // The near-white chrome icon became a near-black one; the action was not
-    // rebuilt, only its icon was redrawn.
     QVERIFY(dark.lightness() > light.lightness());
 }
 

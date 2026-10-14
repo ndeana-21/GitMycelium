@@ -131,7 +131,6 @@ void PreferencesTest::storeRoundTripsTypedValues() {
     QVERIFY(store.contains(QStringLiteral("ui/test/bool")));
     store.remove(QStringLiteral("ui/test/bool"));
     QVERIFY(!store.contains(QStringLiteral("ui/test/bool")));
-    // The fallback is what an unset value reads as, not a zero.
     QCOMPARE(store.intValue(QStringLiteral("ui/test/missing"), 42), 42);
 }
 
@@ -155,7 +154,6 @@ void PreferencesTest::theWindowPersistsTheGraphAnimation() {
                                        true),
              false);
 
-    // A fresh window reads the saved choice rather than defaulting to motion.
     MainWindow window;
     auto* view = window.findChild<CommitGraphView*>();
     QVERIFY(view);
@@ -267,7 +265,6 @@ void PreferencesTest::theToolbarPreferencesButtonIsLive() {
             break;
         }
     }
-    // A button that cannot be pressed looks exactly like one that does nothing.
     QVERIFY(preferences);
     QVERIFY(preferences->isEnabled());
     QVERIFY(!preferences->icon().isNull());
@@ -306,8 +303,6 @@ void PreferencesTest::theCloneDialogGathersTheAnswers() {
     QVERIFY(buttons);
     QPushButton* ok = buttons->button(QDialogButtonBox::Ok);
     QVERIFY(ok);
-    // Nothing to clone until both ends are named; the dialog says so rather than
-    // closing and failing in the status bar.
     QVERIFY(!ok->isEnabled());
     url->setText(QStringLiteral("/tmp/repo.git"));
     dest->setText(QStringLiteral("/tmp/dest"));
@@ -338,7 +333,6 @@ void PreferencesTest::theCoauthorDialogGathersTheAuthors() {
 
     auto* ok = buttons->button(QDialogButtonBox::Ok);
     QVERIFY(ok);
-    // Nobody to credit yet, so OK has nothing to accept.
     QVERIFY(!ok->isEnabled());
 
     name->setText(QStringLiteral("Ada Lovelace"));
@@ -349,7 +343,6 @@ void PreferencesTest::theCoauthorDialogGathersTheAuthors() {
     // accept; the one author is what makes it available.
     QVERIFY(ok->isEnabled());
 
-    // The same person twice is one trailer, not two.
     name->setText(QStringLiteral("Ada Lovelace"));
     email->setText(QStringLiteral("ada@example.com"));
     add->click();

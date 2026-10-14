@@ -1,7 +1,3 @@
-/// The configurable keymap. The registry already lists a default per command; the
-/// point of this test is that an override changes the binding the window actually
-/// installs — a menu action's shortcut moves rather than gaining a second one — and
-/// that a clash is refused instead of leaving two commands on one key.
 
 #include "git/cli.h"
 #include "ui/keymap.h"
@@ -79,7 +75,6 @@ void KeymapTest::anUnsetCommandKeepsItsDefault() {
     Keymap keymap;
     const QKeySequence fallback(QStringLiteral("Ctrl+K"));
     QCOMPARE(keymap.effective(QStringLiteral("x.thing"), fallback), fallback);
-    // An override of "" is a command the reader unbound, not an unset one.
     keymap.setOverride(QStringLiteral("x.thing"), QKeySequence());
     QVERIFY(keymap.effective(QStringLiteral("x.thing"), fallback).isEmpty());
 }
@@ -108,7 +103,6 @@ void KeymapTest::aDuplicateIsRefused() {
     const QStringList out = window.keymapForDiagnostics(
         QStringLiteral("set"), {QStringLiteral("app.open"), QStringLiteral("Ctrl+B")});
     QVERIFY2(out.value(0).contains(QStringLiteral("view.branches")), qPrintable(out.value(0)));
-    // Still on its own default: the refused assignment changed nothing.
     QCOMPARE(window.commandSequence(QStringLiteral("app.open")), QStringLiteral("Ctrl+O"));
 }
 

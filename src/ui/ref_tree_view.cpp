@@ -60,7 +60,6 @@ void RefTreeView::startDrag(Qt::DropActions supportedActions) {
 
     const QString name = RefModel::refShortName(index);
     if (name.isEmpty()) {
-        // A group header is not a reference and must not be draggable.
         return;
     }
 

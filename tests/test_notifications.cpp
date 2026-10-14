@@ -48,7 +48,6 @@ void NotificationsTest::newestIsFirstAndProblemsAreCounted() {
     QCOMPARE(log.entries().front().text, QStringLiteral("merged"));
     QCOMPARE(log.entries().back().text, QStringLiteral("fetched"));
     QCOMPARE(log.problemCount(), 1);
-    // An empty message is not a notification.
     log.add(NotificationLog::Info, QStringLiteral("   "));
     QCOMPARE(log.entries().size(), 3);
 }
@@ -59,7 +58,6 @@ void NotificationsTest::theHistoryIsBounded() {
         log.add(NotificationLog::Info, QStringLiteral("entry %1").arg(i));
     }
     QCOMPARE(log.entries().size(), NotificationLog::kCapacity);
-    // The oldest went first.
     QCOMPARE(log.entries().front().text,
              QStringLiteral("entry %1").arg(NotificationLog::kCapacity + 24));
 }

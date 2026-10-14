@@ -81,7 +81,6 @@ void RecentRepositoriesTest::theListIsCappedAtTen() {
         recent.touch(QStringLiteral("/r%1").arg(i), QStringLiteral("r%1").arg(i), at(i));
     }
     QCOMPARE(recent.entries().size(), RecentRepositories::kMaxEntries);
-    // The two oldest fell off the end; the newest is at the front.
     QCOMPARE(recent.entries().front().path, QStringLiteral("/r11"));
     QCOMPARE(recent.entries().back().path, QStringLiteral("/r2"));
 }

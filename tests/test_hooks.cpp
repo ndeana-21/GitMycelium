@@ -85,7 +85,6 @@ void HooksTest::cleanup() {
 void HooksTest::theListReportsSamplesAndServerHooks() {
     const std::vector<HookEntry> hooks = HooksOps(m_path.toStdString()).list();
 
-    // `git init` leaves every hook as a `.sample`; none of them runs.
     const HookEntry* commit = findHook(hooks, QStringLiteral("pre-commit"));
     QVERIFY(commit != nullptr);
     QVERIFY(commit->state == HookState::Sample);
@@ -112,7 +111,6 @@ void HooksTest::enablingAdoptsTheSample() {
     QVERIFY(hook != nullptr);
     QVERIFY(hook->state == HookState::Enabled);
     QVERIFY(QFileInfo(QString::fromStdString(hook->path)).isExecutable());
-    // The content is git's own sample, copied into place.
     QVERIFY(!session.hookContent(QStringLiteral("pre-commit")).isEmpty());
     QVERIFY(QFileInfo::exists(
         QDir(m_path).filePath(QStringLiteral(".git/hooks/pre-commit.sample"))));
@@ -127,7 +125,6 @@ void HooksTest::writingDisablingAndEnabling() {
                                &error),
              qPrintable(error));
 
-    // A fresh file has no executable bit: written is not enabled.
     const HookEntry* written = findHook(session.hooks(), QStringLiteral("pre-commit"));
     QVERIFY(written != nullptr);
     QVERIFY(written->state == HookState::Disabled);
@@ -157,7 +154,6 @@ void HooksTest::hooksPathFollowsTheConfig() {
     QVERIFY2(path.endsWith(QStringLiteral("myhooks")), qPrintable(path));
     QCOMPARE(QFileInfo(path).fileName(), QStringLiteral("myhooks"));
 
-    // Enabling writes into the configured directory, not into `.git/hooks`.
     QVERIFY2(session.writeHook(QStringLiteral("pre-commit"), QStringLiteral("#!/bin/sh\n"),
                                &error),
              qPrintable(error));

@@ -23,12 +23,6 @@ namespace gk {
 
 class RepoSession;
 
-/// Lazily paged commit table. Each fetchMore() asks the session for the next
-/// page in the background; rows are appended when it arrives. This keeps the
-/// GUI responsive and memory bounded on million-commit histories.
-///
-/// The history covers *every* reference, not just HEAD: a graph that only shows
-/// the current branch is not a graph.
 class CommitModel : public QAbstractTableModel {
     Q_OBJECT
 
@@ -56,11 +50,8 @@ public:
     explicit CommitModel(RepoSession* session, QObject* parent = nullptr);
 
 signals:
-    /// A page request started or finished (`isLoading`).
     void loadingChanged();
 
-    /// Emitted when the graph lane layout changed and the graph column must be
-    /// repainted (the commit rows themselves did not change).
     void graphChanged();
 
     /// The hover highlight's branch changed, so every visible row may need
@@ -88,10 +79,8 @@ public:
     /// layout, so answering true here loaded the whole history while the window sat idle.
     bool canFetchMore(const QModelIndex& parent) const override;
     void fetchMore(const QModelIndex& parent) override;
-    /// Another page can be asked for now: there is more history and none is in flight.
     bool canLoadMore() const;
 
-    /// Commits loaded so far, without the working-tree rows and date separators.
     int realRowCount() const;
     /// True while a page is in flight. `canLoadMore` is false then, which is not
     /// the same as "no more history" — a caller paging on its own behalf has to
@@ -107,10 +96,8 @@ public:
                       const QModelIndex& parent) override;
     Qt::DropActions supportedDropActions() const override;
 
-    /// Safe to call when no repository is open.
     void reset();
 
-    /// Re-reads the reference decorations without touching the loaded rows.
     void refreshRefs();
 
     /// How the history groups under date separators. Changing it restarts the
@@ -132,8 +119,6 @@ public:
     void setRefIcons(bool show);
     bool refIcons() const { return m_refIcons; }
 
-    /// How the Date column reads. The window owns the choice; the model only paints
-    /// it, so a format change is one setter and one repaint.
     void setCommitDateFormat(CommitDateFormat format);
     CommitDateFormat commitDateFormat() const { return m_dateFormat; }
 
@@ -141,8 +126,6 @@ public:
     /// it restarts the history: hiding a branch changes which commits exist.
     void setHistoryFilter(const HistoryFilter& filter);
 
-    /// Branches pinned to the left of the graph. Lane order is HEAD, then these,
-    /// then the focused branch, then everything else.
     void setPinnedBranches(const QStringList& names);
 
     /// The branch whose commits the graph keeps lit, dimming the rest. Empty
@@ -179,18 +162,14 @@ public:
     /// "my working tree".
     void setWorkingTreeChanges(const std::vector<FileChange>& changes);
 
-    /// Row of a loaded commit, or -1 when it is not in the loaded range.
     int rowForCommit(const QString& commitId) const;
 
     /// Labels attached to a commit, in stacking order (branches, then remotes,
     /// then tags). Empty for a commit no reference points at.
     const std::vector<RefInfo>& refsAt(int row) const;
-    /// Whether a remote branch whose tip sits on the trunk's line keeps its label.
     void setShowMergedRemotes(bool show);
     bool showMergedRemotes() const { return m_showMergedRemotes; }
 
-    /// Palette index of a reference's colour — stable for the whole session so
-    /// a branch keeps its colour across refreshes.
     int refColorIndex(const QString& shortName) const;
 
     /// The parallel lists `RefPillLayout::arrange` needs for one row, built in one
@@ -214,10 +193,8 @@ public:
     /// Moves on with every `reset`: a page or a decision taken for an older history.
     quint64 generation() const { return m_generation; }
 
-    /// The id the checked-out branch points at, empty when that commit is not loaded.
     Oid headTipId() const;
 
-    /// The loaded commits in the shape the lineage walk wants: id and parents only.
     std::vector<LineageRow> lineageRows() const;
 
     /// The checked-out branch's own line over the loaded commits, newest first. Empty when
@@ -233,7 +210,6 @@ public:
     void setPathAnchor(const QString& commitId);
     void setPathAnchorRow(int row);
     QString pathAnchor() const { return m_pathAnchor; }
-    /// Traced on first use after the graph or the anchor changed.
     const BranchPath& branchPath() const;
 
 private slots:
@@ -258,8 +234,6 @@ private:
     /// HEAD's commit id read from the refs themselves, so the synthetic WIP row can
     /// point at the branch before the commit it sits on has been paged in.
     Oid headTipFromRefs() const;
-    /// The newest loaded commit, skipping separators and working-tree rows; null
-    /// when nothing but those are loaded.
     const CommitInfo* lastRealCommit() const;
 
     RepoSession* m_session = nullptr;
@@ -267,11 +241,9 @@ private:
     GraphLayout m_graph;
     int m_wipCount = 0;
     int m_currentWipRow = -1;
-    /// What each of the front `m_wipCount` rows stands for, in the same order.
     std::vector<WorktreeWip> m_wipInfo;
     bool m_hasMore = true;
     bool m_loading = false;
-    /// Bumped by every reset; a page carries the value it was requested with.
     quint64 m_generation = 0;
 
     std::unordered_map<std::string, std::vector<RefInfo>> m_refsByCommit;
@@ -290,12 +262,8 @@ private:
     QString m_focusedBranch;
     bool m_refIcons = true;
     CommitDateFormat m_dateFormat = CommitDateFormat::Iso;
-    /// How the loaded history groups under date separators, and how many of
-    /// `m_rows` are such separators rather than commits.
     TimelinePeriod m_timelinePeriod = TimelinePeriod::None;
     int m_timelineCount = 0;
-    /// Refs the walk starts from and labels. Defaults to every ref, the graph's
-    /// normal view; an empty `visibleRefs` means all.
     HistoryFilter m_historyFilter{HistoryScope::AllRefs, {}};
     QStringList m_pinnedBranches;
     /// The hovered branch and the commits it lights: its tip and ancestry in the

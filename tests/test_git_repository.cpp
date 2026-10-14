@@ -177,7 +177,6 @@ private slots:
         QVERIFY(git(m_path, {"checkout", "main"}));
         QVERIFY(commitFile("a.txt", "main\n", "main change"));
 
-        // Conflicting merge leaves MERGE_HEAD behind.
         git(m_path, {"merge", "side"});
 
         const auto repo = open();
@@ -249,8 +248,6 @@ private slots:
         QCOMPARE(files.at(0).kind, ChangeKind::Modified);
     }
 
-    /// Rewording the HEAD commit is the one place this client writes history, so
-    /// it is pinned here: a new commit object, the same tree, the same branch.
     void amendsHeadMessageKeepingTheTree() {
         QVERIFY(commitFile("a.txt", "hello\n", "first commit"));
         QVERIFY(commitFile("b.txt", "world\n", "second commit"));
@@ -266,7 +263,6 @@ private slots:
         QVERIFY2(after.headId != before.headId, "an amend must produce a new commit object");
         QCOMPARE(after.headBranch, before.headBranch);
 
-        // The content did not change, only what the commit says about itself.
         const auto filesAfter = repo->changedFiles(after.headId);
         QCOMPARE(filesAfter.size(), filesBefore.size());
         QCOMPARE(filesAfter.front().path, filesBefore.front().path);
@@ -277,8 +273,6 @@ private slots:
                  QStringLiteral("second commit, reworded"));
     }
 
-    /// HEAD on an unborn branch has no commit to reword, and must say so rather
-    /// than write something invented.
     void amendingWithoutACommitFails() {
         const auto repo = open();
         bool threw = false;
@@ -318,8 +312,6 @@ private slots:
         QCOMPARE(QString::fromStdString(upstream.name), QStringLiteral("origin/feature"));
     }
 
-    /// A remote-tracking branch that is not there must fail loudly rather than
-    /// leave a branch pointing nowhere.
     void trackingABranchThatDoesNotExistFails() {
         QVERIFY(commitFile("a.txt", "hello\n", "first commit"));
 
@@ -334,8 +326,6 @@ private slots:
         QVERIFY2(!hasBranch(*repo, "feature"), "a failed attempt must not leave a branch behind");
     }
 
-    /// The ref is there but no remote is configured, so the upstream cannot be set:
-    /// the branch must not survive half-made.
     void aBranchWithoutAWorkingUpstreamIsNotLeftBehind() {
         QVERIFY(commitFile("a.txt", "hello\n", "first commit"));
         QVERIFY(git(m_path, {"update-ref", "refs/remotes/origin/feature", "HEAD"}));
@@ -372,7 +362,6 @@ private slots:
         for (const auto& line : diff.hunks.at(0).lines) {
             if (line.kind == DiffLineKind::Removed) {
                 sawRemoved = true;
-                // Line text must not carry the leading '-' origin character.
                 QCOMPARE(QString::fromStdString(line.text), QStringLiteral("beta"));
             }
             if (line.kind == DiffLineKind::Added) {

@@ -7,17 +7,8 @@
 
 namespace gk {
 
-/// Turns a repository's bytes into text for the viewer.
-///
-/// A git blob stores bytes and nothing else: no encoding is recorded anywhere, and
-/// a file's bytes are whatever the person who wrote it had. Reading them as UTF-8
-/// turns a CP1251 source file into question marks — the diff of a Russian file
-/// becomes noise, and it looks like the file is broken rather than misread.
 class TextEncoding {
 public:
-    /// The codecs offered in the picker. A curated order first — the ones that
-    /// actually turn up in code and prose — then whatever else this build of Qt
-    /// knows, so nothing is hidden, only ordered.
     static QStringList codecs();
 
     /// The name that best fits `bytes`: a byte order mark if there is one, then

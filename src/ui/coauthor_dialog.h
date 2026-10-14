@@ -14,10 +14,6 @@ class QPushButton;
 
 namespace gk {
 
-/// Collects the people to credit in a commit's `Co-authored-by:` trailer block. It
-/// only gathers names and addresses; the window turns them into the trailer with
-/// git's own `interpret-trailers`, so the message the reader sees is the message
-/// that gets committed.
 class CoAuthorDialog : public QDialog {
     Q_OBJECT
 

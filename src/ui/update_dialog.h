@@ -12,8 +12,6 @@ namespace update {
 class Updater;
 }
 
-/// Help → Check for Updates: what is installed, what is published, and one button
-/// that downloads, verifies and puts the new build in place.
 class UpdateDialog : public QDialog {
     Q_OBJECT
 

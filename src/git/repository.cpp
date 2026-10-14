@@ -132,7 +132,6 @@ bool isGitlinkDelta(const git_diff_delta* d) {
                  d->new_file.mode == GIT_FILEMODE_COMMIT);
 }
 
-/// The all-zero oid git uses for "no object", as the empty string.
 Oid nonZeroOid(const Oid& value) {
     return value == std::string(GIT_OID_HEXSZ, '0') ? Oid{} : value;
 }
@@ -359,7 +358,6 @@ bool pathUsesExternalFilter(git_repository* repo, const std::string& path) {
     return externalFilterConfigured(repo, value);
 }
 
-/// Stages `paths` (everything when empty) through `git add`, which runs the filters.
 void stageWithGit(git_repository* repo, const std::vector<std::string>& paths) {
     const std::string workDir = workDirOf(repo).string();
     if (workDir.empty()) {
@@ -484,7 +482,6 @@ ConflictKind classifyConflict(bool hasAncestor, bool hasOurs, bool hasTheirs) {
     return ConflictKind::BothDeleted;
 }
 
-/// Owns every libgit2 handle needed to diff one commit against its first parent.
 struct CommitDiff {
     git_commit* commit = nullptr;
     git_tree* tree = nullptr;
@@ -683,7 +680,6 @@ Repository::Repository(git_repository* repo) : m_repo(repo) {
 }
 
 Repository::~Repository() {
-    // The walk holds a reference to the repository; drop it first.
     invalidateCommitWalk();
     if (m_repo) {
         git_repository_free(m_repo);
@@ -755,7 +751,6 @@ std::vector<RefInfo> Repository::refs() const {
         const char* rawName = git_reference_name(ref);
         const std::string full = rawName ? rawName : "";
 
-        // Resolve symbolic refs (e.g. refs/remotes/origin/HEAD) to a target oid.
         git_reference* resolved = nullptr;
         const git_oid* target = nullptr;
         if (git_reference_type(ref) == GIT_REFERENCE_SYMBOLIC) {
@@ -1621,7 +1616,6 @@ std::vector<std::string> Repository::skipWorktreePaths() const {
     if (workDir.empty()) {
         return out;
     }
-    // `-v` tags each entry; `S` is skip-worktree. `-z` so a path is a path.
     const ProcessResult run = runGit({"ls-files", "-v", "-z"}, workDir);
     if (run.exitCode != 0) {
         fail("cannot list the index: " + failureText(run));
@@ -1849,7 +1843,6 @@ FileDiff fileDiffFromDiff(git_diff* diff, const std::string& path) {
     return result;
 }
 
-/// The tree a revision names, or null for an empty revision (which diffs as "empty").
 git_tree* treeAtRevision(git_repository* repo, const Oid& revision) {
     if (revision.empty()) {
         return nullptr;
@@ -2308,10 +2301,6 @@ std::string Repository::conflictMarkedContent(const std::string& path, bool* tex
 
     git_index* index = nullptr;
     check(git_repository_index(&index, m_repo), "cannot read the index");
-    // The git binary writes the index too — a rebase, a merge, a stash — and libgit2
-    // keeps the copy it read when the repository was opened. Without this, a conflict
-    // created by `git rebase` is invisible: the conflict page finds nothing to resolve
-    // and the reader is told an operation stopped while nothing asks for them.
     git_index_read(index, 0);
 
     bool anySideBinary = false;
@@ -2474,10 +2463,6 @@ void Repository::resolveConflict(const std::string& path, const std::string& con
 
     git_index* index = nullptr;
     check(git_repository_index(&index, m_repo), "cannot read the index");
-    // The git binary writes the index too — a rebase, a merge, a stash — and libgit2
-    // keeps the copy it read when the repository was opened. Without this, a conflict
-    // created by `git rebase` is invisible: the conflict page finds nothing to resolve
-    // and the reader is told an operation stopped while nothing asks for them.
     git_index_read(index, 1);
     // Adding over a conflicted path is what resolves it, and it moves the three
     // stages into the resolve-undo record on the way, as `git add` does. Removing
@@ -2501,7 +2486,6 @@ std::vector<std::string> Repository::resolvedConflictPaths() const {
             continue;
         }
         const git_index_entry* stage = nullptr;
-        // A path with an index stage above zero is conflicted again.
         for (int s = 1; s <= 3 && !stage; ++s) {
             stage = git_index_get_bypath(index, entry->path, s);
         }
@@ -2870,10 +2854,6 @@ Oid Repository::commitMerge(const std::string& message) {
 
     git_index* index = nullptr;
     check(git_repository_index(&index, m_repo), "cannot read the index");
-    // The git binary writes the index too — a rebase, a merge, a stash — and libgit2
-    // keeps the copy it read when the repository was opened. Without this, a conflict
-    // created by `git rebase` is invisible: the conflict page finds nothing to resolve
-    // and the reader is told an operation stopped while nothing asks for them.
     git_index_read(index, 1);
     git_oid treeId;
     check(git_index_write_tree(&treeId, index), "cannot write the index tree");
@@ -3158,8 +3138,6 @@ std::vector<ReflogEntry> Repository::reflog(std::size_t limit) const {
                 "-n", std::to_string(limit)},
                workDir);
     if (run.exitCode != 0) {
-        // A repository with no reflog (freshly created) answers nothing rather than
-        // failing: an empty history of moves is not an error.
         if (run.out.empty()) {
             return {};
         }
@@ -3194,8 +3172,6 @@ std::vector<ReflogEntry> Repository::reflog(std::size_t limit) const {
         entry.author = fields[3];
         entry.date = fields[4];
         entry.message = fields[5];
-        // git writes the verb and the message as one subject, "commit: the thing". A
-        // reader wants the verb on its own line, so it is split here.
         const std::size_t colon = entry.message.find(": ");
         if (colon != std::string::npos) {
             entry.action = entry.message.substr(0, colon);
@@ -3350,8 +3326,6 @@ std::string Repository::indexDiffCli(bool cached, const std::string& path) const
     if (workDir.empty()) {
         return {};
     }
-    // `--cached` is HEAD against the index, an unborn HEAD included; without it,
-    // the index against the working tree. The flags are diffCliText's, for its reason.
     std::vector<std::string> args = {"-c",            "core.quotepath=false",
                                      "diff",          "--no-color",
                                      "--no-ext-diff", "--no-renames",
@@ -3466,7 +3440,6 @@ RebaseResult Repository::rebaseOnto(const std::string& branch, const std::string
         fail("a rebase or merge is already in progress");
     }
 
-    // Rebasing <branch> onto <onto> checks the branch out first.
     checkoutBranch(branch);
 
     const char* workDirRaw = git_repository_workdir(m_repo);
@@ -3785,11 +3758,9 @@ void Repository::dropCommit(const Oid& commitId) {
         runGit({"rebase", "--onto", parent, commitId}, workDir);
     if (run.exitCode != 0) {
         if (rebaseInProgress()) {
-            // A conflict: not a failure, a state with a person needed.
             RebaseResult conflict;
             conflict.status = RebaseStatus::Conflicted;
             conflict.conflictCount = conflicts().size();
-            // The caller reads the state, not this value; keep the shape honest anyway.
             (void)conflict;
             return;
         }
@@ -3960,7 +3931,6 @@ std::string Repository::targetBranch() const {
         }
     }
 
-    // No remote default recorded: fall back to the conventional base names.
     for (const char* candidate : {"refs/heads/main", "refs/heads/master"}) {
         git_reference* ref = nullptr;
         if (git_reference_lookup(&ref, m_repo, candidate) == 0 && ref) {
@@ -4064,7 +4034,6 @@ bool Repository::canFastForward(const std::string& branch, const Oid& target) co
     git_reference_free(ref);
     check(peelRc, "cannot resolve branch tip: " + branch);
 
-    // A commit id or a branch name, whichever the caller has.
     const git_oid targetOid = resolveRevisionToCommit(m_repo, target);
 
     // Fast-forward means: the branch tip is an ancestor of the target. Asking
@@ -4099,8 +4068,6 @@ void Repository::renameBranch(const std::string& from, const std::string& to) {
           "no such branch: " + from);
 
     git_reference* renamed = nullptr;
-    // force = 0: refusing to overwrite an existing branch is the safe default,
-    // and the error message names the clash.
     const int rc = git_branch_move(&renamed, branch, to.c_str(), 0);
     if (renamed) {
         git_reference_free(renamed);

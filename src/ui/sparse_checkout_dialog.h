@@ -8,12 +8,6 @@ class QListWidget;
 
 namespace gk {
 
-/// Chooses the cone of a sparse checkout: which top-level directories stay on
-/// disk. The dialog knows nothing about the repository — it returns the choice and
-/// the window performs it, so a checkbox can never act on a stale tree.
-///
-/// Removing a directory takes its files off disk (they stay in HEAD), so the
-/// dialog says so rather than letting a click look like a filter.
 class SparseCheckoutDialog : public QDialog {
     Q_OBJECT
 
@@ -26,7 +20,6 @@ public:
                          QWidget* parent = nullptr);
 
     Action action() const { return m_action; }
-    /// The checked directories, in the list's order.
     QStringList chosenDirectories() const;
 
 private:

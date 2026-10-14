@@ -59,7 +59,6 @@ void SyntaxHighlightTest::pathsMapToLanguages() {
     QCOMPARE(languageForPath(QStringLiteral("README.md")), Language::Markdown);
     QCOMPARE(languageForPath(QStringLiteral("layout.ui")), Language::Xml);
     QCOMPARE(languageForPath(QStringLiteral("migrations/001.sql")), Language::Sql);
-    // No extension to read: these are decided by name.
     QCOMPARE(languageForPath(QStringLiteral("CMakeLists.txt")), Language::Cmake);
     QCOMPARE(languageForPath(QStringLiteral("Makefile")), Language::Cmake);
     QCOMPARE(languageForPath(QStringLiteral("Dockerfile")), Language::Shell);
@@ -71,7 +70,6 @@ void SyntaxHighlightTest::unknownLanguagesStayPlain() {
 
     const QString line = QStringLiteral("int main() { return 0; }");
     QVERIFY(colourOf(line, Language::None, 0).isValid() == false);
-    // A line with no tokens worth colouring produces no runs at all.
     HighlightState blank;
     QVERIFY(highlightLine(QStringLiteral("   "), Language::Cpp, blank).isEmpty());
 }
@@ -85,7 +83,6 @@ void SyntaxHighlightTest::cppTokensAreColoured() {
     QCOMPARE(colourOf(line, Language::Cpp, at(line, QStringLiteral("how many"))),
              theme::syntaxComment());
 
-    // A call is not a keyword, and a capitalised name is a type.
     const QString call = QStringLiteral("QString value = compute();");
     QCOMPARE(colourOf(call, Language::Cpp, at(call, QStringLiteral("compute"))),
              theme::syntaxFunction());
@@ -102,7 +99,6 @@ void SyntaxHighlightTest::aBlockCommentCarriesToTheNextLine() {
 
     const QVector<SyntaxRun> b = highlightLine(second, Language::Cpp, state);
     QCOMPARE(colourAt(b, 3), theme::syntaxComment());
-    // The comment ends at the terminator; what follows is code again.
     QCOMPARE(colourAt(b, second.indexOf(QStringLiteral("int"))), theme::syntaxType());
     QCOMPARE(colourAt(b, second.indexOf(QStringLiteral("1"))), theme::syntaxNumber());
     QCOMPARE(state.block, HighlightState::Block::None);
@@ -110,7 +106,6 @@ void SyntaxHighlightTest::aBlockCommentCarriesToTheNextLine() {
 
 void SyntaxHighlightTest::aStringIsNotEndedByAnEscapedQuote() {
     const QString line = QStringLiteral("s = \"a \\\" b\" + c;");
-    // Both the escaped quote and the letters after it are still the string.
     QCOMPARE(colourOf(line, Language::Cpp, line.indexOf(QStringLiteral("b"))),
              theme::syntaxString());
     QCOMPARE(colourOf(line, Language::Cpp, line.indexOf(QStringLiteral("\""), 8)),
@@ -121,7 +116,6 @@ void SyntaxHighlightTest::aLineCommentSwallowsWhatFollows() {
     const QString line = QStringLiteral("let x = 1; # not code \"here\"");
     QCOMPARE(colourOf(line, Language::Python, line.indexOf(QStringLiteral("#"))),
              theme::syntaxComment());
-    // The quoted word inside the comment stays a comment.
     QCOMPARE(colourOf(line, Language::Python, line.indexOf(QStringLiteral("here"))),
              theme::syntaxComment());
 }
@@ -209,12 +203,9 @@ void SyntaxHighlightTest::emphasisIsLaidOverSyntaxRatherThanNesting() {
     QVERIFY(html.contains(theme::syntaxString().name()));
     QVERIFY(html.contains(QStringLiteral("#335544")));
     QVERIFY(html.contains(QStringLiteral("old")));
-    // Each piece is wrapped once: nesting shows as a span inside a span.
     const int firstClose = html.indexOf(QStringLiteral("</span>"));
     const int secondOpen = html.indexOf(QStringLiteral("<span"), firstClose);
     if (secondOpen >= 0) {
-        // The next span must open after the previous one closed, and no piece may
-        // carry two colours.
         QVERIFY(html.count(QStringLiteral("<span")) <= 3);
     }
 }

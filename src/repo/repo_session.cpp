@@ -559,7 +559,6 @@ bool RepoSession::undo(QString* labelOut, QString* errorOut) {
     try {
         m_repo->applyRefDelta(entry->before, entry->after, true);
     } catch (const std::exception& error) {
-        // Put the repository back the way the reader left it before failing.
         try {
             m_repo->applyRefDelta(current, entry->before, false);
         } catch (const std::exception&) {
@@ -886,7 +885,6 @@ bool operationPointersIntact(const RefState& current, const RefState& from, cons
         if (to.refs.find(entry.first) != to.refs.end()) {
             continue;
         }
-        // The operation removed it; it must still be gone.
         if (current.refs.find(entry.first) != current.refs.end()) {
             return false;
         }
@@ -1149,7 +1147,6 @@ RepoSession::AutoResolveOutcome RepoSession::autoResolveTrivialConflicts() {
         bool textAvailable = false;
         const std::string marked = m_repo->conflictMarkedContent(entry.path, &textAvailable);
         if (!textAvailable) {
-            // Binary, or stages that make no text at all: a person decides.
             outcome.needsAPerson << path;
             continue;
         }
@@ -2280,7 +2277,6 @@ std::vector<WorktreeWip> RepoSession::worktreeWip(
     const bool rebaseOpen = rebaseInProgress();
 
     std::vector<WorktreeEntry> list = worktrees();
-    // Current first: its node is the one the reader calls "mine".
     std::stable_sort(list.begin(), list.end(),
                      [](const WorktreeEntry& a, const WorktreeEntry& b) {
                          return a.current && !b.current;
@@ -2437,8 +2433,6 @@ std::vector<SubmoduleEntry> RepoSession::submodules() const {
 
 namespace {
 
-/// Runs one submodule command and turns a failure into a GitError carrying git's
-/// own output. The same shape as the worktree helper.
 template <typename Fn>
 bool runSubmodule(std::unique_ptr<Repository>& repo, QMutex* mutex,
               std::atomic<quint64>* epoch, QString* errorOut,
@@ -2560,7 +2554,6 @@ SyncResult RepoSession::syncBlocking(SyncKind kind, const QString& remote,
 }
 
 SyncResult RepoSession::fetchBlocking(const QStringList& remotes, bool prune) const {
-    // The binary moves refs and objects behind libgit2's back.
     const RetireSnapshotOnExit retire{this};
     const RepoInfo repositoryInfo = info();
     if (repositoryInfo.workDir.empty()) {
@@ -2637,7 +2630,6 @@ void RepoSession::requestFetch(const QStringList& remotes, bool prune) {
 }
 
 SyncResult RepoSession::pushTagBlocking(const QString& remote, const QString& tag) const {
-    // The binary moves refs and objects behind libgit2's back.
     const RetireSnapshotOnExit retire{this};
     const RepoInfo repositoryInfo = info();
     if (repositoryInfo.workDir.empty()) {
@@ -2650,7 +2642,6 @@ SyncResult RepoSession::pushTagBlocking(const QString& remote, const QString& ta
 }
 
 SyncResult RepoSession::deleteRemoteTagBlocking(const QString& remote, const QString& tag) const {
-    // The binary moves refs and objects behind libgit2's back.
     const RetireSnapshotOnExit retire{this};
     const RepoInfo repositoryInfo = info();
     if (repositoryInfo.workDir.empty()) {
@@ -2984,7 +2975,6 @@ bool RepoSession::lfsCheckout(QString* errorOut) {
 }
 
 SyncResult RepoSession::lfsBlocking(LfsTask task, const QString& remote, const QString& ref) const {
-    // The binary moves refs and objects behind libgit2's back.
     const RetireSnapshotOnExit retire{this};
     QMutexLocker lock(&m_mutex);
     SyncResult result;
@@ -3034,7 +3024,6 @@ void RepoSession::requestLfs(LfsTask task, const QString& remote, const QString&
 }
 
 SyncResult RepoSession::maintenanceBlocking(MaintenanceTask task) const {
-    // The binary moves refs and objects behind libgit2's back.
     const RetireSnapshotOnExit retire{this};
     QMutexLocker lock(&m_mutex);
     SyncResult result;
@@ -3103,7 +3092,6 @@ std::unordered_map<std::string, std::vector<RefInfo>> RepoSession::refsByCommit(
 
 void RepoSession::requestCommits(quint64 generation, quint64 skip, quint32 limit,
                                  const HistoryFilter& filter) {
-    // Fire-and-forget on the global pool; results come back via a queued signal.
     startWorker([this, generation, skip, limit, filter] {
         QVector<CommitInfo> page;
         bool hasMore = false;
@@ -3174,8 +3162,6 @@ std::vector<CommitInfo> RepoSession::searchCommitsBlocking(const QString& query,
 }
 
 void RepoSession::requestCommitSearch(const QString& query, CommitSearchField field, quint32 limit) {
-    // Fire-and-forget on the global pool, like a history page: a search over a
-    // million commits walks history, and the GUI thread must not wait for it.
     startWorker([this, query, field, limit] {
         std::vector<CommitInfo> rows;
         QString error;

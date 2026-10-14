@@ -18,7 +18,6 @@ namespace gk {
 class CommitGraph;
 class TopoWalk;
 
-/// Thrown from every libgit2 failure. Message comes from git_error_last().
 class GitError : public std::runtime_error {
 public:
     explicit GitError(const std::string& msg) : std::runtime_error(msg) {}
@@ -36,8 +35,6 @@ public:
 
     static std::unique_ptr<Repository> open(const std::string& path);
 
-    /// Creates a repository at `path`, with `initialBranch` as the unborn HEAD.
-    /// Refuses to reinitialise an existing repository.
     static std::unique_ptr<Repository> init(const std::string& path,
                                             const std::string& initialBranch = "main");
 
@@ -85,7 +82,6 @@ public:
     /// for a root commit).
     std::vector<ChangedFile> changedFiles(const Oid& commitId) const;
 
-    /// Line-level diff of one path in `commitId` against its first parent.
     FileDiff commitFileDiff(const Oid& commitId, const std::string& path) const;
 
     /// Files that differ between two revisions. An empty `base` diffs against
@@ -100,14 +96,12 @@ public:
     std::vector<ChangedFile> workdirChangedFilesAgainst(const Oid& revision) const;
     FileDiff workdirFileDiffAgainst(const Oid& revision, const std::string& path) const;
 
-    /// Per-line provenance of `path`, at `revision` (empty = the working tree).
     std::vector<BlameLine> blame(const std::string& path, const Oid& revision = {}) const;
 
     /// The commits that touched `path`, newest first, following renames
     /// (`git log --follow`); libgit2's revwalk has no equivalent.
     std::vector<FileHistoryEntry> fileHistory(const std::string& path) const;
 
-    /// The reflog, newest first, up to `limit` entries, through the git binary.
     std::vector<ReflogEntry> reflog(std::size_t limit) const;
 
     /// Commits from every ref matching `query`, newest first, paged. Message and
@@ -127,7 +121,6 @@ public:
     /// `staged` is false, into the index when it is. This is `git restore`.
     void restoreFile(const Oid& revision, const std::string& path, bool staged);
 
-    /// Line-level diff of one path between the index and the working tree.
     FileDiff workdirFileDiff(const std::string& path) const;
 
     /// One path between HEAD's tree and the index — what is staged. An unborn HEAD
@@ -136,7 +129,6 @@ public:
 
     std::string indexFileContent(const std::string& path) const;
 
-    /// Applies a unified patch to the index and nothing else.
     void applyPatchToIndex(const std::string& patch);
 
     /// Applies a unified patch to the working tree and nothing else. The reverse of
@@ -164,7 +156,6 @@ public:
     /// binary, so filters and hooks apply. Refuses while an operation is open.
     void discardAllChanges();
 
-    /// Commits the current index and moves the checked-out branch to it.
     Oid createCommit(const std::string& message);
 
     /// The same, signing the commit when `sign` is set. Signing is done by the
@@ -187,7 +178,6 @@ public:
     /// The patterns in `.git/info/exclude`, the ignore file that is the reader's own
     /// (never committed, never shared); comments and blank lines left out.
     std::vector<std::string> localExcludePatterns() const;
-    /// Removes every line that is exactly `pattern` from `.git/info/exclude`.
     void removeLocalExcludePattern(const std::string& pattern);
     /// Tracked files whose changes are hidden here only (`--skip-worktree`): an
     /// ignore rule does nothing for a tracked file, this is the local way to stop
@@ -215,7 +205,6 @@ public:
     /// suggestions. Bounded, because a monorepo's log is not a list to walk.
     std::vector<CoAuthor> recentAuthors(std::size_t limit) const;
 
-    /// Paths carrying conflict stages in the index (empty when clean).
     std::vector<ConflictEntry> conflicts() const;
     /// Paths already resolved in the open operation: git's resolve-undo record,
     /// less anything conflicted again. Only meaningful while an operation is open —
@@ -231,7 +220,6 @@ public:
     /// Content of `path` at `commitId` ("" when the path does not exist there).
     std::string fileAt(const Oid& commitId, const std::string& path) const;
 
-    /// The bytes of `path` as they are on disk right now; empty when the file is gone.
     std::string workdirFileContent(const std::string& path) const;
 
     /// Writes `content` to the working tree, drops the path's conflict stages
@@ -283,7 +271,6 @@ public:
     void deleteBranch(const std::string& name, bool force = false,
                       const std::string& base = std::string{});
 
-    /// True when every commit on `name` is already reachable from HEAD.
     bool branchMergedIntoHead(const std::string& name) const;
     /// True when every commit on `name` is already reachable from `base`. An empty
     /// `base` means HEAD: the question "would deleting this branch lose work".
@@ -339,8 +326,6 @@ public:
     /// empty rebase step, which has no reason to become a commit.
     bool indexMatchesHead() const;
 
-    /// Tracking relationship of a branch, if it has an upstream. An empty
-    /// `branch` means HEAD.
     UpstreamInfo upstreamInfo(const std::string& branch = std::string{}) const;
 
     /// Full ref of the branch this repository is based on — the "target" of Smart
@@ -370,8 +355,6 @@ public:
     /// `force` is set.
     void moveBranch(const std::string& name, const Oid& target, bool force = false);
 
-    /// The best common ancestor of two revisions, or empty when their histories are
-    /// unrelated.
     Oid mergeBase(const Oid& a, const Oid& b) const;
 
     /// True when `branch` is an ancestor of `target`, i.e. moving the branch
@@ -382,7 +365,6 @@ public:
     /// fast-forward, so it can never lose a commit.
     void fastForwardBranch(const std::string& branch, const Oid& target);
 
-    /// Renames a local branch. Refuses when the new name is taken.
     void renameBranch(const std::string& from, const std::string& to);
 
     /// Copies commits onto the checked-out branch, oldest first. Throws when the
@@ -445,7 +427,6 @@ public:
     /// stays open for continue or abort.
     void dropCommit(const Oid& commitId);
 
-    /// Creates a tag at `target`. A message makes it annotated.
     void createTag(const std::string& name, const Oid& target, const std::string& message);
 
     void deleteTag(const std::string& name);
@@ -469,7 +450,6 @@ private:
     /// asked for with an explicit choice.
     bool gpgSignConfigured() const;
     explicit Repository(git_repository* repo);
-    /// An untracked file against nothing, read from disk: no work-tree walk.
     FileDiff untrackedFileDiff(const std::string& path) const;
     /// `git cat-file`-backed content read, used when the repository is a partial
     /// (promisor) clone: libgit2 cannot read a blob that was filtered out, while the
@@ -481,7 +461,6 @@ private:
     /// `git diff --name-status --no-renames` between two revisions (empty base = the
     /// empty tree): the file list, without reading any blob.
     std::string nameStatusCli(const Oid& base, const Oid& target) const;
-    /// The same two reads against the working tree: `git diff <rev>` with no target.
     std::string workdirDiffCli(const Oid& base, const std::string& path) const;
     std::string workdirNameStatusCli(const Oid& base) const;
     /// One path's staged (`cached`) or unstaged diff through the binary, for a
@@ -495,8 +474,6 @@ private:
     /// the previous `hasMore`.
     bool takeFromWalk(Oid& id) const;
     git_repository* m_repo = nullptr;
-    /// Cached from the git dir at open time; a promisor repo routes content reads
-    /// through the binary.
     bool m_partialClone = false;
     /// The tips the history walk starts from, in the order git lists them for
     /// `--all`: every ref by name, then HEAD.
@@ -515,7 +492,6 @@ private:
     mutable HistoryFilter m_walkFilter;
     mutable std::size_t m_walkDelivered = 0;
     mutable bool m_walkValid = false;
-    /// One commit read past the page to answer `hasMore`, kept for the next page.
     mutable bool m_walkPeeked = false;
     mutable Oid m_peekId;
 };

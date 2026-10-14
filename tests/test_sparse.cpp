@@ -85,7 +85,6 @@ void SparseTest::enablingKeepsTheChosenDirectoryAndRemovesTheRest() {
 
     QVERIFY(session.sparseCheckoutEnabled());
     QCOMPARE(session.sparseCheckoutDirectories(), QStringList{QStringLiteral("lib")});
-    // The chosen directory is on disk; the other is not, though it is still in HEAD.
     QVERIFY(QFile::exists(m_path + "/lib/a.txt"));
     QVERIFY(!QFile::exists(m_path + "/app/b.txt"));
     QVERIFY(git(m_path, {"cat-file", "-e", "HEAD:app/b.txt"}));
@@ -109,7 +108,6 @@ void SparseTest::topLevelDirectoriesComeFromHeadEvenWhenExcluded() {
     QString error;
     QVERIFY2(session.setSparseCheckout({QStringLiteral("lib")}, &error), qPrintable(error));
 
-    // app is off disk now, but the picker has to be able to offer it back.
     QVERIFY(!QFile::exists(m_path + "/app/b.txt"));
     QCOMPARE(session.sparseCheckoutTopLevelDirectories(),
              (QStringList{QStringLiteral("app"), QStringLiteral("lib")}));

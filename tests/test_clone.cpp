@@ -131,7 +131,6 @@ void CloneTest::aPartialCloneIsPromisor() {
 }
 
 void CloneTest::aShallowSinceCloneLimitsHistoryByDate() {
-    // A little history with real dates for --shallow-since to cut.
     const QString work = QDir(m_dir->path()).filePath(QStringLiteral("dated"));
     QVERIFY(QDir().mkpath(work));
     QVERIFY(git(work, {"init", "-q", "-b", "main"}));

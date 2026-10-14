@@ -46,8 +46,6 @@ void DiffMinimap::paintEvent(QPaintEvent*) {
     const int count = m_marks.size();
     if (count > 0) {
         painter.setPen(theme::accent());
-        // One tick per changed line, at its proportional height. A mark shorter than a
-        // pixel still draws one, so a small diff is not invisible.
         for (int i = 0; i < count; ++i) {
             if (!m_marks.at(i)) {
                 continue;

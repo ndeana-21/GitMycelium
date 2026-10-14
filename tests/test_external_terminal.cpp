@@ -69,13 +69,11 @@ void ExternalTerminalTest::xtermTakesTheGenericForm() {
     const TerminalLaunch launch = buildTerminalLaunch("/repo", "", resolverFor({"xterm"}));
     QVERIFY(launch.valid);
     QCOMPARE(QString::fromStdString(launch.program), QStringLiteral("/usr/bin/xterm"));
-    // `-e sh -c 'cd "$1" && exec ...' sh /repo`: the directory is the last argument.
     QCOMPARE(launch.args.back(), std::string("/repo"));
     QVERIFY(hasArg(launch, "-e"));
 }
 
 void ExternalTerminalTest::anUnrecognisedTerminalTakesTheGenericForm() {
-    // An explicit path is used as given, without a lookup, and without a known flag.
     const TerminalLaunch launch = buildTerminalLaunch("/repo", "/opt/wezterm", resolverFor({}));
     QVERIFY(launch.valid);
     QCOMPARE(QString::fromStdString(launch.program), QStringLiteral("/opt/wezterm"));
@@ -86,7 +84,6 @@ void ExternalTerminalTest::anUnrecognisedTerminalTakesTheGenericForm() {
 void ExternalTerminalTest::noTerminalIsHonestlyInvalid() {
     const TerminalLaunch launch = buildTerminalLaunch("/repo", "", resolverFor({}));
     QVERIFY(!launch.valid);
-    // No working tree to open in is also "no answer", not a guessed command.
     QVERIFY(!buildTerminalLaunch("", "", resolverFor({"konsole"})).valid);
 }
 

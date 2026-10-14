@@ -87,7 +87,6 @@ void Skeleton::paintEvent(QPaintEvent*) {
 void Skeleton::paintRow(QPainter& painter, int top, int height, int index) {
     const QColor base = theme::surfaceAlt();
     QColor highlight = theme::borderStrong();
-    // The sweep: a band of lighter colour crossing the bars left to right.
     qreal phase = -1.0;
     if (g_animate && m_clock.isValid()) {
         phase = std::fmod(static_cast<qreal>(m_clock.elapsed()), kSweepMs) / kSweepMs;

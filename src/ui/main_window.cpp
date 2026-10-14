@@ -118,7 +118,6 @@ void showAboutBox(QWidget* parent) {
             .arg(update::describeVersion(update::currentVersion(), update::currentBuild())));
 }
 
-/// What `renderFile` reads for one file, gathered so the read can run on a worker.
 struct DocumentRequest {
     QString path;
     bool workingTree = false;
@@ -136,8 +135,6 @@ DiffView::Document readDocument(RepoSession& session, const DocumentRequest& req
     document.path = path;
     std::string bytes;
     if (request.workingTree && request.staged) {
-        // The staged side: HEAD against the index. Staging a change here means
-        // taking it back out, so the control offers Unstage.
         document.diff = session.stagedFileDiff(path);
         document.staging = DiffView::Staging::Unstage;
         document.revisionContent = session.indexFileContent(path);
@@ -271,14 +268,9 @@ QString lastLines(const QString& output, int count) {
 } // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
-    // The first context is the window's empty starting point: a repository opened
-    // before there is a second tab fills it in rather than making a spare.
     m_contexts.push_back(makeContext());
     m_active = 0;
     adoptContext(m_contexts.front().get());
-    // Auto-fetch is a background fetch on a timer. It is off until the reader turns
-    // it on for this repository; a tick is skipped whenever a manual network
-    // operation is already running, so it never stomps on one.
     m_autoFetchTimer = new QTimer(this);
     m_autoFetchTimer->setInterval(5 * 60 * 1000);
     connect(m_autoFetchTimer, &QTimer::timeout, this, &MainWindow::onAutoFetchTick);
@@ -287,14 +279,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_watcher, &RepoWatcher::changed, this, &MainWindow::onRepositoryFilesChanged);
     buildUi();
     bindViews();
-    // The window opens with no repository, so it opens on the start page. A path
-    // handed to `openRepository` afterwards switches it to the history page.
     showEmptyTab();
     // The empty starting context is a tab like any other and has to be on the strip:
     // a window whose only context is invisible looks like a window with no tabs, and
     // the "+" beside it makes no sense in that state.
     rebuildTabBar();
-    // The graph's motion is a saved preference, applied once the view exists.
     loadGraphAnimation();
     setWindowTitle(QStringLiteral("GitMycelium"));
     resize(1500, 900);
@@ -579,7 +568,6 @@ void MainWindow::activateContext(int index) {
     RepoContext* context = active();
     adoptContext(context);
     bindViews();
-    // A file or a commit asked for in the tab being left belongs to that tab.
     ++m_documentToken;
     ++m_commitFilesToken;
     m_documentPending = false;
@@ -605,8 +593,6 @@ void MainWindow::activateContext(int index) {
         m_details->setFilesLoading(false);
     }
     rebuildTabBar();
-    // A network or maintenance run belongs to one tab; the one being shown is not
-    // running anything until it starts its own.
     if (m_commitView) {
         m_commitView->setBusy(false);
     }
@@ -622,7 +608,6 @@ void MainWindow::activateContext(int index) {
         return;
     }
 
-    // The alias is remembered per repository, so a rename survives a restart.
     if (context->alias.isEmpty()) {
         const QString alias =
             loadTabAlias(QString::fromStdString(m_session->paths().commonDir));
@@ -681,7 +666,6 @@ void MainWindow::activateContext(int index) {
     loadPreflight();
     loadPrevention();
     loadSubmoduleAutoupdate();
-    // A selection made before the switch comes back with its diff.
     if (!m_selectedCommitId.isEmpty()) {
         selectCommit(m_selectedCommitId);
     }
@@ -690,8 +674,6 @@ void MainWindow::activateContext(int index) {
     if (!shownFile.isEmpty() && (workingTreeFile || shownContext == m_selectedCommitId)) {
         renderFile(shownFile, workingTreeFile, shownStaged);
     }
-    // A tab was opened or brought forward, which is the "last used" the start
-    // page shows.
     noteRecentRepository(*context);
     saveTabs();
 }
@@ -870,8 +852,6 @@ void MainWindow::closeContext(int index) {
         return;
     }
     if (m_contexts.size() == 1) {
-        // The last tab is never removed: it becomes the empty state, so the window
-        // always has somewhere to open the next repository.
         closeAllContexts();
         return;
     }
@@ -944,7 +924,6 @@ void MainWindow::keepOnlyContext(int keep) {
 }
 
 void MainWindow::closeAllContexts() {
-    // Detach first: the contexts being dropped own the models the views point at.
     if (m_commitView) {
         m_commitView->setModel(nullptr);
     }
@@ -1045,8 +1024,6 @@ void MainWindow::restoreTabs() {
     const int savedActive = settings.value(QStringLiteral("ui/tabs/active"), 0).toInt();
 
     m_restoringTabs = true;
-    // The empty starting context is replaced by the saved set. Detach the views
-    // first: the context owns the model they point at.
     if (m_contexts.size() == 1 && !m_contexts.front()->opened) {
         if (m_commitView) {
             m_commitView->setModel(nullptr);
@@ -1079,8 +1056,6 @@ void MainWindow::restoreTabs() {
 }
 
 MainWindow::~MainWindow() {
-    // A clone or an external tool on the worker pool may still be running; tell it
-    // not to touch the window once it finishes.
     if (m_workerAlive) {
         *m_workerAlive = false;
     }
@@ -1123,8 +1098,6 @@ void MainWindow::buildUi() {
     quitAction->setShortcut(QKeySequence::Quit);
     connect(quitAction, &QAction::triggered, this, &QWidget::close);
 
-    // Undo/Redo over the operation log: one QAction each, shared with the toolbar
-    // so a single enabled state and label drives both.
     auto* editMenu = menuBar()->addMenu(QStringLiteral("&Edit"));
     m_undoAction = addThemedAction(editMenu, Icon::Undo, QStringLiteral("&Undo"));
     m_undoAction->setShortcut(QKeySequence::Undo);
@@ -1149,16 +1122,12 @@ void MainWindow::buildUi() {
     m_commandActions.insert(QStringLiteral("edit.redo"), m_redoAction);
     m_commandActions.insert(QStringLiteral("view.branches"), m_refsAction);
 
-    // Hiding the rail is a thing people want with a narrow window, so it is a
-    // menu entry with a shortcut rather than something only the diff can do.
     auto* viewMenu = menuBar()->addMenu(QStringLiteral("&View"));
     m_refsAction = addThemedAction(viewMenu, Icon::Branch, QStringLiteral("&Branches panel"));
     m_refsAction->setCheckable(true);
     m_refsAction->setChecked(true);
     m_refsAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+B")));
     connect(m_refsAction, &QAction::toggled, this, &MainWindow::setRefsPanelVisible);
-    // Remote branches parked on the trunk's line (release branches cut at a merge,
-    // branches merged by fast-forward) are left unlabelled unless asked for.
     m_mergedRemotesAction = viewMenu->addAction(QStringLiteral("Show Merged Remote Branches"));
     m_mergedRemotesAction->setCheckable(true);
     m_mergedRemotesAction->setChecked(
@@ -1182,8 +1151,6 @@ void MainWindow::buildUi() {
         }
     });
 
-    // The graph's motion is pleasant and, for a reader who does not want it, the
-    // first thing they look for a switch for.
     m_animateAction = viewMenu->addAction(QStringLiteral("Animate Graph"));
     m_animateAction->setCheckable(true);
     m_animateAction->setChecked(true);
@@ -1244,8 +1211,6 @@ void MainWindow::buildUi() {
                              &MainWindow::updateAllSubmodules);
     submoduleMenu->addAction(QStringLiteral("Sync All"), this, &MainWindow::syncAllSubmodules);
     submoduleMenu->addSeparator();
-    // The auto-update hook and its tracking choice. Off by default: it can hit the
-    // network and move nested checkouts, which is not something to do unasked.
     m_submoduleAutoupdateAction =
         submoduleMenu->addAction(QStringLiteral("Update after fetch/checkout/merge"));
     m_submoduleAutoupdateAction->setCheckable(true);
@@ -1346,8 +1311,6 @@ void MainWindow::buildUi() {
         }
     });
 
-    // The palette is the keyboard's way to everything: a command that has no
-    // shortcut still gets one once it is listed here.
     auto* paletteShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+P")), this);
     connect(paletteShortcut, &QShortcut::activated, this, &MainWindow::showCommandPalette);
 
@@ -1359,12 +1322,8 @@ void MainWindow::buildUi() {
     m_refPanel = buildReferencePanel();
     buildCommitPanel();
     buildChangesPanel();
-    // The palette's command list, built once the widgets it refers to exist, and
-    // the keymap's bindings on top of it.
     refreshCommands();
 
-    // The diff takes the graph's place rather than sharing the right column: a diff
-    // read in a column two thirds wide is the reason to open one at all.
     m_centerStack = new QStackedWidget(this);
     m_centerStack->addWidget(m_commitView);
     m_centerStack->addWidget(m_diffView);
@@ -1395,8 +1354,6 @@ void MainWindow::buildUi() {
     history->setStretchFactor(0, 1);
     history->setStretchFactor(1, 4);
     history->setStretchFactor(2, 3);
-    // The graph is the point of the window, so it gets the room; the refs rail
-    // and the details panel are both narrower than their stretch factors imply.
     history->setSizes({230, 750, 420});
 
     m_conflictView = new ConflictView(m_session, this);
@@ -1417,16 +1374,12 @@ void MainWindow::buildUi() {
     });
     connect(m_conflictView, &ConflictView::externalMergeRequested, this,
             [this](const QString& path) { openExternalMerge(path); });
-    // Closing the editor is a page switch, not a resolution: the operation stays
-    // open on disk and the reader reaches it again from the Branch menu.
     connect(m_conflictView, &ConflictView::closeRequested, this,
             &MainWindow::onConflictPageClosed);
 
     m_stack = new QStackedWidget(this);
     m_stack->addWidget(history);
     m_stack->addWidget(m_conflictView);
-    // The start page is the third face of the middle column: a tab with no
-    // repository shows it instead of an empty graph.
     m_startPage = new StartPage(this);
     m_stack->addWidget(m_startPage);
     connect(m_startPage, &StartPage::openRequested, this, &MainWindow::onOpenRepositoryDialog);
@@ -1435,13 +1388,9 @@ void MainWindow::buildUi() {
             &MainWindow::createRepositoryFromDialog);
     connect(m_startPage, &StartPage::recentActivated, this,
             [this](const QString& path) { openRepository(path); });
-    // The content itself is shared: a tab switch swaps the session and models
-    // behind these widgets rather than keeping one whole window per repository.
     sizeToCurrentPage(m_stack);
     setCentralWidget(m_stack);
 
-    // Commit search lives in a dock so it does not fight the columns for width and
-    // can be closed without losing the query.
     m_searchPanel = new SearchPanel(m_session, this);
     m_searchDock = new QDockWidget(QStringLiteral("Search Commits"), this);
     m_searchDock->setObjectName(QStringLiteral("searchDock"));
@@ -1508,8 +1457,6 @@ void MainWindow::buildTabBar() {
     m_tabBar->setTabsClosable(true);
     m_tabBar->setDrawBase(false);
     m_tabBar->setContextMenuPolicy(Qt::CustomContextMenu);
-    // The strip hugs its tabs so the "+" lands right after the last one; the
-    // spacer that follows takes the rest of the row.
     m_tabBar->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
     tabs->addWidget(m_tabBar);
 
@@ -1536,8 +1483,6 @@ void MainWindow::buildToolBar() {
     m_toolBar = toolbar;
     toolbar->setMovable(false);
     toolbar->setIconSize(QSize(theme::iconSize(), theme::iconSize()));
-    // Each operation is named under its icon, as GitKraken does: an icon alone is a
-    // guessing game for anything but undo.
     toolbar->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
 
     const auto addIcon = [&](Icon which, const QString& text, const QString& tip, IconTint tint) {
@@ -1546,11 +1491,8 @@ void MainWindow::buildToolBar() {
         action->setToolTip(tip);
         return action;
     };
-    // The caption under the icon: one short word, whatever the menu text says.
     const auto caption = [](QAction* action, const QString& word) { action->setIconText(word); };
 
-    // Undo/Redo are the same actions the Edit menu shows: one enabled state, one
-    // label, two places to reach them.
     toolbar->addAction(m_undoAction);
     toolbar->addAction(m_redoAction);
     caption(m_undoAction, QStringLiteral("Undo"));
@@ -1562,7 +1504,6 @@ void MainWindow::buildToolBar() {
                             IconTint::Text);
     connect(m_fetchAction, &QAction::triggered, this, [this] { startSync(SyncKind::Fetch); });
 
-    // Pull is a menu button: the click runs the chosen mode, the arrow chooses it.
     m_pullAction = new QAction(QStringLiteral("Pull"), this);
     setThemedIcon(m_pullAction, Icon::Pull);
     connect(m_pullAction, &QAction::triggered, this, [this] { startSync(SyncKind::Pull); });
@@ -1588,7 +1529,6 @@ void MainWindow::buildToolBar() {
     m_pullButton->setMenu(pullMenu);
     toolbar->addWidget(m_pullButton);
 
-    // Push is a menu button too: the click pushes, the arrow offers the lease.
     m_pushAction = new QAction(QStringLiteral("Push"), this);
     setThemedIcon(m_pushAction, Icon::Push);
     m_pushAction->setToolTip(
@@ -1628,8 +1568,6 @@ void MainWindow::buildToolBar() {
     connect(checkout, &QAction::triggered, this, &MainWindow::checkoutSelectedBranch);
     toolbar->addSeparator();
 
-    // The working-tree actions. Both are live whenever a non-bare repository is
-    // open; the pop button additionally needs something to pop.
     m_stashAction = addIcon(Icon::Stash, QStringLiteral("Stash"),
                             QStringLiteral("Stash the working changes"), IconTint::Text);
     connect(m_stashAction, &QAction::triggered, this, &MainWindow::stashWorkingTree);
@@ -1642,8 +1580,6 @@ void MainWindow::buildToolBar() {
                               QStringLiteral("Open the three-pane merge editor"), IconTint::Text);
     connect(conflicts, &QAction::triggered, this, &MainWindow::showConflictsPage);
 
-    // Push the trailing controls to the right edge: the command palette and
-    // preferences stay out of the way of the operations.
     auto* spacer = new QWidget(toolbar);
     spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     toolbar->addWidget(spacer);
@@ -1679,8 +1615,6 @@ QWidget* MainWindow::buildReferencePanel() {
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
-    // The filter gets its own row above the tree: it narrows what is below it and
-    // nothing else on the window.
     auto* filterRow = new QWidget(panel);
     auto* filterLayout = new QHBoxLayout(filterRow);
     filterLayout->setContentsMargins(4, 4, 4, 4);
@@ -1710,9 +1644,6 @@ QWidget* MainWindow::buildReferencePanel() {
     refView->setModel(m_refModel);
     refView->setUniformRowHeights(true);
     refView->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    // Shift/Ctrl extend the selection so several branches can be deleted, hidden or
-    // pointed at an upstream at once. Rows only, so a right-click inside a group
-    // opens the group menu rather than acting on one stray cell.
     refView->setSelectionMode(QAbstractItemView::ExtendedSelection);
     refView->setSelectionBehavior(QAbstractItemView::SelectRows);
     refView->header()->setStretchLastSection(true);
@@ -1720,14 +1651,11 @@ QWidget* MainWindow::buildReferencePanel() {
     refView->setToolTip(QStringLiteral(
         "Double-click a branch to check it out.\nDrag a branch onto another branch to merge or "
         "rebase, or onto a commit to move it there."));
-    // Drag a reference onto another one to merge, rebase or move it.
     refView->setDragEnabled(true);
     refView->setAcceptDrops(true);
     refView->setDropIndicatorShown(true);
     refView->setDragDropMode(QAbstractItemView::DragDrop);
     refView->setDefaultDropAction(Qt::MoveAction);
-    // The rail borrows the graph's palette so a label is the same colour
-    // wherever you see it.
     refView->setColorResolver(
         [this](const QString& name) { return m_commitModel->refColorIndex(name); });
     connect(refView, &QTreeView::customContextMenuRequested, this, &MainWindow::onRefContextMenu);
@@ -1750,8 +1678,6 @@ QWidget* MainWindow::buildReferencePanel() {
     connect(refView, &RefTreeView::refFocused, this, [this](const QString& name) {
         m_commitModel->setFocusedBranch(name);
     });
-    // Hovering a branch in the rail lights its commits in the graph. Transient:
-    // the pointer leaving the rail clears it.
     connect(refView, &RefTreeView::refHovered, this, [this](const QString& name) {
         m_commitModel->setHighlightedBranch(name);
     });
@@ -1771,24 +1697,17 @@ void MainWindow::buildCommitPanel() {
     m_commitView->setRootIsDecorated(false);
     m_commitView->setAlternatingRowColors(true);
     m_commitView->setSelectionBehavior(QAbstractItemView::SelectRows);
-    // Shift extends the selection from the last commit clicked to this one, and Ctrl adds
-    // or removes one commit at a time. Both are what a reader expects from a list, and the
-    // rewrite operations are the ones that need several commits at once.
     m_commitView->setSelectionMode(QAbstractItemView::ExtendedSelection);
     auto* refsDelegate = new RefsDelegate(this);
     refsDelegate->setLabelAlphaHook(
         [this](const QString& name) { return m_commitView->animationLabelAlpha(name); });
     m_commitView->setItemDelegateForColumn(CommitModel::Refs, refsDelegate);
     auto* graphDelegate = new GraphDelegate(this);
-    // The graph column's motion is decided by the view; the delegate only asks it
-    // how opaque a row is and whether the overlay already owns it.
     graphDelegate->setAnimationHooks(
         [this](const QString& oid) { return m_commitView->animationFadeAlpha(oid); },
         [this](const QString& oid) { return m_commitView->animationIsMorphing(oid); });
     m_commitView->setItemDelegateForColumn(CommitModel::Graph, graphDelegate);
     m_commitView->setAcceptedMimeType(QString::fromLatin1(kRefMimeType));
-    // Row height comes from CommitModel's SizeHintRole (30px): a QTreeView has
-    // no verticalHeader, and uniformRowHeights caches the first row's height.
 
     connect(m_commitView, &CommitGraphView::refDroppedOnRef, this,
             &MainWindow::onRefDroppedOnRef);
@@ -1840,8 +1759,6 @@ void MainWindow::buildCommitPanel() {
     m_commitView->setColumnHidden(CommitModel::Date, true);
     m_commitView->setColumnHidden(CommitModel::Sha, true);
 
-    // Column widths are measured from the font rather than guessed: a guessed
-    // width clips the date on one DPI and wastes space on another.
     const QFontMetrics metrics(m_commitView->font());
     const int padding = 18;
     m_commitView->setColumnWidth(CommitModel::Refs, 260);
@@ -1853,10 +1770,6 @@ void MainWindow::buildCommitPanel() {
         CommitModel::Sha, metrics.horizontalAdvance(QStringLiteral("0123456789")) + padding);
     m_commitView->setColumnWidth(CommitModel::Author, 150);
 
-    // Columns are the reader's: drag a divider to reorder, right-click the header
-    // to choose which are shown. The default is Branch/Tag, Graph,
-    // Commit Message — and order, visibility and widths are remembered per
-    // repository, so a drag is not undone by the next restart.
     header->setSectionsMovable(true);
     // A drag fires sectionResized many times; coalesce the writes so the profile is
     // touched once when the reader lets go of the divider.
@@ -1877,7 +1790,6 @@ void MainWindow::buildCommitPanel() {
             [this](const QString& name, RefKind kind) { checkoutBranchFromGraph(name, kind); });
     connect(m_commitView, &CommitGraphView::commitContextMenuRequested, this,
             &MainWindow::onCommitContextMenu);
-    // Once the user resizes the graph column, stop auto-fitting it.
     connect(header, &QHeaderView::sectionResized, this,
             [this](int section, int, int) {
                 if (section == CommitModel::Graph && m_commitView->isVisible()) {
@@ -1894,8 +1806,6 @@ void MainWindow::buildCommitPanel() {
 
 void MainWindow::buildChangesPanel() {
     m_details = new CommitDetailsPanel(this);
-    // One click on a file is all it takes to see it: the panel says which file and
-    // whether it is a commit's or the working tree's, and the diff follows.
     connect(m_details, &CommitDetailsPanel::fileSelected, this,
             [this](const QString& path, bool staged) {
                 renderFile(path, m_details->showingWorkingTree(), staged);
@@ -1997,8 +1907,6 @@ bool MainWindow::openRepository(const QString& path) {
         return true;
     }
 
-    // The empty starting context takes the first repository; once it holds one,
-    // every later open is a new tab.
     RepoContext* context = active();
     bool created = false;
     int index = m_active;
@@ -2030,8 +1938,6 @@ void MainWindow::refreshPanels() {
     // Taken now, not when the read lands: a window activation in between must not
     // take the state this refresh is already reading for a change.
     m_lastFingerprint = repositoryFingerprint();
-    // Everything a refresh shows is read on a worker in one pass; the window keeps
-    // what it shows now (or skeletons, the first time) until `snapshotReady`.
     if (RepoContext* context = active(); context && !context->panelsShown) {
         setPanelsLoading(true);
     }
@@ -2050,8 +1956,6 @@ void MainWindow::onSnapshotReady(RepoSession* session) {
 
 void MainWindow::setPanelsLoading(bool loading) {
     if (loading) {
-        // The repository is open: its page, in outline, not the start page or the
-        // previous tab's branch.
         if (m_stack && m_stack->currentIndex() == kStartPage) {
             m_stack->setCurrentIndex(kHistoryPage);
         }
@@ -2148,8 +2052,6 @@ void MainWindow::applyPanels() {
     // read is the most expensive thing a refresh does.
     const std::vector<FileChange> changes = m_session->status();
     m_commitModel->setWorktreeWip(m_session->worktreeWip(changes));
-    // Pins survive the rebuild: the model is thrown away on every fetch, the
-    // decision to keep a branch at the top is not.
     m_refModel->setPinned(m_pins.names());
     // A filter mode owns the list, so hide/solo do not also apply while one is on.
     const bool filterMode =
@@ -2225,8 +2127,6 @@ void MainWindow::applyPanels() {
         }
         refreshStatusBar(changes);
     }
-    // The branch commands are per-branch, so the palette's list and the keymap's
-    // bindings are rebuilt with everything else that follows the refs.
     refreshCommands();
     updateUndoRedoActions();
 }
@@ -2277,7 +2177,6 @@ void MainWindow::showConflictsPage() {
 void MainWindow::onConflictPageClosed() {
     m_conflictPageDismissed = true;
     showHistoryPage();
-    // The operation is still open, and leaving the page must not look like ending it.
     const bool rebasing = m_session->rebaseInProgress();
     const bool squashing = m_session->squashInProgress();
     const QString verb = rebasing ? QStringLiteral("rebase")
@@ -2299,7 +2198,6 @@ void MainWindow::showWorkingTreeChanges(const std::vector<FileChange>& changes) 
     if (!m_details) {
         return;
     }
-    // A comparison is over: the working tree is what is shown now.
     m_compareBase.clear();
     m_compareTarget.clear();
     m_compareMode = CompareMode::TwoDot;
@@ -2341,7 +2239,6 @@ QString MainWindow::repositoryLegacySettingsPath() const {
     if (!m_session->isOpen()) {
         return QString();
     }
-    // Exactly what the old key was: the checkout path, trailing slash trimmed.
     const RepoPaths paths = m_session->paths();
     QString path = QString::fromStdString(paths.workDir.empty() ? paths.gitDir : paths.workDir);
     if (path.isEmpty()) {
@@ -2417,9 +2314,6 @@ void MainWindow::applyCommitColumnModes() {
     header->setSectionResizeMode(CommitModel::Sha, QHeaderView::Fixed);
 }
 
-/// The label column's width for a mode. `Rich` and `Text` share it — the glyph is
-/// small next to a branch name — while `Compact` gives the column back to the
-/// commit message.
 static int refsWidthForMode(GraphColumnMode mode) {
     return mode == GraphColumnMode::Compact ? 170 : 260;
 }
@@ -2548,8 +2442,6 @@ void MainWindow::showCommitColumnMenu(const QPoint& pos) {
         QAction* action = menu.addAction(label);
         action->setCheckable(true);
         action->setChecked(!m_commitView->isColumnHidden(column));
-        // The three core columns are the graph itself; hiding them is allowed but
-        // it is not what a reader wants by accident, so the menu says what it is.
         connect(action, &QAction::triggered, this,
                 [this, column](bool on) { setCommitColumnVisible(column, on); });
     };
@@ -2589,7 +2481,6 @@ void MainWindow::showCommitFiles(const QString& commitId) {
         showCommitDetails(commitId, readCommitDetails(*m_session, commitId));
         return;
     }
-    // The header is in the row already; the file list and the signature are not.
     m_details->showCommit(*commit, {}, false);
     m_details->setFilesLoading(true);
     m_diffView->setLoading(true);
@@ -2714,7 +2605,6 @@ void MainWindow::restoreRenderedFileFromView() {
         return;
     }
     refreshPanels();
-    // It is a working-tree change now, so show it as one.
     m_compareBase.clear();
     m_compareTarget.clear();
     m_compareMode = CompareMode::TwoDot;
@@ -2727,8 +2617,6 @@ void MainWindow::showBlameFor(const QString& path) {
     if (!m_session || !m_session->isOpen() || path.isEmpty()) {
         return;
     }
-    // Blame the revision being viewed: a commit's tree, a comparison's target, or the
-    // working tree when neither applies.
     const QString revision = !m_compareTarget.isEmpty() ? m_compareTarget : m_selectedCommitId;
     const std::vector<BlameLine> lines = m_session->blame(path, revision);
     m_diffView->setBlame(lines);
@@ -3200,12 +3088,9 @@ void MainWindow::selectCommit(const QString& commitId) {
 }
 
 void MainWindow::onCommitSelected() {
-    // Picking a commit leaves comparison mode: the panel describes one commit again.
     m_compareBase.clear();
     m_compareTarget.clear();
     const QModelIndex current = m_commitView->currentIndex();
-    // A date separator is not a commit and not a place: it is a heading, so
-    // selecting it changes nothing rather than describing a row that has no id.
     if (m_commitModel->isTimelineRow(current.row())) {
         return;
     }
@@ -3303,7 +3188,6 @@ void MainWindow::showDocument(const DiffView::Document& document) {
     m_diffView->setCodec(m_diffCodec);
     m_diffView->show(document);
     if (m_diffView->blameView()) {
-        // The viewer asked for blame; keep it in step with the file it is showing.
         showBlameFor(document.path);
     }
 
@@ -3513,7 +3397,6 @@ void MainWindow::refreshIfRepositoryChanged() {
         return;
     }
     m_lastFingerprint = fingerprint;
-    // The refresh decides whether the history moved (`syncHistoryWithRefs`).
     refreshPanels();
     setStatus(QStringLiteral("Repository changed — refreshed."));
 }
@@ -3789,7 +3672,6 @@ void MainWindow::revealFileAfterRefresh(const QString& path, bool staged) {
         renderFile(path, true, staged);
         return;
     }
-    // The preferred side is gone — the file is now entirely on the other one.
     if (m_details->selectPath(path, !staged)) {
         renderFile(path, true, !staged);
     }
@@ -3892,8 +3774,6 @@ void MainWindow::onCoauthorsRequested() {
     if (chosen.empty()) {
         return;
     }
-    // The trailer goes through git and lands in the field, so the reader sees the
-    // exact message that will be committed and can still edit it.
     m_details->setCommitMessage(m_session->withCoAuthors(m_details->commitMessage(), chosen));
 }
 
@@ -4453,8 +4333,6 @@ void MainWindow::buildCommands() {
                 QStringLiteral("Checkout %1").arg(name), QStringLiteral("Branch"), {}, {},
                 [this, name] { checkoutBranchFromGraph(name, RefKind::LocalBranch); });
         }
-        // One push per tag, for the same reason: the set of tags moves with every
-        // fetch and every tag created or deleted.
         for (const RefInfo& ref : m_session->refs()) {
             if (ref.kind != RefKind::Tag) {
                 continue;
@@ -4463,7 +4341,6 @@ void MainWindow::buildCommands() {
             add(QStringLiteral("tag.push:") + tag, QStringLiteral("Push tag %1").arg(tag),
                 QStringLiteral("Remote"), {}, {}, [this, tag] { pushTagToRemote(tag); });
         }
-        // One command per linked worktree: opening one re-points this window.
         for (const WorktreeEntry& worktree : m_worktrees) {
             if (worktree.current) {
                 continue;
@@ -4474,7 +4351,6 @@ void MainWindow::buildCommands() {
                 QStringLiteral("Open Worktree %1").arg(label), QStringLiteral("Branch"), {}, {},
                 [this, path] { openWorktree(path); });
         }
-        // One per submodule that is checked out, for the same reason.
         for (const SubmoduleEntry& submodule : m_submodules) {
             if (!submodule.initialized) {
                 continue;
@@ -4791,8 +4667,6 @@ std::vector<std::string> MainWindow::smartVisibleRefs() const {
     if (target.startsWith(localPrefix)) {
         addUpstreamOf(target.mid(localPrefix.size()));
     } else if (target.startsWith(remotePrefix)) {
-        // The target is remote-tracking; its local counterpart is the branch after
-        // the remote name.
         const QString rest = target.mid(remotePrefix.size());
         const int slash = rest.indexOf(QLatin1Char('/'));
         if (slash >= 0) {
@@ -4843,7 +4717,6 @@ std::vector<std::string> MainWindow::visibilityWantedRefs(bool* active) const {
     const QString presetPrefix = m_visibility.presetPrefix();
 
     for (const RefMeta& meta : m_session->refMeta()) {
-        // A preset picks local branches; a remote-tracking one follows its branch.
         if (!meta.local) {
             continue;
         }
@@ -5060,7 +4933,6 @@ void MainWindow::toggleSmart() {
 }
 
 void MainWindow::applyPreset(VisibilityPreset preset) {
-    // Smart and a preset answer the same question; the newer choice wins.
     m_visibility.setSmart(false);
     m_visibility.setPreset(preset);
     refreshPanels();
@@ -5105,8 +4977,6 @@ void MainWindow::syncRefTreeExpansion() {
     for (int row = 0; row < m_refModel->rowCount(); ++row) {
         const QModelIndex section = m_refModel->index(row, 0);
         m_refView->expand(section);
-        // ...except the pinned one: the whole point of pinning a folder is to
-        // keep what is inside it within reach.
         if (section.data(Qt::DisplayRole).toString() == QLatin1String("Pinned")) {
             m_refView->expandRecursively(section);
         }
@@ -5129,8 +4999,6 @@ void MainWindow::onRefContextMenu(const QPoint& pos) {
         m_refView->setCurrentIndex(index);
     }
 
-    // A stash is not a reference: it has no upstream to merge into and no branch
-    // to check out, so its menu is its own.
     if (RefModel::isStash(index)) {
         const QString oid = index.data(RefModel::StashOidRole).toString();
         const QString label = index.data(Qt::DisplayRole).toString();
@@ -5159,9 +5027,6 @@ void MainWindow::onRefContextMenu(const QPoint& pos) {
         return;
     }
 
-    // A worktree is a directory, not a reference: merge, rebase and checkout mean
-    // nothing for it, and pretending otherwise would offer operations that act on
-    // something else entirely.
     if (RefModel::isWorktree(index)) {
         const QString wtPath = index.data(RefModel::WorktreePathRole).toString();
         const bool isCurrent = index.data(RefModel::WorktreeCurrentRole).toBool();
@@ -5195,10 +5060,6 @@ void MainWindow::onRefContextMenu(const QPoint& pos) {
         return;
     }
 
-    // A submodule is a nested repository: Open re-points the window at it, and the
-    // rest are the `git submodule` verbs. Initialize and Update are different
-    // buttons because the first is for a fresh clone and the second for a checkout
-    // that already exists.
     if (RefModel::isSubmodule(index)) {
         const QString subPath = index.data(RefModel::SubmodulePathRole).toString();
         const QString subUrl = index.data(RefModel::SubmoduleUrlRole).toString();
@@ -5297,8 +5158,6 @@ void MainWindow::onRefContextMenu(const QPoint& pos) {
     }
 
     QMenu menu(this);
-    // Pin first: it is the one entry that changes the list itself rather than the
-    // repository, and it applies to a folder exactly as it does to a branch.
     const QString pinKey = RefModel::pinKey(index);
     QAction* pin = nullptr;
     if (!pinKey.isEmpty()) {
@@ -5309,8 +5168,6 @@ void MainWindow::onRefContextMenu(const QPoint& pos) {
         menu.addSeparator();
     }
 
-    // A tag is a name for a commit, not a branch: it is not checked out and has
-    // no upstream. Its menu leads with the one thing a tag is for — publishing it.
     if (RefModel::refKind(index) == RefKind::Tag) {
         const QString tag = RefModel::refShortName(index);
         QAction* pushOne = menu.addAction(QStringLiteral("Push tag"));
@@ -5355,9 +5212,6 @@ void MainWindow::onRefContextMenu(const QPoint& pos) {
     menu.addSeparator();
     QAction* merge = menu.addAction(QStringLiteral("Merge into current"));
 
-    // Visibility is the pair to pinning: pin brings a branch forward, hide/solo
-    // push the rest back. A branch is the only thing they apply to — the tag
-    // menu already returned above.
     const QString refName = RefModel::refShortName(index);
     const bool isBranch = RefModel::isRef(index) && !refName.isEmpty();
     QAction* hide = nullptr;
@@ -5405,8 +5259,6 @@ void MainWindow::onRefContextMenu(const QPoint& pos) {
 }
 
 void MainWindow::onCommitContextMenu(const QString& commitId, const QPoint& globalPos) {
-    // A working-tree row has no commit behind it, whichever worktree it belongs to.
-    // Its menu is about the work in progress, not about rewriting history.
     if (commitId.startsWith(QStringLiteral("//wip"))) {
         const int row = m_commitModel->rowForCommit(commitId);
         const QModelIndex wipIndex = row >= 0 ? m_commitModel->index(row, 0) : QModelIndex();
@@ -5533,8 +5385,6 @@ void MainWindow::buildCommitMenu(QMenu& menu, const QString& commitId) const {
         return addTo(&menu, text, key);
     };
 
-    // Remote work first. Pull and push act on the current
-    // branch and need a remote to exist at all.
     QAction* pull = add(QStringLiteral("Pull (fast-forward if possible)"),
                         QStringLiteral("pull"));
     pull->setEnabled(!m_remotes.empty() && onBranch);
@@ -5558,7 +5408,6 @@ void MainWindow::buildCommitMenu(QMenu& menu, const QString& commitId) const {
         menu.addSeparator();
     }
 
-    // Detached HEAD first, then the branches sitting here.
     QMenu* checkout = menu.addMenu(QStringLiteral("Checkout"));
     addTo(checkout, QStringLiteral("Detached HEAD at %1").arg(commitId.left(7)),
           QStringLiteral("checkout-detached"));
@@ -5665,8 +5514,6 @@ void MainWindow::buildCommitMenu(QMenu& menu, const QString& commitId) const {
                     .arg(QString::fromStdString(ids[1]).left(7),
                          QString::fromStdString(ids[0]).left(7)),
                 QStringLiteral("compare"));
-            // The three-dot form answers a different question: what the newer side
-            // has done since the two parted, not the sum of both.
             add(QStringLiteral("Compare %1...%2 (merge base)")
                     .arg(QString::fromStdString(ids[1]).left(7),
                          QString::fromStdString(ids[0]).left(7)),
@@ -5848,7 +5695,6 @@ QStringList MainWindow::commitMenuEntries(const QString& commitId) const {
     buildCommitMenu(menu, commitId);
 
     QStringList entries;
-    // Walk submenus too: "Checkout" and "Reset" are most of the menu.
     std::function<void(QMenu*, const QString&)> walk = [&](QMenu* current, const QString& prefix) {
         for (QAction* action : current->actions()) {
             if (action->isSeparator()) {
@@ -6039,8 +5885,6 @@ void MainWindow::runSelectionOperation(SelectionOperation operation) {
         return;
     }
 
-    // Dropping loses work outright, and a squash rewrites messages and commits both, so
-    // neither happens on a click alone.
     QStringList summaries;
     for (const Oid& id : plan.branchCommits) {
         const int row = m_commitModel->rowForCommit(QString::fromStdString(id));
@@ -6310,7 +6154,6 @@ void MainWindow::rewriteCommitInHistory(const QString& commitId, RewriteAction a
 
 void MainWindow::dropCommitFromHistory(const QString& commitId) {
     const QString current = QString::fromStdString(m_session->info().headBranch);
-    // Dropping rewrites everything above the commit, so it is never a quiet operation.
     if (!askYes(QStringLiteral("Drop commit"),
                 QStringLiteral("Remove %1 from the history of “%2”? Everything above it is "
                                "replayed onto its parent, which rewrites those commits.")
@@ -6350,8 +6193,6 @@ void MainWindow::interactiveRebaseFromDrop(const QString& source, const QString&
                       .arg(source, target));
         return;
     }
-    // The same range the drop menu's interactive entry builds: rebase source onto
-    // target, keeping the branch checked out.
     interactiveRebaseRange(base, source, target, source);
 }
 
@@ -6393,8 +6234,6 @@ void MainWindow::interactiveRebaseRange(const QString& base, const QString& tip,
     if (steps.empty()) {
         return;
     }
-    // Destructive and silent by nature: the reader must know the branch's commits get new
-    // ids. The editor's validation already refused an empty or impossible plan.
     if (!askYes(QStringLiteral("Interactive rebase"),
                 QStringLiteral("Rewrite %1 commit(s) on “%2”?\n\nEvery commit above the base "
                                "gets a new id.")
@@ -6441,8 +6280,6 @@ QStringList MainWindow::rebaseEditorForDiagnostics(const QString& base, const QS
         return report;
     }
 
-    // No spec: print what the editor would show, oldest first. The default plan is the
-    // same list the dialog fills from.
     if (args.isEmpty()) {
         const std::string text = rebasePlanText(defaultRebasePlan(candidates));
         for (const QString& line :
@@ -6738,8 +6575,6 @@ void MainWindow::applyPatchInteractive() {
         refreshPanels();
         setStatus(QStringLiteral("Applied %1 as commits.").arg(QFileInfo(path).fileName()));
     } else {
-        // The diff lands in the working tree, so the panel is where it shows up and
-        // the reader decides to stage and commit it.
         refreshPanels();
         showWorkingTreeChanges();
         setStatus(QStringLiteral("Applied %1 to the working tree — review and commit.")
@@ -6776,8 +6611,6 @@ void MainWindow::runMaintenance(MaintenanceTask task) {
         return;
     }
     m_maintenanceRunning = true;
-    // Long object-store work on a worker, with the same quiet sweep the network
-    // operations get: the window must not look frozen while git repacks.
     if (m_commitView) {
         m_commitView->setBusy(true);
     }
@@ -6878,7 +6711,6 @@ void MainWindow::createBranchFromSelection() {
     if (!ok || name.trimmed().isEmpty()) {
         return;
     }
-    // Branch from the selected commit, or from HEAD when nothing is selected.
     const QModelIndex current = m_commitView->currentIndex();
     const CommitInfo* commit = m_commitModel->commitAt(current.row());
     const QString target = commit ? QString::fromStdString(commit->id)
@@ -7312,8 +7144,6 @@ QStringList MainWindow::activateHoverGhostForDiagnostics(int row) {
     if (ghost.isEmpty()) {
         return report;
     }
-    // The real path: the double-click signal goes to the window's own handler, which
-    // performs the checkout exactly as the label's would.
     m_commitView->activateGhostAt(row);
     report << QStringLiteral("branch: %1")
                   .arg(QString::fromStdString(m_session->info().headBranch));
@@ -7367,7 +7197,6 @@ QStringList MainWindow::columnsForDiagnostics(const QString& op) {
 
 QStringList MainWindow::timelineForDiagnostics(const QString& op) {
     if (op != QStringLiteral("show")) {
-        // Only the switch: the caller waits for the page before reporting.
         setTimelineGrouping(timelinePeriodFromKey(op.toStdString()));
         return {};
     }
@@ -7485,8 +7314,6 @@ QStringList MainWindow::profilesForDiagnostics(const QString& op, const QString&
             applyProfile(profile);
         }
     } else if (op == QStringLiteral("config")) {
-        // Reports what the repository would actually commit as, which is the fact a
-        // profile is meant to change.
         QStringList report;
         if (m_session && m_session->isOpen()) {
             report << QStringLiteral("local user.name: %1")
@@ -7639,7 +7466,6 @@ QStringList MainWindow::submoduleForDiagnostics(const QString& operation,
 
     QString error;
     if (operation == QStringLiteral("list")) {
-        // Read-only.
     } else if (operation == QStringLiteral("add")) {
         if (args.size() < 2) {
             report << QStringLiteral("add needs <url> <path> [branch]");
@@ -7895,7 +7721,6 @@ QStringList MainWindow::commitPanelForDiagnostics(const QStringList& paths, cons
         return report;
     }
 
-    // The same two calls the Commit Panel's buttons reach: stage, then commit.
     if (paths.isEmpty()) {
         QString error;
         if (!m_session->stageAll(&error)) {
@@ -7959,8 +7784,6 @@ void MainWindow::rebaseBranchOnto(const QString& branch, const QString& onto,
         break;
     case RebaseStatus::Completed:
         if (result.commitsSkipped > 0) {
-            // Saying nothing about these leaves the reader counting commits and
-            // finding one missing.
             setStatus(QStringLiteral("Rebased %1 onto %2 — %3 replayed, %4 already in %2.")
                           .arg(branch, onto)
                           .arg(result.commitsApplied)
@@ -8153,7 +7976,6 @@ void MainWindow::onRefDroppedOnCommit(RefModel::DraggedRef source, QString commi
 
     const bool isBranch = source.kind == RefKind::LocalBranch;
 
-    // Same as dropping a branch onto another branch: ask at the drop point.
     QMenu menu(this);
     const auto createHere = menu.addAction(QStringLiteral("Create a new branch here…"));
     QAction* moveHere = nullptr;
@@ -8278,7 +8100,6 @@ void MainWindow::updateRemotePicker() {
         m_remotePicker->setCurrentIndex(m_remotePicker->findText(want));
     }
     m_remotePicker->setVisible(!m_remotes.empty());
-    // The Auto-fetch submenu names the remotes, and the remotes just changed.
     updateAutoFetchMenu();
 }
 
@@ -8314,7 +8135,6 @@ void MainWindow::setUpstreamInteractive() {
             candidates << QString::fromStdString(ref.shortName);
         }
     }
-    // Preselect the remote branch that matches this branch's name, if it exists.
     QString preselect;
     const QString remote = currentSyncRemote();
     if (!remote.isEmpty()) {
@@ -8730,8 +8550,6 @@ void MainWindow::openPreferences() {
         remotes << QString::fromStdString(remote.name);
     }
 
-    // rerere lives in the git config, not in QSettings, so the dialog only reports
-    // the reader's choice and the window applies it through the session afterwards.
     RererePreferences rerere;
     if (m_session && m_session->isOpen()) {
         rerere.available = true;
@@ -8739,8 +8557,6 @@ void MainWindow::openPreferences() {
         rerere.autoupdate = m_session->rerereAutoupdate();
     }
 
-    // The external tool choice is git config too: the dialog reads it, and the window
-    // writes it back through the session on accept.
     ExternalToolsPreferences externalTools;
     if (m_session && m_session->isOpen()) {
         externalTools.available = true;
@@ -8754,8 +8570,6 @@ void MainWindow::openPreferences() {
         }
     }
 
-    // Signing choices are git config too; the dialog reports them and the window
-    // writes back only what changed.
     SigningPreferences signing;
     if (m_session && m_session->isOpen()) {
         signing.available = true;
@@ -8882,8 +8696,6 @@ void MainWindow::externalDiffPair(const QString& path, QString* base, QString* t
         return;
     }
     if (m_details && m_details->showingWorkingTree()) {
-        // Staged is HEAD against the index (`--cached`); unstaged is the index
-        // against the working tree, which needs no revision at all.
         *cached = m_renderedStaged;
         return;
     }
@@ -9862,7 +9674,6 @@ void MainWindow::refreshStashes() {
         m_refModel->setStashes(messages, oids);
     }
     const bool open = m_session && m_session->isOpen() && !m_session->info().bare;
-    // Nothing changed is nothing to stash: the button says so before it is pressed.
     if (m_stashAction) {
         m_stashAction->setEnabled(open && !m_session->status().empty());
     }
@@ -10074,7 +9885,6 @@ void MainWindow::refreshSubmodules() {
 
 namespace {
 
-/// The submodule's working directory, relative to the repository the window is on.
 QString submoduleDirectory(const RepoInfo& info, const QString& path) {
     const QString base =
         QString::fromStdString(info.workDir.empty() ? info.gitDir : info.workDir);
@@ -10443,10 +10253,8 @@ QStringList MainWindow::syncForDiagnostics(const QString& operation, const QStri
     } else if (operation == QStringLiteral("push-tags")) {
         result = m_session->syncBlocking(SyncKind::PushTags, remote, branch);
     } else if (operation == QStringLiteral("push-tag")) {
-        // argument is the tag here, not the remote.
         result = m_session->pushTagBlocking(selected, argument);
     } else if (operation == QStringLiteral("delete-tag-all-remotes")) {
-        // argument is the tag; every configured remote is tried.
         const std::vector<RemoteInfo> remotes = m_session->remotes();
         QStringList touched;
         QStringList failed;
@@ -10533,8 +10341,6 @@ QStringList MainWindow::autoFetchForDiagnostics(const QString& operation,
     }
 
     if (operation == QStringLiteral("now")) {
-        // What a tick would watch: the chosen remotes, or every remote when the
-        // list is empty. The window's own selection logic decides.
         const QStringList targets = remotes.isEmpty() ? m_autoFetchRemotes : remotes;
         const SyncResult result = m_session->fetchBlocking(targets, /*prune=*/true);
         refreshPanels();
@@ -10572,7 +10378,6 @@ QStringList MainWindow::conflictForDiagnostics(const QString& action, const QStr
     }
 
     if (action == QStringLiteral("close")) {
-        // Exactly what the editor's close button does.
         onConflictPageClosed();
     } else if (action == QStringLiteral("refresh")) {
         // The window's own refresh, which is what decides the page. A close has to
@@ -10639,7 +10444,6 @@ QStringList MainWindow::conflictForDiagnostics(const QString& action, const QStr
         m_commitModel->reset();
         refreshPanels();
     } else if (action == QStringLiteral("keep") && !args.isEmpty()) {
-        // The binary-conflict path: keep one whole index stage.
         QString error;
         const bool ok = m_conflictView->keepSide(args.at(0), &error);
         report << QStringLiteral("keep %1: %2")
@@ -10652,7 +10456,6 @@ QStringList MainWindow::conflictForDiagnostics(const QString& action, const QStr
         if (!ok) {
             report << QStringLiteral("smart: %1").arg(error);
         } else if (m_conflictView->regionCount() == 0) {
-            // Fully decided: stage it, so a single headless call finishes the file.
             QString saveError;
             const bool saved = m_conflictView->trySaveResolution(&saveError);
             report << QStringLiteral("smart: %1")
@@ -10709,8 +10512,6 @@ QStringList MainWindow::conflictForDiagnostics(const QString& action, const QStr
         report << QStringLiteral("takelines: %1")
                       .arg(ok ? QStringLiteral("ok") : QStringLiteral("failed"));
     } else if (action == QStringLiteral("auto")) {
-        // The automatic pass alone, with its reasons: what the sweep does after a
-        // stopped operation, reported per file rather than as a bare count.
         const RepoSession::AutoResolveOutcome autoPass =
             m_session->autoResolveTrivialConflicts();
         for (const QString& line : autoPass.resolvedDetail) {
@@ -11267,8 +11068,6 @@ void MainWindow::startSync(SyncKind kind, bool silent) {
     m_silentSync = silent;
     m_syncRunning = true;
     updateSyncActions();
-    // The graph shows a quiet sweep while the network work runs; the window is
-    // otherwise idle and would look frozen.
     if (m_commitView) {
         m_commitView->setBusy(true);
     }

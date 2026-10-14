@@ -5,8 +5,6 @@
 
 namespace gk {
 
-/// Lays its items out left to right and wraps to a new line when the row is full,
-/// so a row of buttons asks for the width of its widest button, not of all of them.
 class FlowLayout : public QLayout {
 public:
     explicit FlowLayout(QWidget* parent = nullptr, int spacing = 6);

@@ -42,7 +42,6 @@ public:
     /// window's repository tabs, so a tab switch hands it a different session.
     void setSession(RepoSession* session);
 
-    /// Re-reads the conflict list and selects the first unresolved file.
     void reload();
 
     /// Re-renders the current file after a theme or zoom change: the panes and
@@ -71,18 +70,13 @@ public:
     bool takeAllRegionLines(int region, const QString& side, bool take);
     bool setRegionLineOrder(int region, bool oursFirst);
     int regionLineTakeCount(int region, const QString& side) const;
-    /// Forgets every answer given in the current file — sides, lines and order —
-    /// leaving each region unanswered.
     void clearChoices();
     /// The file as the current choices would write it, markers kept where a
     /// region is unresolved.
     QString assembledText() const;
-    /// What a save would write: the card choices, or the manual editor's text.
     QString resultText() const;
-    /// Selects a conflicted file by path. False when it is not conflicted.
     bool selectFile(const QString& path);
     QString currentPath() const { return m_path; }
-    /// Writes and stages the result. Refuses while conflict markers remain.
     bool trySaveResolution(QString* errorOut);
     /// Keeps one whole index stage — the resolution for a binary file, where
     /// there is no text to merge. `side` is "ours", "base" or "theirs".
@@ -114,8 +108,6 @@ public:
     /// without staging it. The conflict stays open, so a partial resolution can be
     /// put on disk and picked up later.
     bool saveDraft(QString* errorOut);
-    /// True when the current conflict is a delete/modify (one side removed the
-    /// file). The editor then offers the explicit delete alongside the sides.
     bool isDeleteModify() const { return m_deleteModify; }
     QString currentKind() const;
     /// True when the file is binary (or its stages yield no text): the editor
@@ -135,7 +127,6 @@ public:
     bool rerereRemembered() const { return m_rerereRemembered; }
     bool rerereApplied() const { return m_rerereApplied; }
     bool stageRecordedResolution(QString* errorOut);
-    /// Finds `text` in the focused pane (the result when none has focus).
     bool findInPanes(const QString& text, bool forward, bool caseSensitive);
 
 signals:
@@ -187,13 +178,8 @@ private:
     /// there are no regions to set, so a choice keeps that whole side instead.
     void applyChoiceToAll(int choice);
     void keepCurrentSide(int choice);
-    /// Shows the card browser or the plain editor, and disables the toggle when
-    /// there are no regions to show.
     void updateResultMode();
 
-    /// Fills a pane with the text, coloured for the file being resolved, with the
-    /// words a word-level diff flagged laid over `emphasisBackground` (one range
-    /// list per line).
     void setPaneText(QTextEdit* pane, const QString& text,
                      const std::vector<QVector<QPair<int, int>>>& emphasis = {},
                      const QString& emphasisBackground = QString());
@@ -224,8 +210,6 @@ private:
     QPushButton* m_stageWorkdirButton = nullptr;
     QPushButton* m_externalButton = nullptr;
     QPushButton* m_deleteButton = nullptr;
-    /// The explicit question a delete/modify conflict asks, shown above the panes
-    /// instead of leaving the reader to infer it from an empty side.
     QFrame* m_deleteModifyPanel = nullptr;
     QLabel* m_deleteModifyText = nullptr;
     QPushButton* m_keepModifiedButton = nullptr;
@@ -251,11 +235,8 @@ private:
     QString m_path;
     QString m_workdirMarked;
     bool m_manualMode = false;
-    /// True when the conflict has no text to merge (a binary file). The panes
-    /// show sizes, the editor is disabled, and a side is kept whole.
     bool m_binary = false;
     bool m_deleteModify = false;
-    /// rerere state for the file on screen, recomputed by showEntry().
     bool m_rerereRemembered = false;
     bool m_rerereApplied = false;
     /// Recursion guard: one pane's scroll moving the others must not move it back.

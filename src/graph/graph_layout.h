@@ -44,7 +44,6 @@ public:
     const GraphLane& operator[](std::size_t index) const { return lanes()[index]; }
 
     const GraphLane* find(int lane) const;
-    /// The largest lane in the set, or -1 when it is empty.
     int maxLane() const { return m_data ? m_data->maxLane : -1; }
     /// Two sets built once and handed to several rows answer the same identity.
     const void* identity() const { return m_data.get(); }
@@ -94,7 +93,6 @@ struct GraphEdge {
 
 struct GraphNode {
     int lane = 0;
-    /// Colour of this commit's own node and of the line it continues.
     int colorIndex = 0;
     /// The palette index the node's colour came from, kept apart from `lane` for
     /// the reason the lane order is a permutation: `updateLaneOrder` moves a node
@@ -105,7 +103,6 @@ struct GraphNode {
     /// display lanes, so it answers "does this row draw past column N" without
     /// walking the edges again — the check a pinned-width snapshot makes.
     int edgeColumnMax = 0;
-    /// Lines born at this commit (a merge's additional parents).
     std::vector<GraphEdge> edges;
     /// Lanes that arrive from above and *end* at this commit's node.
     ///
@@ -130,7 +127,6 @@ struct GraphNode {
     GraphNodeType type = GraphNodeType::Commit;
 };
 
-/// What one lane's line is doing at one row.
 enum class GraphEdgeRole {
     Starting,    ///< born here: a merge's extra parent, or a branch tip
     PassThrough, ///< already alive above and still alive below
@@ -185,13 +181,6 @@ public:
     /// match its label. Keys are commit ids; values index the branch palette.
     void setTipColors(std::unordered_map<std::string, int> tipColors);
 
-    /// How important a tip is, lower being more important: 0 is the current
-    /// branch, 1 the branch the user focused, then the rest.
-    ///
-    /// Lanes are ordered by this after layout, so the branch you care about
-    /// sits leftmost and stays visible when the column is too narrow to show
-    /// every lane. Without it the order follows the commit walk, which is
-    /// effectively arbitrary — HEAD could end up clipped off the right edge.
     void setTipPriority(std::unordered_map<std::string, int> tipPriority);
 
     /// Types the commit list cannot tell on its own: a stash tip, a working-tree
@@ -207,8 +196,6 @@ public:
     const std::vector<CommitInfo>& commits() const { return m_commits; }
 
 private:
-    /// Lays out every row from scratch. Used by setCommits and the two tip
-    /// setters, which can change any row.
     void rebuild();
     /// Lays out rows `[from, to)` continuing from the live-lane state the last
     /// laid-out row left behind, appending to m_nodes.
@@ -217,7 +204,6 @@ private:
     /// applies it. When it leaves every lane that already existed where it was,
     /// only rows from `firstNewRow` are remapped; a change remaps every row.
     void updateLaneOrder(std::size_t firstNewRow);
-    /// Smallest palette index not currently carried by a live lane.
     int freeColor(const std::vector<int>& laneColors) const;
     LaneSet liveLanes() const;
 
@@ -234,14 +220,12 @@ private:
     std::vector<int> m_laneColors;
     std::vector<int> m_lanePriorities;
     LaneSet m_lastActiveBelow;
-    /// oid -> first (newest) row carrying it, for resolving a parent's row.
     std::unordered_map<std::string, int> m_rowOf;
     /// Parent oid -> the edges born before it loaded, waiting for its row.
     std::unordered_map<std::string, std::vector<std::pair<std::size_t, std::size_t>>>
         m_pendingEdges;
     bool m_walkReady = false;
 
-    /// natural lane -> display lane, and the inverse, for the lanes they cover.
     std::vector<int> m_laneOrder;
     std::vector<int> m_laneOrderInv;
     int m_orderedLanes = 0;

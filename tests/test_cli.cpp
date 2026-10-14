@@ -87,7 +87,6 @@ void CliTest::messagesAreEnglishWhateverTheLocale() {
 }
 
 void CliTest::theEnvironmentReachesGitItself() {
-    // The variables used to be set on a `cd` that ran before git, and git never saw them.
     const ProcessResult run = runGit(
         {"-c", "alias.env=!echo $GIT_OPTIONAL_LOCKS $GIT_TERMINAL_PROMPT $LANGUAGE", "env"},
         m_path);

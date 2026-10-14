@@ -19,10 +19,8 @@ namespace {
 
 enum Column { ActionColumn = 0, CommitColumn = 1 };
 
-/// Full commit id and the subject, kept on the commit cell.
 constexpr int IdRole = Qt::UserRole;
 constexpr int SubjectRole = Qt::UserRole + 1;
-/// The reword message, kept on the action cell.
 constexpr int MessageRole = Qt::UserRole + 1;
 
 /// The action cell is a combo box rather than a run of little buttons per row: the
@@ -54,7 +52,6 @@ public:
     void setModelData(QWidget* editor, QAbstractItemModel* model,
                       const QModelIndex& index) const override {
         auto* combo = qobject_cast<QComboBox*>(editor);
-        // The model decides what a valid action is; the combo only offers the six.
         model->setData(index, combo->currentData(), Qt::UserRole);
         model->setData(index, combo->currentText(), Qt::DisplayRole);
     }

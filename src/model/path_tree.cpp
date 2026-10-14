@@ -50,7 +50,6 @@ void sortFolders(PathFolder& folder) {
 PathFolder buildPathTree(const QStringList& names, const std::vector<int>& items) {
     PathFolder root;
     const qsizetype count = std::min<qsizetype>(names.size(), static_cast<qsizetype>(items.size()));
-    // Parallel lists: pairing fewer than we have would drop items silently.
     Q_ASSERT(names.size() == static_cast<qsizetype>(items.size()));
     for (qsizetype i = 0; i < count; ++i) {
         const QStringList parts = names.at(i).split(QLatin1Char('/'), Qt::SkipEmptyParts);

@@ -57,8 +57,6 @@ bool BranchPath::hasNode(int row) const {
 
 std::vector<BranchPath::RowPiece> BranchPath::piecesAt(int row) const {
     std::vector<RowPiece> pieces;
-    // The last segment starting at or above the row, and the one before it, which may
-    // end on this row's node.
     const auto after = std::upper_bound(
         m_segments.begin(), m_segments.end(), row,
         [](int value, const Segment& segment) { return value < segment.fromRow; });

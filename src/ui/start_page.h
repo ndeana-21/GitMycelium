@@ -10,12 +10,6 @@ class QTreeWidget;
 
 namespace gk {
 
-/// What a tab shows when it holds no repository: the way in, and the way back.
-///
-/// Three buttons — open an existing repository, clone one, create one — and the
-/// list of repositories used recently, each with its path and when it was last
-/// opened. The page holds no session: it reports what the reader asked for and the
-/// window performs it, because the same actions are reachable from the menu.
 class StartPage : public QWidget {
     Q_OBJECT
 

@@ -108,8 +108,6 @@ void WordDiffTest::anEmptyReferenceEmphasisesEveryLine() {
 }
 
 void WordDiffTest::blankLinesAreNotEmphasised() {
-    // An added blank line has no words to underline; a zero-length range would be
-    // noise the renderer has to skip anyway.
     const std::vector<QString> side = {QStringLiteral(""), QStringLiteral("x")};
     const std::vector<QString> reference = {QStringLiteral("x")};
     const std::vector<QVector<QPair<int, int>>> emphasis =

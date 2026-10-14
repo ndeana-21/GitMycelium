@@ -39,8 +39,6 @@ bool isBranchKind(RefKind kind) {
     return kind == RefKind::LocalBranch || kind == RefKind::RemoteBranch;
 }
 
-/// `origin/main` names a local `main`; the first path segment is the remote. Empty
-/// when there is no slash to split on.
 QString remoteCounterpart(const QString& remoteShortName) {
     const int slash = remoteShortName.indexOf(QLatin1Char('/'));
     return slash < 0 ? QString() : remoteShortName.mid(slash + 1);
@@ -199,7 +197,6 @@ std::vector<RefPill> RefPillLayout::arrange(const QStringList& labels, const QVa
     int visible = std::min(total, std::max(1, maxVisible));
     const bool overflow = total > visible;
 
-    // Reserve room for the badge on the last visible line.
     const int available = cell.height() - 2 * kMarginY;
     int pillH = (available - (visible - 1) * kGap) / visible;
     pillH = std::min(pillH, kMaxPillH);

@@ -31,8 +31,6 @@ constexpr const char* kWipCommitId = "//wip";
 /// oid, so it can never collide with a commit, and `isTimelineRow` recognises it.
 constexpr const char* kTimelineIdPrefix = "//timeline:";
 
-/// Where a commit sits in the timeline, and what the separator above it says.
-/// `valid` is false for `TimelinePeriod::None` and for a commit with no timestamp.
 struct PeriodStamp {
     bool valid = false;
     qint64 key = 0;      ///< commits sharing it belong under one separator
@@ -305,7 +303,6 @@ void CommitModel::setWorktreeWip(const std::vector<WorktreeWip>& list) {
     }();
 
     if (same) {
-        // Same nodes, so only the text or the branch they hang from can have moved.
         bool parentMoved = false;
         for (int i = 0; i < m_wipCount; ++i) {
             const CommitInfo& fresh = next[static_cast<std::size_t>(i)];
@@ -317,7 +314,6 @@ void CommitModel::setWorktreeWip(const std::vector<WorktreeWip>& list) {
         m_currentWipRow = currentRow;
         m_wipInfo = list;
         if (parentMoved) {
-            // The branch the node hangs from moved, so its colour may have.
             rebuildTipColors();
             rebuildTipPriority();
             m_graph.setNodeTypeHints(nodeTypeHints());
@@ -594,9 +590,6 @@ std::unordered_map<std::string, GraphNodeType> CommitModel::nodeTypeHints() cons
         }
     }
 
-    // A stash tip is a stash node whatever its parents make it look like: the
-    // stash commit itself is a merge of HEAD and the index, and would otherwise be
-    // drawn as a junction.
     for (const auto& [oid, bucket] : m_refsByCommit) {
         for (const RefInfo& ref : bucket) {
             if (ref.fullName.rfind("refs/stash", 0) == 0) {
@@ -743,7 +736,6 @@ void CommitModel::rebuildTipColors() {
 }
 
 namespace {
-/// Below everything else, unlabelled lines included.
 constexpr int kStashPriority = 2000;
 } // namespace
 
@@ -770,7 +762,6 @@ void CommitModel::rebuildTipPriority() {
         if (bucket.empty()) {
             continue;
         }
-        // A stash alone ranks below everything: a branch never continues on it.
         int best = kStashPriority;
         for (const RefInfo& ref : bucket) {
             if (ref.fullName.rfind("refs/stash", 0) == 0) {
@@ -930,7 +921,6 @@ Qt::ItemFlags CommitModel::flags(const QModelIndex& index) const {
             base |= Qt::ItemIsDragEnabled;
         }
     } else {
-        // The viewport is not a drop target: a drop there has no commit.
         base &= ~Qt::ItemIsDropEnabled;
     }
     return base;
@@ -953,12 +943,9 @@ bool CommitModel::canDropMimeData(const QMimeData* data, Qt::DropAction action, 
     if (!target.isValid() || target.row() >= m_rows.size()) {
         return false;
     }
-    // A branch does not belong on a working-tree row: there is no commit there
-    // to move, create or merge it into.
     if (isWipRow(target.row())) {
         return false;
     }
-    // Nor on a date separator, which is not a commit either.
     return !isTimelineRow(target.row());
 }
 
@@ -990,8 +977,6 @@ QVariant CommitModel::data(const QModelIndex& index, int role) const {
     }
 
     if (isTimelineRow(index.row())) {
-        // A separator is a heading: it shows its label in the message column and
-        // nothing else, and it is never a commit anything may act on.
         if (role == TimelineRole) {
             return true;
         }
@@ -1018,7 +1003,6 @@ QVariant CommitModel::data(const QModelIndex& index, int role) const {
     }
 
     if (role == WipRole) {
-        // True on any working-tree row, whatever column asks.
         return isWipRow(index.row());
     }
 
@@ -1080,7 +1064,6 @@ QVariant CommitModel::data(const QModelIndex& index, int role) const {
     if (role == Qt::DisplayRole) {
         switch (index.column()) {
         case Refs:
-            // The delegate paints labels; this is the accessible fallback.
             if (refs.empty()) {
                 return QString();
             }
@@ -1285,7 +1268,6 @@ void CommitModel::reset() {
     m_highlightActive = false;
     refreshRefs();
     endResetModel();
-    // Seed the first page; the view pages on from there as the reader scrolls.
     if (canLoadMore()) {
         fetchMore(QModelIndex());
     }

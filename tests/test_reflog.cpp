@@ -33,8 +33,6 @@ const QStringList kIdentity{"-c", "user.name=Test", "-c", "user.email=test@local
 
 } // namespace
 
-/// The reflog read path: it has to name the selector, the action and the commit the
-/// way git does, because the dialog acts on exactly those and cannot verify them.
 class ReflogTest : public QObject {
     Q_OBJECT
 
@@ -102,8 +100,6 @@ void ReflogTest::aCheckoutIsRecordedWithItsAction() {
 }
 
 void ReflogTest::anEmptyReflogIsNotAnError() {
-    // No commits: there is nothing the reflog could hold, and asking must answer
-    // nothing rather than throw.
     RepoSession session;
     QVERIFY(session.open(m_path));
     QVERIFY(session.reflog(10).empty());

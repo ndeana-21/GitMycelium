@@ -8,9 +8,6 @@ class QListWidget;
 
 namespace gk {
 
-/// What this checkout hides from the reader alone, without touching the shared
-/// `.gitignore`: the patterns in `.git/info/exclude` and the tracked files marked
-/// skip-worktree. The dialog only reports the reader's edits; the window writes them.
 class LocalIgnoreDialog : public QDialog {
     Q_OBJECT
 
@@ -20,7 +17,6 @@ public:
 
     QStringList addedPatterns() const;
     QStringList removedPatterns() const;
-    /// Hidden tracked files the reader brought back.
     QStringList unhiddenFiles() const;
 
     /// Test seams.

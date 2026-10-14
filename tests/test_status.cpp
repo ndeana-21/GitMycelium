@@ -1,7 +1,3 @@
-/// The working-tree status comes from `git status --porcelain=v2 -z`. These pin the
-/// shape the window was written against — one entry per changed side, a conflict
-/// as one unstaged entry, a rename under its new name, sorted by path — on the
-/// parser alone and on a repository with every kind of change at once.
 
 #include "core/porcelain_status.h"
 #include "core/types.h"

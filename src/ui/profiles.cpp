@@ -41,8 +41,6 @@ void save(const GitProfile& profile) {
         return;
     }
     QSettings settings;
-    // The list is written only when the name is new, so saving a profile twice does
-    // not duplicate it or move it in the order.
     QStringList known = names();
     if (!known.contains(profile.name)) {
         known << profile.name;

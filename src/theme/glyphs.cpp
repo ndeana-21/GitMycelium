@@ -83,7 +83,6 @@ void drawFolder(QPainter* painter, const QRectF& box, const QColor& colour) {
     QPainterPath path;
     path.addRoundedRect(
         QRectF(box.left() + w * 0.05, top, w * 0.90, bodyH), h * 0.13, h * 0.13);
-    // The tab, wider than half the body so the two merge into one silhouette.
     path.addRoundedRect(
         QRectF(box.left() + w * 0.05, top - h * 0.14, w * 0.46, h * 0.30), h * 0.10, h * 0.10);
 
@@ -93,8 +92,6 @@ void drawFolder(QPainter* painter, const QRectF& box, const QColor& colour) {
 }
 
 void drawBranch(QPainter* painter, const QRectF& box, const QColor& colour) {
-    // The usual three-dot branch: a stem with a commit at each end and a branch
-    // curving off to the right.
     QPen pen(colour);
     pen.setWidthF(std::max(1.0, box.height() * 0.10));
     pen.setCapStyle(Qt::RoundCap);
@@ -143,8 +140,6 @@ void drawTag(QPainter* painter, const QRectF& box, const QColor& colour) {
 }
 
 void drawStash(QPainter* painter, const QRectF& box, const QColor& colour) {
-    // An archive box: a lid, a body and a handle slot. The same silhouette the
-    // toolbar's stash icon uses, drawn as a path so the tree and the chrome agree.
     QPen pen(colour);
     pen.setWidthF(std::max(1.0, box.height() * 0.10));
     pen.setJoinStyle(Qt::RoundJoin);
@@ -166,8 +161,6 @@ void drawStash(QPainter* painter, const QRectF& box, const QColor& colour) {
                       QPointF(box.center().x() + w * 0.14, box.top() + h * 0.52));
 }
 
-/// Two overlapping checkouts: a linked working tree is a second place the same
-/// repository is checked out, which is exactly what the shape says.
 void drawWorktree(QPainter* painter, const QRectF& box, const QColor& colour) {
     QPen pen(colour);
     pen.setWidthF(std::max(1.0, box.height() * 0.11));

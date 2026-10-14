@@ -39,7 +39,6 @@ public:
     void stop();
 
     int watchedDirectoryCount() const;
-    /// True once every directory is being watched (the worker finished its scan).
     bool ready() const;
 
 signals:

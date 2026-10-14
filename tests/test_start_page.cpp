@@ -1,5 +1,3 @@
-/// The start page reports the request and the window acts on it, so a widget test can
-/// drive it without a repository at all.
 
 #include "ui/start_page.h"
 
@@ -119,8 +117,6 @@ void StartPageTest::theTitleIsBiggerThanTheBaseFont() {
 }
 
 void StartPageTest::theTitleNamesTheApplication() {
-    // The product name is "GitMycelium" wherever it is read; the binary and the
-    // settings identity stay lowercase.
     StartPage page;
     auto* title = page.findChild<QLabel*>(QStringLiteral("startPageTitle"));
     QVERIFY(title);

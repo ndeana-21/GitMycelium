@@ -36,10 +36,6 @@ bool writeFile(const QString& path, const QByteArray& content) {
 
 } // namespace
 
-/// Selecting several commits in the graph by hand: shift takes everything between the last
-/// commit picked and the one picked after it, ctrl adds or removes one at a time. Both are
-/// the reader's half of every rewrite that needs more than one commit, so they are driven
-/// here the way a hand drives them — with real clicks, not by setting a selection.
 class GraphSelectionTest : public QObject {
     Q_OBJECT
 
@@ -102,12 +98,6 @@ private slots:
     void init();
     void cleanup();
 
-    // The rules a selection is judged by — which commits may be dropped, which may be
-    // squashed, which can only be picked — live in test_selection_plan, where they need no
-    // window. The right-click path (a menu inside the selection must not disturb it) is
-    // driven by `--ui-context-menu`, which runs the real events without a mouse. What is
-    // left here is the gesture a reader makes, on real clicks.
-
     void shiftTakesEverythingBetweenTheTwoClicks();
     void squashingTheRootAndItsChildIsAllowed();
 };
@@ -125,7 +115,6 @@ void GraphSelectionTest::init() {
                            QStringLiteral("line %1\n").arg(step).toUtf8(),
                            QStringLiteral("c%1: step %1").arg(step)));
     }
-    // A branch of its own, so that "commits of this branch" means something.
     QVERIFY(git(m_path, {"checkout", "-q", "-b", "side", "main~3"}));
     QVERIFY(commitFile("s.txt", "s1\n", "side: first"));
     QVERIFY(commitFile("s.txt", "s2\n", "side: second (tip)"));

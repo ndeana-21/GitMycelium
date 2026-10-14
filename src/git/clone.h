@@ -14,11 +14,9 @@ struct CloneOptions {
     std::string shallowSince;
 };
 
-/// The outcome of `git clone`, through the binary.
 struct CloneResult {
     bool ok = false;
     int exitCode = -1;
-    /// git's merged stdout+stderr, exactly as it printed it.
     std::string output;
 };
 

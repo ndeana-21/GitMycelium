@@ -297,7 +297,6 @@ void ConflictViewTest::anUnresolvedRegionKeepsItsMarkersAndRefusesToSave() {
     QString error;
     QVERIFY(!view.trySaveResolution(&error));
     QVERIFY(!error.isEmpty());
-    // Nothing was written or staged: the conflict is still all there.
     QVERIFY(!session.conflicts().empty());
 }
 
@@ -382,7 +381,6 @@ void ConflictViewTest::closingTheMergeEditorLeavesItClosed() {
     report = window.conflictForDiagnostics(QStringLiteral("regions"), {});
     QVERIFY2(report.join(QLatin1Char('\n')).contains(QStringLiteral("page: history")),
              qPrintable(report.join(QLatin1Char('\n'))));
-    // Leaving the page is not ending the operation: the conflicts are still there.
     QVERIFY(report.join(QLatin1Char('\n')).contains(QStringLiteral("conflicts left: 1")));
 
     // A refresh used to drag the reader straight back, because the page is sticky
@@ -472,13 +470,11 @@ void ConflictViewTest::stagingTheWorkingTreeFileFinishesAnExternalResolution() {
 
     QCOMPARE(view.currentKind(), QStringLiteral("both modified"));
 
-    // Still marked up: staging as-is is refused rather than committing markers.
     QString error;
     QVERIFY(!view.stageWorkingTree(&error));
     QVERIFY(!error.isEmpty());
     QVERIFY(!session.conflicts().empty());
 
-    // Resolved somewhere else, then staged as it is on disk.
     QVERIFY(writeFile(m_path, "a.txt", "line1\nEXTERNAL\nline3\n"));
     QVERIFY2(view.stageWorkingTree(&error), qPrintable(error));
     QVERIFY(session.conflicts().empty());
@@ -516,7 +512,6 @@ void ConflictViewTest::markAllResolvedStagesTheResolvedFilesAndNamesTheRest() {
     view.reload();
     QCOMPARE(view.conflictCount(), 2);
 
-    // a.txt is settled on disk; b.txt still carries its markers.
     QVERIFY(writeFile(d, "a.txt", "a-resolved\n"));
     QStringList skipped;
     QString error;
@@ -638,7 +633,6 @@ void ConflictViewTest::keepingTheModifiedSideOfADeleteModifyKeepsTheFile() {
     ConflictView view(&session);
     view.reload();
 
-    // "ours" is the side that still has the file (HEAD modified it).
     QCOMPARE(view.regionCount(), 1);
     QVERIFY(view.setRegionChoice(0, QStringLiteral("ours")));
     QString error;
@@ -707,7 +701,6 @@ void ConflictViewTest::aDeleteModifyIsAnsweredOneOfFourWays() {
     QCOMPARE(gitOut(dir.path(), {"ls-files", "d.txt"}).trimmed().isEmpty(), !kept);
     if (kept) {
         QCOMPARE(readFile(dir.path(), "d.txt"), content);
-        // Staged as written: the index holds exactly what the working tree does.
         QCOMPARE(gitOut(dir.path(), {"diff", "--name-only", "--", "d.txt"}).trimmed(), QString());
     }
 }
@@ -716,7 +709,6 @@ void ConflictViewTest::deletedOnOurSideKeepsTheirChanges() {
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
     buildDeleteModifyConflict(dir.path());
-    // The same two branches merged the other way round: the deletion is ours now.
     QVERIFY(git(dir.path(), {"merge", "--abort"}));
     QVERIFY(git(dir.path(), {"checkout", "-q", "feature"}));
     git(dir.path(), kIdentity + QStringList{"merge", "main"});
@@ -765,7 +757,6 @@ void ConflictViewTest::theQuestionIsAskedOnlyOfADeleteModify() {
     QVERIFY(QTest::qWaitForWindowExposed(&view));
     QVERIFY(panel->mapTo(&view, QPoint(0, 0)).y() > 40);
     QVERIFY(panel->width() > 400);
-    // The real button, so the chain from the click to the index is what is checked.
     auto* keepBase = view.findChild<QPushButton*>(QStringLiteral("deleteModifyKeepBase"));
     QVERIFY(keepBase && keepBase->isEnabled());
     keepBase->click();
@@ -788,7 +779,6 @@ void ConflictViewTest::clearingChoicesLeavesEveryRegionUnanswered() {
     clear->click();
     QCOMPARE(view.unresolvedRegionCount(), 1);
     QCOMPARE(view.assembledText(), untouched);
-    // Nothing was written: the file on disk still carries git's markers.
     QVERIFY(readFile(m_path, "a.txt").contains(QStringLiteral("<<<<<<<")));
 }
 
@@ -803,7 +793,6 @@ void ConflictViewTest::aResolvedFileCanBeMarkedConflictedAgain() {
     QVERIFY(view.setRegionChoice(0, QStringLiteral("ours")));
     QString error;
     QVERIFY2(view.trySaveResolution(&error), qPrintable(error));
-    // The window reloads the editor on repositoryChanged; here the test does.
     view.reload();
     QCOMPARE(view.conflictCount(), 0);
     // Staged the way `git add` stages: git itself can see the way back.
@@ -818,7 +807,6 @@ void ConflictViewTest::aResolvedFileCanBeMarkedConflictedAgain() {
     QCOMPARE(view.conflictCount(), 1);
     QCOMPARE(view.currentPath(), QStringLiteral("a.txt"));
     QVERIFY(view.resolvedPaths().isEmpty());
-    // The file on disk keeps the resolution the reader had made.
     QCOMPARE(readFile(m_path, "a.txt"), QStringLiteral("line1\nMAIN\nline3\n"));
 
     QVERIFY(!view.markConflicted(QStringLiteral("a.txt"), &error));

@@ -228,7 +228,6 @@ void GraphLayout::rebuild() {
 }
 
 void GraphLayout::processRows(std::size_t from, std::size_t to) {
-    // Anything that is not a named, prioritised tip sorts last.
     constexpr int kUnprioritised = 1000;
 
     const auto addAwaited = [this](int lane, const std::string& oid) {
@@ -307,8 +306,6 @@ void GraphLayout::processRows(std::size_t from, std::size_t to) {
             continue;
         }
 
-        // This row is loaded now, so any edge that was waiting for it learns
-        // where its parent lives.
         if (const auto it = m_pendingEdges.find(commit.id); it != m_pendingEdges.end()) {
             for (const auto& [row, edge] : it->second) {
                 m_nodes[row].edges[edge].toRow = static_cast<int>(i);
@@ -323,8 +320,6 @@ void GraphLayout::processRows(std::size_t from, std::size_t to) {
         // it as it was — that is most rows, and those share the row above's set.
         bool lanesChanged = lane < 0 || commit.parents.size() != 1;
         if (lane < 0) {
-            // Nothing was waiting for this commit, so it is the tip of
-            // something: a branch, a remote-tracking branch or a tag.
             const auto tip = m_tipColors.find(commit.id);
             const auto prio = m_tipPriority.find(commit.id);
             lane = ensureLane(tip != m_tipColors.end() ? tip->second : -1,
@@ -421,8 +416,6 @@ void GraphLayout::processRows(std::size_t from, std::size_t to) {
         }
         node.activeLanesBelow = m_lastActiveBelow;
 
-        // The row's horizontal extent, in the lanes just filled in, and the colour
-        // column it settled on. Both are derived, never stored twice.
         node.colorColumn = node.colorIndex;
         node.edgeColumnMax = maxLaneOf(node);
 
@@ -444,7 +437,6 @@ void GraphLayout::updateLaneOrder(std::size_t firstNewRow) {
 
     std::vector<int> order(static_cast<std::size_t>(m_laneCount));
     std::iota(order.begin(), order.end(), 0);
-    // Stable so lanes of equal importance keep the order the walk gave them.
     std::stable_sort(order.begin(), order.end(), [this](int a, int b) {
         return m_lanePriorities[static_cast<std::size_t>(a)] <
                m_lanePriorities[static_cast<std::size_t>(b)];

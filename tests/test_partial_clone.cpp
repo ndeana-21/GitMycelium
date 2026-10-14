@@ -137,7 +137,6 @@ void PartialCloneTest::theCloneIsReallyPartial() {
     QVERIFY2(session.open(m_clone, &error), qPrintable(error));
     QVERIFY(session.info().partialClone);
 
-    // The clone has a promisor pack...
     QVERIFY(!QDir(QDir(m_clone).filePath(QStringLiteral(".git/objects/pack")))
                  .entryList(QStringList{QStringLiteral("*.promisor")})
                  .isEmpty());
@@ -184,8 +183,6 @@ void PartialCloneTest::fileAtReadsABlobOutsideTheCheckout() {
     QString error;
     QVERIFY2(session.open(m_clone, &error), qPrintable(error));
 
-    // H-2: `fileAtRevision` now routes through the git binary for a promisor clone, so
-    // a blob that was filtered out is fetched and returned — no more empty success.
     std::string bytes;
     QString readError;
     QVERIFY2(session.fileAtRevision(m_base, QStringLiteral("a.txt"), &bytes, &readError),
@@ -222,8 +219,6 @@ void PartialCloneTest::fileDiffReadsThroughTheBinary() {
     QString error;
     QVERIFY2(session.open(m_clone, &error), qPrintable(error));
 
-    // H-3: `fileDiffBetween` routes through the git binary on a promisor clone, so a
-    // path whose old blob is missing produces the diff instead of throwing.
     const FileDiff diff = session.fileDiffBetween(m_base, m_tip, QStringLiteral("a.txt"));
     QCOMPARE(diff.removed, 1);
     QCOMPARE(diff.added, 1);
@@ -318,7 +313,6 @@ void PartialCloneTest::aTreelessCloneStillListsChangesAndDiffs() {
     QVERIFY2(session.open(treeless, &error), qPrintable(error));
     QVERIFY(session.info().partialClone);
 
-    // The graph still walks: commit objects are present.
     bool hasMore = false;
     QCOMPARE(session.commitsBlocking(0, 10, &hasMore).size(), std::size_t(3));
 

@@ -181,7 +181,6 @@ bool BranchOpsTest::commitFile(const QString& name, const QString& content,
     return git(m_path, args);
 }
 
-/// main and feature, both past a common base, each with its own commit.
 void BranchOpsTest::buildTwoBranches() {
     QVERIFY(commitFile(QStringLiteral("base.txt"), QStringLiteral("base\n"),
                        QStringLiteral("base commit")));
@@ -197,7 +196,6 @@ QString BranchOpsTest::headId() const {
     return QString::fromStdString(Repository::open(m_path.toStdString())->info().headId);
 }
 
-/// The commit at the top of the history, which after a merge is the merge commit.
 CommitInfo BranchOpsTest::headCommit() const {
     const auto repo = Repository::open(m_path.toStdString());
     bool hasMore = false;
@@ -248,7 +246,6 @@ void BranchOpsTest::creatingABranchLeavesTheWorkingTreeAlone() {
     QVERIFY2(session.createBranch(QStringLiteral("topic"), before, &error), qPrintable(error));
 
     QCOMPARE(branchTip(QStringLiteral("topic")), before);
-    // Creating a branch is not going there.
     QCOMPARE(QString::fromStdString(session.info().headBranch), QStringLiteral("main"));
     QCOMPARE(readFile(m_path, QStringLiteral("a.txt")), QStringLiteral("one\n"));
 }
@@ -287,7 +284,6 @@ void BranchOpsTest::creatingABranchWithAnImpossibleNameFails() {
     QString error;
     QVERIFY(session.open(m_path, &error));
 
-    // A space and a double dot are both refused by git itself.
     QVERIFY(!session.createBranch(QStringLiteral("bad name"), headId(), &error));
     QVERIFY(!session.createBranch(QStringLiteral("bad..name"), headId(), &error));
     QVERIFY(!session.createBranch(QString(), headId(), &error));
@@ -396,7 +392,6 @@ void BranchOpsTest::deletingAMergedBranchWorks() {
     RepoSession session;
     QString error;
     QVERIFY(session.open(m_path, &error));
-    // Merged first, so nothing is lost by deleting it.
     MergeResult merge;
     QVERIFY2(session.mergeBranch(QStringLiteral("feature"), &merge, &error), qPrintable(error));
 
@@ -481,7 +476,6 @@ void BranchOpsTest::renamingOntoAnExistingNameFails() {
 
     QVERIFY(!session.renameBranch(QStringLiteral("feature"), QStringLiteral("main"), &error));
     QVERIFY(!error.isEmpty());
-    // Neither branch may be damaged by the refusal.
     QVERIFY(!branchTip(QStringLiteral("feature")).isEmpty());
     QVERIFY(!branchTip(QStringLiteral("main")).isEmpty());
 }
@@ -534,7 +528,6 @@ void BranchOpsTest::mergingNothingReportsUpToDate() {
 }
 
 void BranchOpsTest::aConflictedMergeStaysInProgressAndCanBeAborted() {
-    // The same file, the same line, different text on both branches.
     QVERIFY(commitFile(QStringLiteral("f.txt"), QStringLiteral("keep\nhere\n"),
                        QStringLiteral("base")));
     QVERIFY(git(m_path, {"checkout", "-q", "-b", "feature"}));
@@ -579,7 +572,6 @@ void BranchOpsTest::aConflictedMergeCanBeCompleted() {
     MergeResult result;
     QVERIFY(session.mergeBranch(QStringLiteral("feature"), &result, &error));
 
-    // What the conflict editor does: write the resolution, stage it, commit.
     QVERIFY2(session.resolveConflict(QStringLiteral("f.txt"), QStringLiteral("keep\nboth\n"),
                                      &error),
              qPrintable(error));
@@ -740,7 +732,6 @@ void BranchOpsTest::rebasingReplaysAndMovesTheBranch() {
     QCOMPARE(result.commitsApplied, std::size_t(1));
     QVERIFY(!session.rebaseInProgress());
 
-    // feature now sits on main and carries its own work.
     const CommitInfo head = headCommit();
     QCOMPARE(head.parents.size(), std::size_t(1));
     QCOMPARE(QString::fromStdString(head.parents.front()), mainTip);
@@ -836,7 +827,6 @@ void BranchOpsTest::movingAnUncheckedOutBranchMovesTheRefOnly() {
 
     QCOMPARE(branchTip(QStringLiteral("feature")), mainTip);
     QVERIFY(featureTip != mainTip);
-    // HEAD's branch was not touched, and neither was the working tree.
     QCOMPARE(headId(), mainTip);
     QVERIFY(QFile::exists(QDir(m_path).filePath(QStringLiteral("main.txt"))));
 }
@@ -878,7 +868,6 @@ void BranchOpsTest::fastForwardingABranchMovesItAndNothingElse() {
     QVERIFY2(session.fastForwardBranch(QStringLiteral("main"), QStringLiteral("feature"), &error),
              qPrintable(error));
     QCOMPARE(branchTip(QStringLiteral("main")), featureTip);
-    // Still on main: a fast-forward moves the branch, it does not switch branches.
     QCOMPARE(QString::fromStdString(session.info().headBranch), QStringLiteral("main"));
     QVERIFY(QFile::exists(QDir(m_path).filePath(QStringLiteral("b.txt"))));
 }
@@ -894,7 +883,6 @@ void BranchOpsTest::resettingSoftKeepsTheChangesStaged() {
     QVERIFY2(session.resetTo(first, ResetMode::Soft, &error), qPrintable(error));
 
     QCOMPARE(headId(), first);
-    // Soft means the work from the undone commit is still in the index.
     QVERIFY2(stagedPaths().contains(QStringLiteral("b.txt")),
              "a soft reset must leave the undone commit's files staged");
 }
@@ -915,7 +903,6 @@ void BranchOpsTest::resettingHardDiscardsThem() {
 }
 
 void BranchOpsTest::upstreamReportsAheadAndBehind() {
-    // A remote to follow, so the relationship can be measured both ways.
     QVERIFY(commitFile(QStringLiteral("a.txt"), QStringLiteral("one\n"), QStringLiteral("first")));
     QVERIFY(git(m_path, {"remote", "add", "origin", "https://example.invalid/repo.git"}));
     QVERIFY(git(m_path, {"update-ref", "refs/remotes/origin/main", "HEAD"}));
@@ -1029,7 +1016,6 @@ void BranchOpsTest::fastForwardingADivergedBranchIsRefusedAndChangesNothing() {
     QString error;
     QVERIFY(session.open(m_path, &error));
 
-    // Diverged: both sides moved on, so a fast-forward would drop main's commit.
     QVERIFY(!session.canFastForward(QStringLiteral("main"), featureTip));
     QVERIFY(!session.fastForwardBranch(QStringLiteral("main"), featureTip, &error));
     QVERIFY(!error.isEmpty());
@@ -1083,7 +1069,6 @@ void BranchOpsTest::deletingABranchThatSharesItsCommitKeepsTheCommits() {
     QVERIFY(!deleted);
     QVERIFY(!error.isEmpty());
     QCOMPARE(branchTip(QStringLiteral("feature")), featureTip);
-    // Deleting anyway is the caller's explicit decision, and it works.
     QVERIFY2(session.deleteBranchForced(QStringLiteral("feature"), &error), qPrintable(error));
     QVERIFY(branchTip(QStringLiteral("feature")).isEmpty());
     QCOMPARE(branchTip(QStringLiteral("twin")), featureTip);
@@ -1133,7 +1118,6 @@ void BranchOpsTest::branchNamesDifferingOnlyByCaseAreNotConfused() {
     QVERIFY2(session.createBranch(QStringLiteral("Topic"), tip, &error), qPrintable(error));
     QVERIFY2(session.createBranch(QStringLiteral("topic"), tip, &error), qPrintable(error));
 
-    // Deleting one must not take the other with it.
     QVERIFY2(session.deleteBranch(QStringLiteral("Topic"), &error), qPrintable(error));
     QVERIFY(!branchTip(QStringLiteral("topic")).isEmpty());
 }
@@ -1150,7 +1134,6 @@ void BranchOpsTest::aRefusedOperationLeavesTheRepositoryExactlyAsItWas() {
     const QString head = headId();
     const QString file = readFile(m_path, QStringLiteral("base.txt"));
 
-    // A run of operations that all have to fail.
     QVERIFY(!session.createBranch(QStringLiteral("main"), head, &error));
     QVERIFY(!session.checkoutBranch(QStringLiteral("nowhere"), &error));
     QVERIFY(!session.deleteBranch(QStringLiteral("feature"), &error));
@@ -1173,7 +1156,6 @@ void BranchOpsTest::operationsReportWhyTheyRefused() {
     QString error;
     QVERIFY(session.open(m_path, &error));
 
-    // A silent failure is a failure the reader cannot act on.
     error.clear();
     QVERIFY(!session.checkoutBranch(QStringLiteral("nowhere"), &error));
     QVERIFY2(!error.trimmed().isEmpty(), "a refused checkout must say why");
@@ -1193,7 +1175,6 @@ void BranchOpsTest::operationsReportWhyTheyRefused() {
 
 void BranchOpsTest::mergingWithUncommittedChangesIsRefused() {
     buildTwoBranches();
-    // An edit to a file the merge would have to touch.
     QVERIFY(writeFile(m_path, QStringLiteral("base.txt"), QStringLiteral("edited, not committed\n")));
 
     RepoSession session;
@@ -1228,7 +1209,6 @@ void BranchOpsTest::rebasingWithUncommittedChangesIsRefused() {
     if (rebased && result.status == RebaseStatus::Completed) {
         QFAIL("a rebase ran over uncommitted changes");
     }
-    // Whatever it decided, the work is still there.
     QCOMPARE(readFile(m_path, QStringLiteral("base.txt")), QStringLiteral("edited on feature\n"));
 }
 
@@ -1332,7 +1312,6 @@ void BranchOpsTest::movingTheCurrentBranchWithUncommittedChangesIsRefused() {
     QCOMPARE(branchTip(QStringLiteral("main")), before);
     QCOMPARE(readFile(m_path, QStringLiteral("main.txt")), QStringLiteral("not committed\n"));
 
-    // Forcing it is the caller's explicit decision, and it does move.
     const bool forced = session.moveBranchForced(QStringLiteral("main"), featureTip, &error);
     QVERIFY2(forced, qPrintable(error));
     QCOMPARE(branchTip(QStringLiteral("main")), featureTip);
@@ -1389,7 +1368,6 @@ void BranchOpsTest::ourRefsAgreeWithGitAfterASequenceOfOperations() {
     QVERIFY(session.renameBranch(QStringLiteral("work/one"), QStringLiteral("work/two"), &error));
     QVERIFY(session.moveBranch(QStringLiteral("work/two"), headId(), &error));
 
-    // git's own answer
     const auto listing = runGit({"for-each-ref", "--format=%(refname:short) %(objectname)",
                                  "refs/heads/"},
                                 m_path.toStdString());
@@ -1552,7 +1530,6 @@ void BranchOpsTest::ourRebaseLandsOnExactlyTheTreeGitLandsOn() {
     QVERIFY(commitFile(QStringLiteral("app.conf"), QStringLiteral("workers=8\n"),
                        QStringLiteral("raise the worker pool to 8")));
 
-    // A second copy of the same starting point.
     const QString other = m_dir->path() + QStringLiteral("-git");
     QVERIFY(git(m_path, {"clone", "-q", "--no-hardlinks", "--local", m_path, other}));
     QVERIFY(git(other, {"checkout", "-q", "bystander"}));

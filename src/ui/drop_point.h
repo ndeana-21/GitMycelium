@@ -14,7 +14,6 @@ namespace gk {
 /// menu asks for it here.
 void rememberDropPoint(const QPoint& globalPos);
 
-/// The last recorded drop position, or a null point if no drop has happened yet.
 QPoint lastDropPoint();
 
 } // namespace gk

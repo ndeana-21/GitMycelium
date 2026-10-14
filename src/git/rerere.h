@@ -19,7 +19,6 @@ class RerereOps {
 public:
     explicit RerereOps(std::string workDir);
 
-    /// `git config --bool --get rerere.enabled`. Off unless it says true.
     bool enabled() const;
     bool autoupdate() const;
     void setEnabled(bool on) const;
@@ -32,10 +31,7 @@ public:
     /// in `statusPaths()` but not here was applied from a recorded resolution.
     std::vector<std::string> remainingPaths() const;
 
-    /// `git rerere`: applies every recorded resolution it can to the working tree.
     SyncResult apply() const;
-    /// `git rerere forget <path>`: drops the recorded resolution for a path, so the
-    /// next conflict in it is presented fresh.
     SyncResult forget(const std::string& path) const;
 
     const std::string& workDir() const { return m_workDir; }

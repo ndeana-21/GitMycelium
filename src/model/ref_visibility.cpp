@@ -35,7 +35,6 @@ VisibilityPreset presetFromId(const QString& id) {
     return VisibilityPreset::None;
 }
 
-/// The whole per-repository table, or an empty object when nothing is stored yet.
 QJsonObject readTable(const QString& storePath) {
     QFile file(storePath);
     if (!file.open(QIODevice::ReadOnly)) {

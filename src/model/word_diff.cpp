@@ -111,7 +111,6 @@ WordDiff wordDiff(const QString& before, const QString& after) {
         }
     }
 
-    // Walk back from the corner, replaying the alignment forwards into the runs.
     std::vector<bool> leftKept(n, false);
     std::vector<bool> rightKept(m, false);
     std::size_t i = n;
@@ -175,7 +174,6 @@ std::vector<QVector<QPair<int, int>>> emphasisAgainstReference(
         return out;
     }
 
-    // Line-level LCS: exact equality is the only thing that counts as "unchanged".
     std::vector<std::vector<int>> lengths(n + 1, std::vector<int>(m + 1, 0));
     for (std::size_t i = 1; i <= n; ++i) {
         for (std::size_t j = 1; j <= m; ++j) {

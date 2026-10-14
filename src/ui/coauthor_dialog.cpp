@@ -97,8 +97,6 @@ void CoAuthorDialog::addCurrent() {
         return;
     }
     CoAuthor author{name.toStdString(), email.toStdString()};
-    // A person added twice is one trailer; git would deduplicate it anyway, but the
-    // list should not lie about what it will produce.
     for (const CoAuthor& existing : m_authors) {
         if (existing.email == author.email) {
             return;
@@ -113,8 +111,6 @@ void CoAuthorDialog::addCurrent() {
 }
 
 void CoAuthorDialog::refreshOkState() {
-    // OK only means something with at least one person and no half-typed row: a
-    // dialog that accepts a blank co-author writes a trailer nobody asked for.
     const bool ready =
         !m_authors.empty() && m_name->text().trimmed().isEmpty() && m_email->text().trimmed().isEmpty();
     m_ok->setEnabled(ready);

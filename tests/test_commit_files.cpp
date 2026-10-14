@@ -14,8 +14,6 @@ ChangedFile file(const QString& path, ChangeKind kind = ChangeKind::Modified) {
     return out;
 }
 
-/// "parent|label" for every row, so a test can state the shape it expects in one
-/// literal rather than chasing indexes.
 void collect(const QStandardItemModel& model, const QModelIndex& parent, const QString& trail,
              QStringList* out) {
     for (int row = 0; row < model.rowCount(parent); ++row) {
@@ -124,7 +122,6 @@ void CommitFilesTest::folderFilterNarrowsTheList() {
     model.setFolderFilter(QStringLiteral("src/ui/"));
     QCOMPARE(shape(model), QStringList({QStringLiteral("src/ui/window.cpp")}));
 
-    // ...and the same filter narrows the tree shape, without a second code path.
     model.setMode(CommitFilesModel::TreeMode);
     QCOMPARE(shape(model),
              QStringList({QStringLiteral("src/ui"), QStringLiteral("src/ui/window.cpp")}));

@@ -191,7 +191,6 @@ void InteractiveRebaseTest::candidatesAreTheTodoOldestFirst() {
     const std::vector<RebaseCandidate> candidates =
         session.rebaseCandidates(base, QStringLiteral("HEAD"));
 
-    // c2, c3, c4 oldest first — exactly what git's todo lists.
     QCOMPARE(candidates.size(), std::size_t(3));
     QCOMPARE(QString::fromStdString(candidates.front().subject), QStringLiteral("c2"));
     QCOMPARE(QString::fromStdString(candidates.back().subject), QStringLiteral("c4"));
@@ -271,7 +270,6 @@ void InteractiveRebaseTest::squashCombinesMessagesAndFixupKeepsTheFirst() {
         QVERIFY(log.contains(QStringLiteral("c3")));
         QCOMPARE(gitOut(m_path, {"rev-list", "--count", "HEAD"}).trimmed(),
                  QStringLiteral("2"));
-        // The squash kept both files: it only joined the commits.
         QVERIFY(gitOut(m_path, {"ls-tree", "--name-only", "HEAD"}).contains(QStringLiteral("f3.txt")));
     }
     cleanup();
@@ -357,7 +355,6 @@ void InteractiveRebaseTest::aPlanThatDoesNotMatchTheRangeIsRefused() {
 }
 
 void InteractiveRebaseTest::rebaseingAnotherBranchOntoATargetMatchesTheGitBinary() {
-    // main: c1. feature from c1: f1, f2. main then advances, so the two share only c1.
     QVERIFY(build(1));
     QVERIFY(git(m_path, {"checkout", "-q", "-b", "feature"}));
     QVERIFY(writeFile(m_path, QStringLiteral("feature1.txt"), QStringLiteral("x\n")));
@@ -399,7 +396,6 @@ void InteractiveRebaseTest::rebaseingAnotherBranchOntoATargetMatchesTheGitBinary
                                     QStringLiteral("feature")),
              qPrintable(error));
     QVERIFY(!session.rebaseInProgress());
-    // The branch was checked out by the rebase and now sits on main.
     QCOMPARE(QString::fromStdString(session.info().headBranch), QStringLiteral("feature"));
     QCOMPARE(gitOut(m_path, {"rev-parse", "feature^{tree}"}).trimmed(), oracleTree);
     QCOMPARE(gitOut(m_path, {"log", "--format=%s", "feature"}), oracleLog);
@@ -413,7 +409,6 @@ void InteractiveRebaseTest::anEditStepIsAmendedAndContinued() {
     QVERIFY(session.open(m_path, &error));
     const QString base = gitOut(m_path, {"rev-parse", "HEAD~2"}).trimmed();
 
-    // Amending needs an open rebase; there is none yet.
     QVERIFY(!session.amendStoppedCommit(QString(), &error));
 
     std::vector<RewriteStep> steps = planFrom(session.rebaseCandidates(base, QStringLiteral("HEAD")));
@@ -423,14 +418,12 @@ void InteractiveRebaseTest::anEditStepIsAmendedAndContinued() {
     QVERIFY(session.conflicts().empty());
     QCOMPARE(headSubject(), QStringLiteral("c2"));
 
-    // Stage a change and amend the stopped commit, keeping its message.
     QVERIFY(writeFile(m_path, QStringLiteral("amended.txt"), QStringLiteral("new\n")));
     QVERIFY(git(m_path, {"add", "-A"}));
     QVERIFY2(session.amendStoppedCommit(QString(), &error), qPrintable(error));
     QCOMPARE(headSubject(), QStringLiteral("c2"));
     QVERIFY(gitOut(m_path, {"ls-tree", "--name-only", "HEAD"}).contains(QStringLiteral("amended.txt")));
 
-    // Continue: the rest replays on top of the amended commit.
     RebaseResult result;
     QVERIFY2(session.rebaseContinue(&result, &error), qPrintable(error));
     QVERIFY(!session.rebaseInProgress());

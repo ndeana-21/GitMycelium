@@ -345,7 +345,6 @@ void TopoWalkTest::indexingNeedsToBeAskedFor() {
     }
     QVERIFY(!QFile::exists(info + QStringLiteral("/commit-graphs")));
 
-    // Asked for, but the reader turned the graph off: git would not read one.
     QVERIFY(git(dir.path(), {"config", "core.commitGraph", "false"}));
     {
         RepoSession session;

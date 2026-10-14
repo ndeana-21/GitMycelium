@@ -36,7 +36,6 @@ std::vector<std::string> splitLines(const std::string& text) {
     return out;
 }
 
-/// `%(authoremail)` prints `<t@t>`; the rest of the code compares addresses.
 std::string stripBrackets(std::string text) {
     if (!text.empty() && text.front() == '<') {
         text.erase(text.begin());

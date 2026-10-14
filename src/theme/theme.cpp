@@ -308,8 +308,6 @@ QColor branchLabelBorder(const QColor& branch) {
 }
 
 QColor branchLabelText(const QColor& branch) {
-    // Lift the text towards white on a near-black row, sink it towards black on a
-    // white one, so the label reads in both modes while carrying its own hue.
     return active().liftLabelText ? branch.lighter(118) : branch.darker(140);
 }
 

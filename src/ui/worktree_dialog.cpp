@@ -49,8 +49,6 @@ WorktreeDialog::WorktreeDialog(QWidget* parent) : QDialog(parent) {
     m_start->setPlaceholderText(QStringLiteral("HEAD"));
     layout->addWidget(m_start);
 
-    // The start point only means something while the branch is being created; a
-    // field that does nothing is worse than a disabled one.
     connect(m_create, &QCheckBox::toggled, m_start, &QWidget::setEnabled);
     m_start->setEnabled(m_create->isChecked());
 

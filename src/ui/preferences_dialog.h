@@ -36,9 +36,6 @@ struct KeymapRow {
     QKeySequence sequence;
 };
 
-/// External diff/merge tool state as the dialog found it. The choice lives in the git
-/// config, so the dialog only reports the reader's choice and the window applies it
-/// through the session afterwards.
 struct ExternalToolsPreferences {
     bool available = false;
     QString diffTool;
@@ -47,9 +44,6 @@ struct ExternalToolsPreferences {
     QStringList mergeTools;
 };
 
-/// Commit-signing state as the dialog found it. The choices live in the git config
-/// (`commit.gpgsign`, `user.signingkey`, `gpg.format`, `gpg.program`), so the dialog
-/// only reports them; the window writes them through the session on accept.
 struct SigningPreferences {
     bool available = false;
     bool sign = false;
@@ -76,7 +70,6 @@ public:
 
     bool rerereEnabled() const { return m_rerereEnabled; }
     bool rerereAutoupdate() const { return m_rerereAutoupdate; }
-    /// The chosen external tool names as of accept; empty means "git's default".
     QString diffTool() const;
     QString mergeTool() const;
     bool signCommits() const;

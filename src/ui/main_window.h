@@ -69,7 +69,6 @@ class StartPage;
 /// silently rewrite history.
 enum class RefDropAction { MergeInto, RebaseOnto, Checkout };
 
-/// A commit's file list and signature: what selecting it reads beyond its row.
 struct CommitDetails {
     std::vector<ChangedFile> files;
     bool amendable = false;
@@ -83,10 +82,8 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow() override;
 
-    /// Pins the graph column to `width` pixels, as dragging its header does.
     void setGraphColumnWidth(int width);
 
-    /// Returns false on failure and shows the reason in a message box.
     bool openRepository(const QString& path);
 
     void selectFirstCommit();
@@ -106,7 +103,6 @@ public:
     /// its action key; submenu entries are indented and their parent marked " ▸".
     QStringList commitMenuEntries(const QString& commitId) const;
 
-    /// Says yes without a dialog when headless.
     bool askYes(const QString& title, const QString& text);
     void reportFailure(const QString& title, const QString& text);
 
@@ -132,7 +128,6 @@ public:
     /// Off by default so a test or one-shot run does not rewrite a reader's profile;
     /// the application turns it on for an interactive launch.
     void setTabsPersistenceEnabled(bool on) { m_tabsPersistence = on; }
-    /// Off by default: a test or a `--shot` must not change the repository it reads.
     void setBackgroundIndexingEnabled(bool on);
     /// Off by default: only an interactive launch asks the release page for a newer
     /// build (at most once a day, and only while the preference allows it).
@@ -141,17 +136,14 @@ public:
     /// result of what it just did. The interactive launch turns it on: refreshes read
     /// on a worker, and what is not read yet shows as skeleton rows.
     void setAsyncReadsEnabled(bool on);
-    /// For a test of the asynchronous path: whether each part still shows its skeleton.
     QStringList loadingStateForDiagnostics() const;
     void showUpdateDialog();
     /// Opens only the active one; a session with several monorepos must not read them all
     /// at startup.
     void restoreTabs();
 
-    /// Off by default: nobody asked for network traffic.
     void setAutoFetch(bool enabled);
     bool autoFetchEnabled() const { return m_autoFetchEnabled; }
-    /// Empty means every configured remote.
     void setAutoFetchRemotes(const QStringList& remotes);
     QStringList autoFetchRemotes() const { return m_autoFetchRemotes; }
     /// Test seam: the production interval is five minutes, which no test will wait.
@@ -166,13 +158,11 @@ public:
     void checkConflictsWithBase(bool silent);
     void setPreventionEnabled(bool enabled);
     bool preventionEnabled() const { return m_preventionEnabled; }
-    /// `--ui-prevention`: "check", "enable", "disable".
     QStringList preventionForDiagnostics(const QString& op);
 
     /// Off by default: it can hit the network and move nested checkouts, which is not
     /// something to do unasked.
     void setSubmoduleAutoupdate(bool enabled);
-    /// Whether that update tracks the submodule's remote branch (`--remote`).
     void setSubmoduleAutoupdateRemote(bool remote);
     bool submoduleAutoupdateEnabled() const { return m_submoduleAutoupdate; }
     bool submoduleAutoupdateRemote() const { return m_submoduleAutoupdateRemote; }
@@ -183,8 +173,6 @@ public:
     void setRerereAutoupdate(bool on);
     bool rerereEnabled() const;
 
-    /// The plan says which operations are on offer; this says which one the reader
-    /// picked.
     enum class SelectionOperation { Drop, Squash, CherryPick };
 
     SelectionPlan selectionPlan() const;
@@ -200,14 +188,10 @@ public:
 
     QStringList m_lastMenuReport;
 
-    /// The base a rewrite of `commits` replays onto: the oldest commit's parent, or the root.
     QString rootBelow(const std::vector<Oid>& commits) const;
 
-    /// The base below one commit: its parent, or `kRebaseRoot` when it has none.
     QString rebaseBaseBelow(const QString& commitId) const;
 
-    /// Runs an operation on the whole selection; single-commit selections go through the
-    /// paths the menu always used.
     void runSelectionOperation(SelectionOperation operation);
 
     QStringList runSelectionForDiagnostics(const QVector<int>& rows, const QString& operation);
@@ -233,19 +217,14 @@ public:
     /// `show` reports the gitflow config; `init|master|develop`, `start|kind|name` and
     /// `finish|kind|name[|version]` drive it.
     QStringList gitflowForDiagnostics(const QString& op, const QString& argument);
-    /// `list` prints the recent notifications, `clear` empties them.
     QStringList notificationsForDiagnostics(const QString& op);
-    /// Sets the Date column format and reports it with the first row's rendered date.
     QStringList dateFormatForDiagnostics(const QString& key);
     /// `show` reports the LFS state; `init|track|untrack|checkout|prune` act on it;
     /// `fetch|pull|push` run the network path.
     QStringList lfsForDiagnostics(const QString& op, const QString& argument);
 
-    /// Lists, adds, removes, locks or prunes worktrees and reports the resulting list.
     QStringList worktreeForDiagnostics(const QString& operation, const QStringList& args);
 
-    /// Lists, adds, initializes, updates, syncs or deinitializes submodules and reports
-    /// the resulting list.
     QStringList submoduleForDiagnostics(const QString& operation, const QStringList& args);
 
     /// `--shot` uses it to keep the captured frame free of a mid-flight fade.
@@ -262,7 +241,6 @@ public:
     /// Print (`args` empty) or run (`args` = a plan spec) an interactive rebase over
     /// `base..HEAD`; the `--onto`/branch form is not exposed here.
     QStringList rebaseEditorForDiagnostics(const QString& base, const QStringList& args);
-    /// An empty message keeps the commit's own.
     QStringList rebaseAmendForDiagnostics(const QString& message);
     /// `mergeBase` asks for the three-dot form; a `target` of `//wip` compares `base`
     /// with the working tree.
@@ -272,7 +250,6 @@ public:
                                           bool staged);
     QStringList blameForDiagnostics(const QString& path, const QString& revision);
     QStringList fileHistoryForDiagnostics(const QString& path);
-    /// The reflog, newest first, one "selector action commit message" line per entry.
     QStringList reflogForDiagnostics(int limit);
     QStringList maintenanceForDiagnostics(const QString& operation);
 
@@ -315,17 +292,14 @@ public:
     /// or `merge`.
     QStringList externalToolForDiagnostics(const QString& op, const QString& kind,
                                            const QString& name);
-    /// The tool itself must already be set up.
     QStringList runExternalToolForDiagnostics(const QString& kind, const QString& base,
                                               const QString& target, const QString& path);
     QStringList terminalForDiagnostics();
 
     QStringList tabsForDiagnostics(const QString& operation, const QStringList& args);
 
-    /// `list` the recently-used repositories, `add` one or `clear` the list.
     QStringList recentForDiagnostics(const QString& operation, const QStringList& args);
     QStringList startPageForDiagnostics() const;
-    /// The dialog is bypassed; the path and branch come from the call.
     QStringList createRepositoryForDiagnostics(const QString& path, const QString& branch);
 
     QStringList undoForDiagnostics();
@@ -342,7 +316,6 @@ public:
     /// One of `fetch`, `fetch-all`, `pull`, `pull-merge`, `pull-rebase`, `push`,
     /// `push-tags`, `push-tag`.
     QStringList syncForDiagnostics(const QString& operation, const QString& argument);
-    /// The flag that refuses the next network operation.
     bool syncRunningForDiagnostics() const { return m_syncRunning; }
     QStringList setUpstreamForDiagnostics(const QString& upstream);
 
@@ -358,8 +331,6 @@ public:
     /// file, print the assembled text, or save — through the page's own calls.
     QStringList conflictForDiagnostics(const QString& action, const QStringList& args);
 
-    /// Predicts what merging `theirs` into `ours` would do, through `git merge-tree`,
-    /// without touching the working tree.
     QStringList mergePreviewForDiagnostics(const QString& ours, const QString& theirs);
 
     QStringList squashMergeForDiagnostics(const QString& source, const QString& target);
@@ -419,8 +390,6 @@ private:
     void buildToolBar();
     /// Added before the main toolbar so it sits above it.
     void buildTabBar();
-    /// `QSettings` is the source of truth; the window re-reads it rather than trusting
-    /// the dialog.
     void openPreferences();
     void cloneFromDialog();
     /// The repository does not exist yet, so this cannot go through RepoSession.
@@ -429,17 +398,12 @@ private:
     void onCloneFinished(bool ok, const QString& destination, const QString& output);
     void openExternalDiff(const QString& path);
     void openExternalMerge(const QString& path);
-    /// The base, target and `--cached` flag the viewer's current context means.
     void externalDiffPair(const QString& path, QString* base, QString* target, bool* cached) const;
-    /// A merge refreshes the panels because the tool may have written a resolution.
     void onExternalToolFinished(bool ok, const QString& output, const QString& title, bool refresh);
     void openTerminal();
     void openHooks();
     void openLocalIgnore();
-    /// Writes the chosen trailers back into the commit message, so the field always
-    /// shows what will be committed.
     void onCoauthorsRequested();
-    /// `scope` is "gitignore" or "exclude"; `kind` is "file", "ext" or "dir".
     void onIgnoreRequested(const QStringList& paths, const QString& scope, const QString& kind);
     static QString ignorePatternFor(const QString& path, const QString& kind);
     static QString ignorePathspecFor(const QString& path, const QString& kind);
@@ -448,8 +412,6 @@ private:
     /// applies the look.
     void applyAppearance();
     void loadGraphAnimation();
-    /// Every place that used to call buildCommands() calls this instead, so a rebuilt
-    /// registry never leaves a stale binding behind.
     void refreshCommands();
     /// A menu action keeps its binding, anything else gets a shortcut, and a command
     /// with no sequence gets none.
@@ -483,20 +445,15 @@ private:
     void showWorkingTreeChanges();
     void showWorkingTreeChanges(const std::vector<FileChange>& changes);
     void showCommitFiles(const QString& commitId);
-    /// The file list is what differs between them, and a click shows that path's diff
-    /// between the two rather than against a parent.
     void showComparison(const QString& base, const QString& target);
     /// `base` is the merge base of the two revisions: what this branch has done on top
     /// of `target`, ignoring what `target` has done since — `git diff target...base`.
     void showComparisonMergeBase(const QString& base, const QString& target);
     /// `git diff <rev>`, the "what have I not committed yet against this" question.
     void showComparisonWorkingTree(const QString& revision);
-    /// What a comparison is; rendering and the cache key both need to know.
     enum class CompareMode { TwoDot, MergeBase, WorkingTree };
-    /// The ids are already resolved; this lays the comparison out and shows the page.
     void applyComparison(const QString& baseId, const QString& targetId, CompareMode mode,
                          const QString& label);
-    /// Overwrites the working-tree copy, so it asks first.
     void restoreRenderedFileFromView();
     void showBlameFor(const QString& path);
     void showDocument(const DiffView::Document& document);
@@ -506,16 +463,12 @@ private:
     void editSparseCheckout();
     void editProfiles();
     void openGitFlow();
-    /// Reopened after an action so several patterns can be tracked in one visit.
     void openLfs();
     void notify(int level, const QString& text);
     void showNotifications();
     void applyProfile(const gk::GitProfile& profile);
-    /// Right-click on the graph header: which columns to show. Column layout is a
-    /// property of the view, remembered per repository.
     void showCommitColumnMenu(const QPoint& pos);
     void setCommitColumnVisible(CommitModel::Column column, bool visible);
-    /// Applies the saved choice, or the default (Branch/Tag, Graph, Message).
     void loadCommitColumns();
     void saveCommitColumns();
     /// The parts of the header that must be set after `restoreState` too, since a saved
@@ -531,14 +484,12 @@ private:
     void loadTimeline();
     QString columnSettingsKey() const;
     void amendSelectedCommitMessage(const QString& message);
-    /// What git says about the commit's signature: good, bad, unknown or none.
     void verifyCommitSignature(const QString& commitId);
     void selectCommit(const QString& commitId);
     void showDiff(const QString& path, const QString& commitId);
     /// `workingTree` says which of the two the file is read from; `staged` says which side,
     /// which decides the diff and whether the control offers Stage or Unstage.
     void renderFile(const QString& path, bool workingTree, bool staged = false);
-    /// Refreshes and returns to the same file.
     void applyStagingRequest(const QString& path, int hunkIndex, const QVector<int>& lines,
                              bool toIndex);
     /// Asks first: the content was never committed, so the operation log cannot bring it
@@ -561,7 +512,6 @@ private:
 
     void refreshWorktrees();
     void createWorktree();
-    /// Its own tab when the window already shows a repository, otherwise the current one.
     void openWorktree(const QString& path);
     void removeWorktreeAt(const QModelIndex& index);
     void lockWorktreeAt(const QModelIndex& index);
@@ -570,11 +520,8 @@ private:
 
     void refreshSubmodules();
     void addSubmodule();
-    /// Its own tab when one is already showing a repository.
     void openSubmodule(const QString& path);
-    /// `git submodule update --init` for one submodule (and its nested ones).
     void initSubmoduleAt(const QModelIndex& index);
-    /// `remote` fetches the tracked branch instead of the recorded commit.
     void updateSubmoduleAt(const QModelIndex& index, bool remote);
     void syncSubmoduleAt(const QModelIndex& index);
     /// Removes the checkout but keeps the entry; asks before forcing.
@@ -583,7 +530,6 @@ private:
     void updateAllSubmodules();
     void syncAllSubmodules();
 
-    /// Reports failures and refreshes on success.
     void runWrite(const QString& what, const std::function<bool(QString*)>& action,
                   bool resetHistory = true);
     /// A checkout, on a worker when reads are asynchronous: on a large work tree it
@@ -596,11 +542,8 @@ private:
     enum class StageOp { Stage, Unstage, Discard };
 
     void checkoutSelectedBranch();
-    /// Applies one staging action to every path the commit panel reports, then refreshes.
-    /// Discard asks first — it is the one that loses work.
     void applyToFiles(const QStringList& paths, StageOp op);
     void commitStaged(const QString& message);
-    /// Empty when HEAD is not loaded.
     QString headCommitMessage() const;
     QColor headBranchColor() const;
     void discardAllChanges();
@@ -612,9 +555,7 @@ private:
     void updateUndoRedoActions();
 
     void buildCommands();
-    /// Opens the palette and runs whatever was chosen.
     void showCommandPalette();
-    /// A disabled command is reported, not silently ignored.
     void runCommand(const QString& id);
     /// A local branch is checked out; a remote-tracking one becomes a local branch that
     /// follows it, after asking.
@@ -629,7 +570,6 @@ private:
     void refreshIfRepositoryChanged();
     void createBranchFromSelection();
     void deleteSelectedBranch();
-    /// One confirmation and one operation-log entry; the checked-out branch is never touched.
     void deleteSelectedBranches();
     void deleteMergedBranches();
     void setUpstreamsForSelected();
@@ -642,7 +582,6 @@ private:
                          bool preflightShown = false);
     void rebaseBranchOnto(const QString& branch, const QString& onto,
                           bool preflightShown = false);
-    /// The change is staged, not committed.
     void squashMergeBranch(const QString& source, const QString& target,
                            bool preflightShown = false);
     void squashMergeIntoCurrent();
@@ -654,24 +593,19 @@ private:
     void cherryPickCommit(const QString& commitId);
     void revertCommit(const QString& commitId);
     void resetCurrentBranchTo(const QString& commitId, ResetMode mode);
-    /// Folds a commit into the one below it, or gives it a new message.
     void rewriteCommitInHistory(const QString& commitId, RewriteAction action);
     void dropCommitFromHistory(const QString& commitId);
     /// `onto` retargets the replay, `branch` replays that branch rather than the
     /// checked-out one.
     void interactiveRebaseRange(const QString& base, const QString& tip = QStringLiteral("HEAD"),
                                 const QString& onto = {}, const QString& branch = {});
-    /// The range is `commitId^..HEAD`.
     void interactiveRebaseFromCommit(const QString& commitId);
     /// The base is the two branches' merge base, so the replay is exactly `source` onto
     /// `target`.
     void interactiveRebaseFromDrop(const QString& source, const QString& target);
-    /// How an `edit` step is finished once its file changes are staged.
     void amendStoppedRebaseCommit();
     void savePatchForCommit(const QString& commitId);
-    /// A mailbox becomes commits, a diff lands in the working tree.
     void applyPatchInteractive();
-    /// Runs on a worker thread; the graph shows the busy sweep.
     void runMaintenance(MaintenanceTask task);
     void onMaintenanceFinished(bool ok, const QString& task, const QString& output);
     void onRepositoryFilesChanged(bool gitState);
@@ -680,22 +614,16 @@ private:
     void startSync(SyncKind kind, bool silent = false);
     void updateSyncActions();
 
-    /// The picker's choice, or the first configured remote when empty.
     QString currentSyncRemote() const;
-    /// Keeps the reader's choice when it still exists.
     void updateRemotePicker();
     void setPullMode(PullMode mode);
     void setUpstreamInteractive();
-    /// Asks before rewriting a published branch, then force-pushes with a lease.
     void forcePushInteractive();
     void pushTagToRemote(const QString& tag);
     void pushAllTags();
     void deleteTagInteractive(const QString& tag);
-    /// The local tag is left alone.
     void deleteTagFromRemotesInteractive(const QString& tag);
 
-    /// Skip if the repository is busy, bare or remote-less, otherwise fetch the watched
-    /// remotes silently.
     void onAutoFetchTick();
     void updateAutoFetchMenu();
     void loadAutoFetch();
@@ -715,7 +643,6 @@ private:
     void loadPrevention();
     void savePrevention();
     QString preventionSettingsKey() const;
-    /// Starts the update when the choice is on, and reports a failure in the status bar.
     void loadSubmoduleAutoupdate();
     void saveSubmoduleAutoupdate();
     void maybeAutoUpdateSubmodules();
@@ -748,7 +675,6 @@ private:
     /// `*active` is false when neither mode is on, i.e. the caller should fall back to
     /// hide/solo.
     std::vector<std::string> visibilityWantedRefs(bool* active) const;
-    /// The mode's hidden branches, or the explicit hidden list when no mode is on.
     QStringList graphHiddenBranchNames() const;
 
     QString selectedRefShortName() const;
@@ -761,7 +687,6 @@ private:
     /// HEAD.
     void deleteBranchesWithConsent(const QStringList& names, const QString& base,
                                    const QString& what);
-    /// Failures in a modal, the rest in the status bar.
     void reportBranchBatch(const QString& what, const RepoSession::BranchBatchResult& result);
 
     /// One repository the window has open. The active context's session and models are
@@ -818,9 +743,7 @@ private:
         TimelinePeriod timelinePeriod = TimelinePeriod::None;
     };
 
-    /// The context on screen, or null before the first one exists.
     RepoContext* active();
-    /// The open context that owns `session`, or null once its tab has been closed.
     RepoContext* contextOf(const RepoSession* session);
     const RepoContext* active() const;
 
@@ -829,29 +752,22 @@ private:
     /// screen, so every connection is filtered by "is this the active context".
     void wireContext(RepoContext* context);
     bool openIntoContext(RepoContext* context, const QString& path);
-    /// Saves the outgoing state, adopts the incoming one, rebinds the views and refreshes.
     void activateContext(int index);
     void saveActiveState();
     void adoptContext(RepoContext* context);
-    /// Points the views at the active context's models and session.
     void bindViews();
     /// The last one is emptied rather than removed.
     void closeContext(int index);
     void rebuildTabBar();
-    /// Its alias, or the directory's name.
     QString contextLabel(const RepoContext& context) const;
     void onTabChanged(int index);
     void onTabCloseRequested(int index);
     void onTabContextMenu(const QPoint& pos);
     void onNewTabRequested();
-    /// `keep` becomes the only tab.
     void keepOnlyContext(int keep);
-    /// Leaves one empty tab.
     void closeAllContexts();
-    /// Asks for a new name and remembers it for that repository.
     void renameContext(int index);
     void applyTabAlias(int index, const QString& alias);
-    /// The "no repository open" state: the start page, with the recent list.
     void showEmptyTab();
     void refreshStartPage();
     void noteRecentRepository(const RepoContext& context);
@@ -869,7 +785,6 @@ private:
     /// Outside the model because pins outlive it: it is rebuilt on every fetch and every
     /// keystroke.
     RefPins m_pins;
-    /// Same reasoning as pins.
     RefVisibility m_visibility;
 
     RepoSession* m_session = nullptr;
@@ -902,7 +817,6 @@ private:
     QStackedWidget* m_stack = nullptr;
     StartPage* m_startPage = nullptr;
     bool m_headless = false;
-    /// The middle column: the graph, or the diff that replaces it.
     QStackedWidget* m_centerStack = nullptr;
     QAction* m_refsAction = nullptr;
     QAction* m_detailsAction = nullptr;
@@ -927,7 +841,6 @@ private:
     bool m_conflictPageDismissed = false;
     SearchPanel* m_searchPanel = nullptr;
     QDockWidget* m_searchDock = nullptr;
-    /// Cleared once the target is found or the history is exhausted.
     QString m_revealTarget;
     /// What `reloadHistory` is waiting to select again: a commit id, or the
     /// working-tree row when `m_restoreWip` is set.
@@ -944,14 +857,11 @@ private:
     /// CP1251 project is CP1251 throughout.
     QString m_diffCodec;
     QLabel* m_branchLabel = nullptr;
-    /// Shows an active hide/solo filter and clears it on click; hidden when the graph shows
-    /// everything.
     QToolButton* m_visibilityButton = nullptr;
 
     QAction* m_fetchAction = nullptr;
     QAction* m_pullAction = nullptr;
     QAction* m_pushAction = nullptr;
-    /// Held so updateSyncActions can grey the force-push entry out with the rest.
     QAction* m_forcePushAction = nullptr;
     QAction* m_stashAction = nullptr;
     QAction* m_popStashAction = nullptr;
@@ -963,7 +873,6 @@ private:
     /// Shared between the Edit menu and the toolbar so one enable decision drives both.
     QAction* m_undoAction = nullptr;
     QAction* m_redoAction = nullptr;
-    /// Kept so a zoom change can resize its icons without rebuilding it.
     QToolBar* m_toolBar = nullptr;
     bool m_syncRunning = false;
     bool m_checkoutRunning = false;
@@ -983,14 +892,11 @@ private:
     QToolButton* m_pushButton = nullptr;
     PullMode m_pullMode = PullMode::FfOnly;
 
-    /// Held so the Auto-fetch submenu's remote entries can be rebuilt as the remotes change.
     QMenu* m_remoteMenu = nullptr;
     QMenu* m_autoFetchMenu = nullptr;
     QAction* m_autoFetchAction = nullptr;
-    /// Everything after this separator is rebuilt when the remotes change.
     QAction* m_autoFetchSeparator = nullptr;
     QTimer* m_autoFetchTimer = nullptr;
-    /// Coalesces the column-layout writes while a divider is being dragged.
     QTimer* m_columnSaveTimer = nullptr;
     /// True while a clone runs, so a second one is refused rather than racing into the same
     /// directory.
@@ -999,7 +905,6 @@ private:
     /// destroyed.
     std::shared_ptr<std::atomic<bool>> m_workerAlive = std::make_shared<std::atomic<bool>>(true);
     bool m_autoFetchEnabled = false;
-    /// Empty means every configured remote, which is also the default.
     QStringList m_autoFetchRemotes;
     /// Set while a background auto-fetch runs: its failures go to the status bar, not a modal.
     bool m_silentSync = false;
@@ -1012,16 +917,13 @@ private:
     QAction* m_submoduleAutoupdateRemoteAction = nullptr;
     bool m_submoduleAutoupdate = false;
     bool m_submoduleAutoupdateRemote = false;
-    /// True while the auto-update hook runs, so a second trigger is skipped.
     bool m_submoduleUpdateRunning = false;
     bool m_lfsRunning = false;
     QAction* m_rerereAction = nullptr;
     QAction* m_rerereAutoupdateAction = nullptr;
-    /// Held so the Branch ▸ Visibility ▸ Smart tick agrees with the indicator after a clear.
     QAction* m_smartAction = nullptr;
     QAction* m_animateAction = nullptr;
 
-    /// Empty when the working tree is the selection source.
     QString m_selectedCommitId;
     /// Set while the diff viewer is showing a comparison: the two revisions whose difference
     /// each rendered file belongs to. Empty otherwise.
@@ -1030,15 +932,12 @@ private:
     CompareMode m_compareMode = CompareMode::TwoDot;
     QString m_compareLabel;
 
-    /// Rebuilt from state on every refresh; the branch commands are per-branch.
     CommandRegistry m_commands;
 
-    /// The reader's shortcut overrides, on top of each command's own default.
     Keymap m_keymap;
     /// Menu actions a command already has, so its binding updates the action rather than
     /// adding a second shortcut beside it.
     QHash<QString, QAction*> m_commandActions;
-    /// Rebuilt whenever the registry is, so a command that disappears takes its binding.
     QHash<QString, QShortcut*> m_commandShortcuts;
 };
 

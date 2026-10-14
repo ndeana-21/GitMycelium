@@ -641,8 +641,6 @@ void ConflictView::onFileSelected() {
 void ConflictView::setPaneText(QTextEdit* pane, const QString& text,
                                const std::vector<QVector<QPair<int, int>>>& emphasis,
                                const QString& emphasisBackground) {
-    // The path is what tells the highlighter which language this is. A file nobody
-    // taught it still renders — word emphasis needs no language, only offsets.
     const Language language = languageForPath(m_path);
     const std::vector<QString> lines = splitLines(text);
 
@@ -673,7 +671,6 @@ void ConflictView::showEntry(int index) {
         return m_session->conflictFileContent(QString::fromStdString(oid));
     };
 
-    // Whether there is text to merge decides everything below, so ask first.
     bool textAvailable = false;
     const QString marked = m_session->conflictMarkedContent(m_path, &textAvailable);
     m_binary = !textAvailable;
@@ -694,7 +691,6 @@ void ConflictView::showEntry(int index) {
     }
 
     if (m_binary) {
-        // Nothing to compare as text: show each side's size and keep one whole.
         m_ours->setPlainText(binarySideNotice(entry.ours, "ours"));
         m_base->setPlainText(binarySideNotice(entry.ancestor, "base"));
         m_theirs->setPlainText(binarySideNotice(entry.theirs, "theirs"));
@@ -769,8 +765,6 @@ void ConflictView::showEntry(int index) {
 void ConflictView::updateResultMode() {
     const bool hasRegions = !m_document.regions.empty();
     if (m_binary) {
-        // A binary file has no text to compare or merge; the result area explains
-        // that and the whole-side buttons above are the way through it.
         m_manualMode = false;
         if (m_manualButton->isChecked()) {
             const QSignalBlocker block(m_manualButton);
@@ -813,7 +807,6 @@ void ConflictView::updateResultMode() {
 
 void ConflictView::onToggleManual(bool manual) {
     if (m_document.regions.empty()) {
-        // There are no cards to return to; the toggle is inert for this file.
         updateResultMode();
         return;
     }
@@ -910,8 +903,6 @@ QString ConflictView::regionHtml(std::size_t index, const ConflictRegion& region
     html += QStringLiteral("</div>");
 
     if (showSides) {
-        // Take a line by clicking it. The words each side changed against the base
-        // are still picked out, so the choice is informed rather than blind.
         const RegionEmphasis emphasis = regionEmphasis(region);
         const QString changed = theme::changedWordBg().name();
         html += QStringLiteral("<div style=\"color:%1\">Ours — click a line to take it</div>")
@@ -1031,8 +1022,6 @@ bool ConflictView::setRegionLine(int region, const QString& side, int line, bool
     } else {
         mask.theirs[static_cast<std::size_t>(line)] = take ? 1 : 0;
     }
-    // A line take is a per-line answer; taking every line away leaves the region
-    // unanswered again, which is what the reader sees.
     m_choices[static_cast<std::size_t>(region)] =
         mask.anyTaken() ? RegionLines : RegionUnanswered;
     m_currentRegion = region;
@@ -1098,7 +1087,6 @@ void ConflictView::applyChoiceToAll(int choice) {
         return;
     }
     if (m_document.regions.empty()) {
-        // No cards: the whole-file buttons fill the editor with the chosen side.
         const QString text = choice == 1 ? m_ours->toPlainText()
                              : choice == 2 ? m_base->toPlainText()
                              : choice == 3 ? m_theirs->toPlainText()
@@ -1217,7 +1205,6 @@ bool ConflictView::smartMerge(QString* errorOut) {
         return true;
     }
 
-    // Every key was decided: the merged document is what a save would write.
     m_document = ConflictDocument{};
     resetRegionChoices();
     m_currentRegion = -1;
@@ -1671,8 +1658,6 @@ void ConflictView::completeMerge() {
         return;
     }
 
-    // The same three panes serve every operation; only the "finish" call and
-    // the wording differ.
     const bool rebasing = m_session->rebaseInProgress();
     QString error;
 
@@ -1757,7 +1742,6 @@ bool ConflictView::stageRecordedResolution(QString* errorOut) {
 
 void ConflictView::onRerereClicked() {
     if (m_rerereApplied) {
-        // rerere already resolved the working tree; staging is all that is left.
         QString error;
         if (!stageRecordedResolution(&error)) {
             QMessageBox::warning(this, QStringLiteral("Cannot stage the resolution"), error);
@@ -1789,8 +1773,6 @@ void ConflictView::onFileContextMenu(const QPoint& pos) {
     }
     const QString path = item->data(0, Qt::UserRole).toString();
     QMenu menu(this);
-    // Resolving is the common action, so it leads; the rerere entry is a footnote
-    // and is only there when rerere is on.
     QAction* markResolved = menu.addAction(QStringLiteral("Mark as resolved"));
     QAction* markAll = menu.addAction(QStringLiteral("Mark all resolved"));
     markAll->setEnabled(!m_conflicts.empty());

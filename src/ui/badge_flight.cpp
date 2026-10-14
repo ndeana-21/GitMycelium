@@ -40,8 +40,6 @@ int badgeWidthFor(const QString& branch, const QFontMetrics& metrics) {
 }
 namespace {
 
-/// Fast at the start, settling at the end: a badge that moved at a constant speed
-/// reads as machinery, and one that barely moves at the start reads as stuck.
 qreal easeOut(qreal t) {
     const qreal inverse = 1.0 - std::clamp(t, 0.0, 1.0);
     return 1.0 - inverse * inverse * inverse;

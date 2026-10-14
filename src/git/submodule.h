@@ -22,8 +22,6 @@ public:
     /// A repository without submodules yields an empty list, not an error.
     std::vector<SubmoduleEntry> list() const;
 
-    /// `git submodule add`. `branch` empty leaves the tracked branch unset; an
-    /// empty `path` lets git derive it from the URL.
     SyncResult add(const std::string& url, const std::string& path, const std::string& branch,
                    bool force) const;
     /// `git submodule deinit`. git refuses a submodule with local changes unless
@@ -34,7 +32,6 @@ public:
     /// submodule.
     SyncResult update(const std::vector<std::string>& paths, bool initialize, bool remote,
                       bool recursive) const;
-    /// `git submodule sync`: copies the `.gitmodules` URL into `.git/config`.
     SyncResult sync(const std::vector<std::string>& paths, bool recursive) const;
 
     const std::string& workDir() const { return m_workDir; }

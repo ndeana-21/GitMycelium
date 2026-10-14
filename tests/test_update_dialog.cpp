@@ -1,5 +1,3 @@
-/// The update dialog says what is installed and what is published, and offers the
-/// install only to a copy that can replace itself.
 
 #include "ui/update_dialog.h"
 #include "update/updater.h"

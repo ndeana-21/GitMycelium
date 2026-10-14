@@ -46,7 +46,6 @@ QString readFile(const QString& dir, const QString& name) {
     return QString::fromUtf8(file.readAll());
 }
 
-/// The `added removed` pair `git diff --numstat` reports for one path.
 QPair<int, int> numstat(const QString& dir, const QString& base, const QString& target,
                         const QString& path) {
     const QString line =
@@ -181,8 +180,6 @@ void DiffBetweenTest::restoreFilePutsAnOldVersionBack() {
              qPrintable(error));
 
     QCOMPARE(readFile(m_path, QStringLiteral("a.txt")), QStringLiteral("one\ntwo\nthree\n"));
-    // Working-tree restore does not stage a change: it matches HEAD's c3 blob? No —
-    // c1's text differs from c3's, so it now shows as a working-tree modification.
     QVERIFY(gitOut(m_path, {"diff"}).contains(QStringLiteral("a.txt")));
 }
 
@@ -195,7 +192,6 @@ void DiffBetweenTest::restoreFileCanTargetTheIndex() {
     QVERIFY2(session.restoreFile(m_c1, QStringLiteral("a.txt"), /*staged=*/true, &error),
              qPrintable(error));
 
-    // The index holds c1's version; the working tree still holds the tampered text.
     QCOMPARE(gitOut(m_path, {"show", ":a.txt"}), QStringLiteral("one\ntwo\nthree"));
     QCOMPARE(readFile(m_path, QStringLiteral("a.txt")), QStringLiteral("tampered\n"));
 }

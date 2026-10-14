@@ -144,8 +144,6 @@ std::vector<HookEntry> HooksOps::list() const {
         return out;
     }
 
-    // Anything else the reader put in the directory. A hook the list does not know
-    // is still a hook, and hiding it would make the panel disagree with the disk.
     std::error_code ec;
     for (const auto& dirEntry : std::filesystem::directory_iterator(hooksDir, ec)) {
         if (ec) {

@@ -91,7 +91,6 @@ void GraphViewBindTest::rebindingTheSameModelKeepsTheViewFollowingIt() {
     view.show();
     QVERIFY(QTest::qWaitForWindowExposed(&view));
 
-    // The loaded commit is laid out — the view really is following the model.
     QTRY_VERIFY(view.visualRect(model.index(0, 0)).isValid());
 
     // A dirty working tree inserts its row at the front. A view that was disconnected

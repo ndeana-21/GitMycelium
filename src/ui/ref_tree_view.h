@@ -15,14 +15,10 @@ class RefTreeView : public QTreeView {
 public:
     explicit RefTreeView(QWidget* parent = nullptr);
 
-    /// Injected so the rail and the graph agree on colours without the rail having to
-    /// reach into the commit model.
     void setColorResolver(std::function<int(const QString&)> resolver);
 
 signals:
-    /// A reference was clicked, i.e. focused, but not checked out.
     void refFocused(QString shortName);
-    /// Empty when the pointer left every row.
     void refHovered(QString shortName);
 
 protected:

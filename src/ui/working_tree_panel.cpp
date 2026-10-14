@@ -130,9 +130,6 @@ QFrame* messageBox(QWidget* parent, QLineEdit** summary, QPlainTextEdit** descri
     return box;
 }
 
-/// The summary and the stash title are half again the description's size: they are the
-/// line that is read, but twice read as a heading over a body instead of as the first
-/// line of one message.
 void styleMessageFields(QLineEdit* summary, QPlainTextEdit* description) {
     const QString family = QApplication::font().family();
     summary->setStyleSheet(QStringLiteral("font-size: %1px; padding: 4px 8px;")
@@ -358,7 +355,6 @@ void WorkingTreePanel::wireSection(Section& section) {
                 if (!CommitFilesModel::isFile(index)) {
                     return;
                 }
-                // One file is "the file": picking one here lets go of the other list's.
                 Section& twin = other(*self);
                 twin.view->selectionModel()->clear();
                 emit fileSelected(CommitFilesModel::pathOf(index), self->staged);
@@ -474,8 +470,6 @@ QWidget* WorkingTreePanel::buildCommitForm() {
     connect(m_description, &QPlainTextEdit::textChanged, this,
             &WorkingTreePanel::refreshCommitButton);
 
-    // The options are folded away and drawn faint: they are set once and forgotten,
-    // and the form should read as summary, description, button.
     m_optionsToggle = new QToolButton(page);
     m_optionsToggle->setObjectName(QStringLiteral("commitOptions"));
     m_optionsToggle->setProperty("role", QStringLiteral("faint"));
@@ -525,8 +519,6 @@ QWidget* WorkingTreePanel::buildCommitForm() {
         }
     };
     connect(m_commit, &QPushButton::clicked, this, commit);
-    // Ctrl+Enter commits from either half of the message, the way a reader who is
-    // done typing tries to finish.
     for (QWidget* field : {static_cast<QWidget*>(m_summary), static_cast<QWidget*>(m_description)}) {
         auto* shortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+Return")), field);
         shortcut->setContext(Qt::WidgetShortcut);
@@ -795,7 +787,6 @@ void WorkingTreePanel::setCommitMessage(const QString& message) {
     const qsizetype newline = message.indexOf(QLatin1Char('\n'));
     QString summary = newline < 0 ? message : message.left(newline);
     QString description = newline < 0 ? QString() : message.mid(newline + 1);
-    // The blank line between the two is the separator, not part of the description.
     if (description.startsWith(QLatin1Char('\n'))) {
         description.remove(0, 1);
     }

@@ -108,7 +108,6 @@ void GraphColumnsTest::textDropsTheGlyphsAndKeepsTheWidth() {
     const QStringList report = window.columnsForDiagnostics(QStringLiteral("text"));
     QCOMPARE(field(report, QStringLiteral("mode")), QStringLiteral("text"));
     QCOMPARE(field(report, QStringLiteral("icons")), QStringLiteral("no"));
-    // Text is not compact: the names keep the room the glyphs gave up.
     QCOMPARE(fieldOf(report, QStringLiteral("refs"), QStringLiteral("w")), QStringLiteral("260"));
 }
 

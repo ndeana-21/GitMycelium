@@ -7,9 +7,6 @@
 
 namespace gk::theme {
 
-/// Which palette the whole application draws. The window opens in `Dark` and a
-/// reader can switch to `Light` in Preferences; both are complete sets, not a
-/// tint applied to one another.
 enum class ThemeMode {
     Dark,
     Light,
@@ -31,7 +28,6 @@ void setZoomPercent(int percent);
 /// tell a stale render from a current one.
 int generation();
 
-/// Base text size and the monospace size used inside diff and conflict markup.
 int baseFontPixelSize();
 int monoFontPixelSize();
 /// Scales one of the window's own fixed metrics (an avatar, a glyph side) by the
@@ -43,7 +39,6 @@ int scaledPixels(int base);
 /// the installed coding fonts, falling back to the system's fixed font. The look
 /// follows the opencode terminal UI, where every surface is a grid of characters.
 QString uiFontFamily();
-/// That family at the monospace size: code, diffs and the merge editor.
 QFont monoFont();
 /// The smaller face of a branch label: painting, hit-testing and the drag chip
 /// all measure with it, so the drawn pill and the grabbed one agree.
@@ -110,7 +105,6 @@ QColor diffHeader();
 /// changed identifier does not read as a keyword.
 QColor changedWordBg();
 
-/// Vivid lane colours for the commit graph, chosen for contrast on `surface()`.
 QColor laneColor(int lane);
 int laneColorCount();
 
@@ -134,7 +128,6 @@ QColor branchLabelText(const QColor& branch);
 /// background; the hue is spread over the whole circle rather than the branch palette,
 /// so an avatar is not mistaken for a branch.
 QColor authorColor(const QString& identity);
-/// Black or white, whichever reads better on `fill`: initials on an avatar.
 QColor textOn(const QColor& fill);
 
 QPalette palette();

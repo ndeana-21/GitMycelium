@@ -16,8 +16,6 @@
 namespace gk {
 namespace {
 
-/// How well one query word matches one command, lower being better, or -1 when
-/// it does not match at all.
 int wordScore(const QString& title, const QString& category, const QString& word) {
     const QString lowerTitle = title.toLower();
     if (lowerTitle.startsWith(word)) {
@@ -63,7 +61,6 @@ std::vector<const Command*> CommandRegistry::search(const QString& query) const 
         }
     }
 
-    // Stable order for equal scores, so the same query always lists the same way.
     std::stable_sort(scored.begin(), scored.end(), [](const auto& a, const auto& b) {
         if (a.second != b.second) {
             return a.second < b.second;
@@ -131,8 +128,6 @@ void CommandPalette::refill() {
         }
         item->setData(0, Qt::UserRole, command->id);
         if (!command->isEnabled()) {
-            // Shown but greyed: the command exists, it just cannot run right now,
-            // which is more useful than hiding it and leaving the reader wondering.
             item->setForeground(0, theme::textDim());
             item->setForeground(1, theme::textDim());
         }

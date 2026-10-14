@@ -33,7 +33,6 @@ enum class VisibilityPreset {
 class RefVisibility {
 public:
     RefVisibility();
-    /// Uses `storePath` instead — how a test gets its own file.
     explicit RefVisibility(QString storePath);
 
     /// Loads the visibility recorded for `repoPath`. A missing or unreadable file
@@ -57,7 +56,6 @@ public:
     /// ways to answer the same question), and turning smart on clears the preset.
     VisibilityPreset preset() const { return m_preset; }
     void setPreset(VisibilityPreset preset);
-    /// The name fragment the Prefix preset matches, e.g. `feature/`.
     const QString& presetPrefix() const { return m_presetPrefix; }
     void setPresetPrefix(const QString& prefix);
 

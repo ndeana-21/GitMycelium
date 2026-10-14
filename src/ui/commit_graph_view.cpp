@@ -66,8 +66,6 @@ CommitGraphView::CommitGraphView(QWidget* parent) : QTreeView(parent) {
         logBadgeFlow(QStringLiteral("view: chosen %1 — %2 onto %3")
                          .arg(static_cast<int>(operation))
                          .arg(source, target));
-        // The badge starts home first: whatever the operation does, the list is closed
-        // and nothing is waiting on the air any more.
         finishFlight();
         switch (operation) {
         case RefOperation::Merge:
@@ -173,7 +171,6 @@ void CommitGraphView::fetchIfNearEnd() {
     // The scrollbar is only right once pending rows are laid out; read before that, a
     // page that just landed looks like the end of the history and asks for another.
     executeDelayedItemsLayout();
-    // One page ahead of the reader: within two screens of the end of what is loaded.
     const QScrollBar* bar = verticalScrollBar();
     if (bar->maximum() - bar->value() <= 2 * std::max(1, bar->pageStep())) {
         commits->fetchMore(QModelIndex());
@@ -267,7 +264,6 @@ void CommitGraphView::advanceAnimation() {
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     const bool more = m_animation.advance(now);
     if (more) {
-        // A ghost is only worth keeping while its commit still has something to do.
         for (auto it = m_ghosts.begin(); it != m_ghosts.end();) {
             if (!m_animation.find(it->first, GraphMotion::Move) &&
                 !m_animation.find(it->first, GraphMotion::Vanish)) {
@@ -427,8 +423,6 @@ void CommitGraphView::paintAnimation(QPainter& painter) const {
     painter.save();
     painter.setClipRect(viewportRect, Qt::IntersectClip);
 
-    // A running operation: a quiet band sweeping down the graph, so a long fetch or
-    // rebase reads as work rather than as a frozen window.
     if (m_busy) {
         const qreal phase = double(now % 1000) / 1000.0;
         const int y = viewportRect.top() + int(phase * viewportRect.height());
@@ -456,7 +450,6 @@ void CommitGraphView::paintAnimation(QPainter& painter) const {
                 newTop = rect.top();
                 newLeft = rect.left();
             }
-            // The lane the commit left, still drawn at its old x, drifts to the new one.
             const double laneShift =
                 (t.fromLane - t.toLane) * double(GraphDelegate::laneWidth()) * (1.0 - p);
             target.setX(newLeft + int(laneShift));
@@ -713,8 +706,6 @@ void CommitGraphView::paintEvent(QPaintEvent* event) {
     QPainter animationPainter(viewport());
     paintAnimation(animationPainter);
 
-    // The ghost badge belongs to the row under the pointer, or to the current row so it can
-    // be double-clicked. Painted every frame rather than cached anywhere.
     QPainter hoverPainter(viewport());
     paintHoverExpansion(hoverPainter);
     paintGhostBadge(hoverPainter);
@@ -778,8 +769,6 @@ void CommitGraphView::mouseMoveEvent(QMouseEvent* event) {
     // on.
     updateHoverExpansion(pos);
 
-    // A real label first, then the ghost badge on an unlabelled row, which names the same
-    // branch the badge shows.
     QString name;
     if (refAt(pos, &name)) {
         setHoveredRef(name);
@@ -844,23 +833,17 @@ CommitGraphView::HoverLabel CommitGraphView::hoverLabelAt(int row) const {
         return label;
     }
 
-    // The branch that owns the commit's line: the topmost labelled commit on it. A shared
-    // ancestor is named after the line it is drawn on, not after whichever branch passes
-    // nearer.
     const int labelled = nearestLabelledChildRow(row);
     if (labelled < 0) {
         return label;
     }
 
     const std::vector<RefInfo>& refs = model->refsAt(labelled);
-    // The pill stack the delegate would paint on that row, tracking badge and all.
     const std::vector<RefPill> pills = rowPills(labelled);
     if (pills.empty() || pills.front().overflow) {
         return label;
     }
 
-    // The first pill is the branch that row would name, and the collapsed-pill rule already
-    // decided which one that is. The hover badge says the same thing in the same colour.
     label.valid = true;
     label.text = pills.front().shortName;
     label.colorIndex = model->refColorIndex(label.text);
@@ -994,7 +977,6 @@ void CommitGraphView::updateHoverExpansion(const QPoint& pos) {
     int y = source.rect.bottom() + 2;
     const int totalH = static_cast<int>(source.collapsedNames.size()) * pillH + 2;
     if (y + totalH > viewport()->height() - 2) {
-        // No room below: the stack opens above the pill instead.
         y = source.rect.top() - 2 - totalH;
     }
     y = std::max(y, 2);
@@ -1046,8 +1028,6 @@ void CommitGraphView::updateHoverExpansion(const QPoint& pos) {
         y += pillH;
     }
 
-    // The region that keeps the overlay open: the pill, the stack, and the space
-    // between them, so the pointer can travel without the popup vanishing.
     m_expandSourceRect = source.rect;
     QRect panel = m_expandPills.front().rect;
     for (const RefPill& pill : m_expandPills) {
@@ -1164,8 +1144,6 @@ QString CommitGraphView::highlightBranchAt(int row) const {
     }
     const std::vector<RefInfo>& refs = model->refsAt(row);
     if (!refs.empty()) {
-        // The head branch wins when it is on the row, matching what a hover over the
-        // row's first label resolves to.
         for (const RefInfo& ref : refs) {
             if (QString::fromStdString(ref.shortName) == model->headBranchName()) {
                 return QString::fromStdString(ref.shortName);
@@ -1198,8 +1176,6 @@ void CommitGraphView::paintGhostBadge(QPainter& painter) {
         return;
     }
 
-    // Half-transparent: the shape and place are the same as a real label, the
-    // certainty is not.
     const QColor branch = theme::branchColor(label.colorIndex);
     QColor fill = theme::branchLabelFill(branch);
     QColor border = theme::branchLabelBorder(branch);
@@ -1427,8 +1403,6 @@ void CommitGraphView::openContextMenuAt(int row) {
     }
     const QRect rect = visualRect(model()->index(row, CommitModel::Message));
     const QPoint pos = rect.center();
-    // The same two events a right-click produces, in the same order: the press that the
-    // base class would use to change the selection, and then the context menu itself.
     QMouseEvent press(QEvent::MouseButtonPress, pos, viewport()->mapToGlobal(pos),
                       Qt::RightButton, Qt::RightButton, Qt::NoModifier);
     QCoreApplication::sendEvent(viewport(), &press);
@@ -1448,10 +1422,6 @@ void CommitGraphView::mouseDoubleClickEvent(QMouseEvent* event) {
         return;
     }
 
-    // No real label under the pointer: a ghost badge on an unlabelled row names the
-    // nearest branch that contains this commit, and the same double-click checks it
-    // out. Bounded to the badge's own rect, so a double-click anywhere else on the
-    // row still goes to the base class.
     const int row = rowAtViewportPos(pos);
     if (row >= 0 && row == ghostBadgeRow()) {
         RefPill pill;
@@ -1592,8 +1562,6 @@ void CommitGraphView::startDrag(Qt::DropActions supportedActions) {
     QString shortName;
     const RefInfo* ref = nullptr;
     if (m_pressedRefValid) {
-        // The press captured the label; the hover overlay may have closed while the
-        // pointer moved, but the branch the drag started from is still the one to carry.
         shortName = QString::fromStdString(m_pressedRef.shortName);
         ref = &m_pressedRef;
     } else {
@@ -1642,7 +1610,6 @@ void CommitGraphView::dragMoveEvent(QDragMoveEvent* event) {
     const QPoint pos = event->position().toPoint();
     const RefInfo* ref = refAt(pos, &target);
     if (ref && ref->fullName.rfind("refs/stash", 0) == 0) {
-        // Nothing merges into or rebases onto a stash.
         setDropTarget(QString(), QRect());
         event->ignore();
         return;
@@ -1712,7 +1679,6 @@ void CommitGraphView::paintDropTarget(QPainter& painter) {
             : 1.0;
     painter.save();
     painter.setRenderHint(QPainter::Antialiasing, true);
-    // A halo that breathes around the label: this is where the branch will land.
     QColor glow = theme::accent();
     glow.setAlphaF(0.18 + 0.22 * pulse);
     const qreal spread = 2.0 + 3.0 * pulse;
@@ -1725,7 +1691,6 @@ void CommitGraphView::paintDropTarget(QPainter& painter) {
     painter.setBrush(Qt::NoBrush);
     painter.drawRoundedRect(QRectF(m_dropTargetRect).adjusted(-1.5, -1.5, 1.5, 1.5), 4, 4);
 
-    // What releasing here offers, beside the label.
     const QString hint = QStringLiteral("Release: merge / rebase onto %1").arg(m_dropTarget);
     const QFont font = theme::labelFont();
     const QFontMetrics metrics(font);
@@ -1765,8 +1730,6 @@ void CommitGraphView::dropEvent(QDropEvent* event) {
             return;
         }
         event->acceptProposedAction();
-        // The badge stays up, beside the branch it was dropped on, while the list of
-        // operations is open. The window is not asked for a menu: this flow owns it.
         QString pinned;
         const RefInfo* landed = refAt(pos, &pinned);
         QRect pillRect;
@@ -1790,7 +1753,6 @@ void CommitGraphView::dropEvent(QDropEvent* event) {
         return;
     }
 
-    // 2. Dropped onto a commit row: the row becomes a branch target.
     const QModelIndex index = indexAt(pos);
     if (!index.isValid()) {
         event->ignore();

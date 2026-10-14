@@ -66,7 +66,6 @@ private:
         QVERIFY(git(m_path, {"commit", "-qm", "first"}));
     }
 
-    /// Adds an untracked file, which is enough to make the working tree dirty.
     void makeDirty() { QVERIFY(writeFile(m_path + "/dirty.txt", "not committed\n")); }
 
     static CommitModel* modelOf(MainWindow& window) {
@@ -124,7 +123,6 @@ void WipNodeTest::theWorkingTreeIsTheTopRowWhenDirty() {
     QCOMPARE(model->wipRow(), 0);
     QTRY_VERIFY(model->rowCount() >= 2);
     QCOMPARE(QString::fromStdString(model->commitAt(0)->id), CommitModel::wipId());
-    // The real commit follows it, not replaces it.
     QVERIFY(QString::fromStdString(model->commitAt(1)->id) != CommitModel::wipId());
     QVERIFY(model->data(model->index(0, CommitModel::Message), Qt::DisplayRole)
                 .toString()
@@ -138,11 +136,9 @@ void WipNodeTest::theWipRowIsNotACommit() {
     CommitModel* model = modelOf(window);
     QVERIFY(model);
     QVERIFY(model->hasWip());
-    // No reference points at the working tree, and the model says so.
     QVERIFY(model->refsAt(0).empty());
     QVERIFY(model->data(model->index(0, 0), CommitModel::WipRole).toBool());
     QVERIFY(!model->data(model->index(1, 0), CommitModel::WipRole).toBool());
-    // It is not on the checked-out branch's lineage.
     const std::vector<Oid> line = model->headLineage();
     QVERIFY(std::find(line.begin(), line.end(), CommitModel::wipId().toStdString()) == line.end());
 }
@@ -250,7 +246,6 @@ void WipNodeTest::eachDirtyWorktreeGetsItsOwnNode() {
     QCOMPARE(model->data(model->index(0, 0), CommitModel::WipWorktreeRole).toString(),
              QDir::cleanPath(m_path));
 
-    // Each node hangs off its own worktree's HEAD, not off a single shared one.
     QCOMPARE(QString::fromStdString(model->commitAt(0)->parents.front()), mainHead);
     QCOMPARE(QString::fromStdString(model->commitAt(1)->parents.front()), wtHead);
 }
@@ -264,7 +259,6 @@ void WipNodeTest::aConflictedTreeIsAMergeConflictNode() {
     QVERIFY(git(m_path, {"checkout", "-q", "main"}));
     QVERIFY(writeFile(m_path + "/app.txt", "main side\n"));
     QVERIFY(git(m_path, {"commit", "-qam", "main"}));
-    // A conflicting merge exits non-zero; that is the point.
     git(m_path, {"merge", "other"});
 
     MainWindow window;
@@ -289,7 +283,6 @@ void WipNodeTest::aStashTipIsAStashNode() {
     QVERIFY(window.openRepository(m_path));
     CommitModel* model = modelOf(window);
     QVERIFY(model);
-    // The stash commit has to be in the graph for it to have a node at all.
     QTRY_VERIFY(model->rowForCommit(stash) >= 0);
 
     const GraphNode* node = model->graphNodeAt(model->rowForCommit(stash));

@@ -109,8 +109,6 @@ void RebaseAndSyncTest::rebaseReplaysCommitsOntoTheTarget() {
     QCOMPARE(result.commitsApplied, static_cast<std::size_t>(2));
     QVERIFY(!repo->rebaseInProgress());
 
-    // The branch is checked out and its history is linear on top of main:
-    // base -> main work -> feature1' -> feature2' (replayed, so new ids).
     QCOMPARE(QString::fromStdString(repo->info().headBranch), QStringLiteral("feature"));
     const auto history = repo->commits(0, 4, nullptr);
     QCOMPARE(history.size(), static_cast<std::size_t>(4));
@@ -128,8 +126,6 @@ void RebaseAndSyncTest::rebaseReportsUpToDateWhenAlreadyBased() {
     const std::string base = repo->info().headId;
     repo->createBranch("feature", base);
 
-    // main is strictly behind feature? No: feature points at the same commit,
-    // so rebasing main onto feature has nothing to replay.
     const RebaseResult result = repo->rebaseOnto("main", "feature");
     QCOMPARE(result.status, RebaseStatus::UpToDate);
     QCOMPARE(result.commitsApplied, static_cast<std::size_t>(0));
@@ -155,7 +151,6 @@ void RebaseAndSyncTest::rebaseStopsOnConflictAndContinues() {
     QVERIFY(repo->rebaseInProgress());
     QCOMPARE(repo->info().operation, RepoOperation::Rebase);
 
-    // Continuing while conflicts remain is refused, not silently committed.
     RebaseResult stillConflicted;
     const bool continued = [&] {
         try {
@@ -242,7 +237,6 @@ void RebaseAndSyncTest::pushConfiguresUpstreamAndFetchUpdatesBehind() {
     QCOMPARE(tracked.ahead, static_cast<std::size_t>(0));
     QCOMPARE(tracked.behind, static_cast<std::size_t>(0));
 
-    // Someone else pushes a commit; after a fetch we are one behind.
     const QString otherPath = QDir(m_dir->path()).filePath("other");
     QVERIFY(git(m_dir->path(), {"clone", "-q", "-b", "main", remotePath, otherPath}));
     QVERIFY(writeFile(otherPath, "b.txt", "b\n"));

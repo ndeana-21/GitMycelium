@@ -180,7 +180,6 @@ private slots:
             }
             QCOMPARE(node.edgeColumnMax, furthest);
             QVERIFY(node.edgeColumnMax >= node.lane);
-            // The colour is a per-row snapshot, not a property of the lane.
             QCOMPARE(node.colorColumn, node.colorIndex);
         }
     }
@@ -194,11 +193,9 @@ private slots:
 
         QCOMPARE(layout.size(), static_cast<std::size_t>(3));
         QCOMPARE(layout.node(1).type, GraphNodeType::Timeline);
-        // Both real commits stay in lane 0: the separator invented no lane.
         QCOMPARE(layout.node(0).lane, 0);
         QCOMPARE(layout.node(2).lane, 0);
         QCOMPARE(layout.laneCount(), 1);
-        // The line runs through the separator rather than stopping at it.
         QVERIFY(!layout.node(1).activeLanesBelow.empty());
         QCOMPARE(layout.node(1).activeLanesAbove.size(), layout.node(1).activeLanesBelow.size());
         QVERIFY(layout.node(1).edges.empty());
@@ -267,7 +264,6 @@ private slots:
         QCOMPARE(layout.node(0).activeLanesBelow.size(), static_cast<std::size_t>(1));
         QCOMPARE(layout.node(0).activeLanesBelow[0].lane, 0);
         QVERIFY(layout.node(0).edges.empty());
-        // The lane is still reserved for the missing parent.
         QCOMPARE(layout.laneCount(), 1);
     }
 
@@ -337,7 +333,6 @@ private slots:
 
     void aParentInALaterPageResolvesItsEdge() {
         GraphLayout layout;
-        // The merge's second parent lives two rows below, on the next page.
         layout.append({mk("m", {"a", "b"}), mk("a", {"root"})});
         QCOMPARE(layout.node(0).edges.size(), static_cast<std::size_t>(1));
         QCOMPARE(layout.node(0).edges[0].toRow, -1);
@@ -362,7 +357,6 @@ private slots:
         QCOMPARE(mergeRow[1].role, GraphEdgeRole::Starting);
         QCOMPARE(mergeRow[1].toRow, 2);
 
-        // The side branch's rows are straight lines through their lanes.
         for (const std::size_t row : {std::size_t(1), std::size_t(2)}) {
             const std::vector<GraphRowEdge> edges = rowEdgesOf(layout.node(row));
             QCOMPARE(edges.size(), static_cast<std::size_t>(2));
@@ -371,7 +365,6 @@ private slots:
             }
         }
 
-        // Both branches end at the root; lane 1 is the one that met lane 0 there.
         const std::vector<GraphRowEdge> rootRow = rowEdgesOf(layout.node(3));
         QCOMPARE(rootRow.size(), static_cast<std::size_t>(2));
         QCOMPARE(rootRow[0].role, GraphEdgeRole::Ending);

@@ -11,9 +11,6 @@
 namespace gk {
 namespace {
 
-/// The codecs worth putting at the top of the picker: UTF-8 and UTF-16, the two
-/// Russian single-byte encodings, and the Western ones a file from an old project
-/// is likely to be in.
 const char* const kPreferred[] = {
     "UTF-8", "UTF-16LE", "UTF-16BE", "windows-1251", "KOI8-R", "IBM866", "ISO-8859-5",
     "windows-1252", "ISO-8859-1", "windows-1250", "Shift_JIS", "GB18030",
@@ -133,8 +130,6 @@ QStringList TextEncoding::codecs() {
         }
     }
 
-    // Whatever else this build knows, so a project in Shift_JIS or CP437 can still
-    // be read; simply further down the list.
     QStringList rest = QStringConverter::availableCodecs();
     std::sort(rest.begin(), rest.end(), [](const QString& a, const QString& b) {
         return QString::compare(a, b, Qt::CaseInsensitive) < 0;

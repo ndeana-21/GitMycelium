@@ -75,7 +75,6 @@ void SigningTest::init() {
     QVERIFY(git(m_path, {"config", "user.name", "Test"}));
     QVERIFY(git(m_path, {"config", "user.email", "test@localhost"}));
 
-    // A real signature, from a key generated for this test.
     const QString sshKeygen = QStandardPaths::findExecutable(QStringLiteral("ssh-keygen"));
     if (sshKeygen.isEmpty()) {
         QSKIP("ssh-keygen is not installed; the signing path cannot be exercised");
@@ -124,7 +123,6 @@ void SigningTest::signingConfigRoundTrips() {
              qPrintable(error));
     QVERIFY(!session.commitSigningEnabled());
 
-    // An empty value removes the key rather than storing an empty string.
     QVERIFY2(session.setConfigValue(QStringLiteral("gpg.program"), QString(), &error),
              qPrintable(error));
     QVERIFY(!git(m_path, {"config", "--get", "gpg.program"}));

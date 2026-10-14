@@ -222,8 +222,6 @@ void add(QVector<SyntaxRun>& runs, int begin, int length, const QColor& colour) 
     if (length <= 0) {
         return;
     }
-    // Merge with the run before it when the colour matches, so the document ends up
-    // with fewer spans than there are tokens.
     if (!runs.isEmpty() && runs.last().colour == colour &&
         runs.last().begin + runs.last().length == begin) {
         runs.last().length += length;
@@ -252,7 +250,6 @@ int stringEnd(const QString& line, int at, QChar quote) {
     return line.size();
 }
 
-/// Markdown is not tokenised like code: a line has one thing worth colouring.
 QVector<SyntaxRun> markdownLine(const QString& line) {
     QVector<SyntaxRun> runs;
     if (line.startsWith(QLatin1String("```")) || line.startsWith(QLatin1String("~~~"))) {
@@ -281,7 +278,6 @@ QVector<SyntaxRun> markdownLine(const QString& line) {
         }
         return runs;
     }
-    // Inline code and emphasis are the two that read as code without a parser.
     int i = 0;
     while (i < line.size()) {
         const QChar c = line.at(i);
@@ -462,7 +458,6 @@ QVector<SyntaxRun> highlightLine(const QString& line, Language language, Highlig
 
     int i = 0;
     while (i < line.size()) {
-        // Carried block state first: it overrides everything else on the line.
         if (state.block == HighlightState::Block::Comment) {
             const int end = line.indexOf(state.terminator, i);
             const int stop = end < 0 ? line.size() : end + state.terminator.size();
@@ -527,7 +522,6 @@ QVector<SyntaxRun> highlightLine(const QString& line, Language language, Highlig
                 continue;
             }
             const int end = stringEnd(line, i, c);
-            // A quoted key — `"workers": 8` — is a name, not a value.
             int after = end;
             while (after < line.size() && line.at(after) == QLatin1Char(' ')) {
                 ++after;

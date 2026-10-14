@@ -14,10 +14,8 @@ enum class HookState { Missing, Sample, Disabled, Enabled };
 
 const char* hookStateName(HookState state);
 
-/// One hook name and what the repository has for it.
 struct HookEntry {
     std::string name;
-    /// `<hooks dir>/<name>`; empty when the hooks directory cannot be resolved.
     std::string path;
     HookState state = HookState::Missing;
     /// Server-side hooks (pre-receive, update, …) never run on a local repository.
@@ -41,10 +39,8 @@ public:
     /// regular file found in the hooks directory so nothing is silently hidden.
     std::vector<HookEntry> list() const;
 
-    /// The resolved hooks directory, empty when git cannot answer.
     std::string dir() const;
 
-    /// The hook's text, empty when the file does not exist.
     std::string read(const std::string& name) const;
 
     /// Writes `name`'s content, creating the file. The executable bit is left as it
@@ -55,7 +51,6 @@ public:
     /// place first, so a hook can be started from git's own sample.
     void enable(const std::string& name) const;
 
-    /// Clears the executable bit. A name with no file is left alone.
     void disable(const std::string& name) const;
 
     const std::string& workDir() const { return m_workDir; }

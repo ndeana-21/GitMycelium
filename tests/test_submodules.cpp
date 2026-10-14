@@ -114,7 +114,6 @@ void SubmoduleTest::init() {
     makeRepo(m_lib);
     makeRepo(m_inner);
 
-    // libsrc carries innersrc as a submodule, so the parent has a nested one.
     QVERIFY(git(m_lib, {"submodule", "add", "-q", m_inner, "inner"}));
     QVERIFY(git(m_lib, {"commit", "-q", "-m", "add inner"}));
 }
@@ -133,7 +132,6 @@ void SubmoduleTest::addingRecordsTheSubmodule() {
              qPrintable(error));
 
     const std::vector<SubmoduleEntry> list = session.submodules();
-    // libsrc itself carries innersrc, so the parent sees lib and lib/inner.
     QCOMPARE(list.size(), std::size_t(2));
     const SubmoduleEntry* found = findSubmodule(list, QStringLiteral("lib"));
     QVERIFY(found);
@@ -238,7 +236,6 @@ void SubmoduleTest::updateToRemoteMovesTheCheckoutAndLeavesThePointerStale() {
     QCOMPARE(QString::fromStdString(entry->recordedOid), recorded);
     QCOMPARE(entry->state, SubmoduleState::OutOfSync);
 
-    // Committing the new pointer brings it back in sync.
     QVERIFY(git(m_parent, {"add", "lib"}));
     QVERIFY(git(m_parent, {"commit", "-q", "-m", "update pointer"}));
     const std::vector<SubmoduleEntry> committed = session.submodules();
@@ -289,7 +286,6 @@ void SubmoduleTest::aNestedSubmoduleIsListedAndRecursivelyInitialized() {
     QVERIFY(session.addSubmodule(m_lib, QStringLiteral("lib"), QString(), false, &error));
     QVERIFY(git(m_parent, {"commit", "-q", "-m", "add lib"}));
 
-    // Before init, the nested one is known but not checked out.
     const std::vector<SubmoduleEntry> beforeList = session.submodules();
     const SubmoduleEntry* before = findSubmodule(beforeList, QStringLiteral("lib/inner"));
     QVERIFY(before);
@@ -319,7 +315,6 @@ void SubmoduleTest::anOutOfSyncSubmoduleShowsAsAPointerChangeAndStagingRecordsIt
     QVERIFY(git(m_parent, {"commit", "-q", "-m", "add lib"}));
     const QString recorded = gitOut(m_parent, {"rev-parse", "HEAD:lib"});
 
-    // Move the submodule's checkout to a commit the parent's gitlink does not name.
     QVERIFY(writeFile(m_lib, QStringLiteral("b.txt"), QStringLiteral("new\n")));
     QVERIFY(git(m_lib, {"add", "-A"}));
     QVERIFY(git(m_lib, {"commit", "-q", "-m", "advance"}));
@@ -327,7 +322,6 @@ void SubmoduleTest::anOutOfSyncSubmoduleShowsAsAPointerChangeAndStagingRecordsIt
     QVERIFY2(session.updateSubmodules({QStringLiteral("lib")}, true, true, false, &error),
              qPrintable(error));
 
-    // The Commit Panel sees it: a gitlink, unstaged, with both oids for the tooltip.
     const auto findLib = [](const std::vector<FileChange>& changes) -> const FileChange* {
         for (const FileChange& change : changes) {
             if (change.path == "lib") {
@@ -358,7 +352,6 @@ void SubmoduleTest::anOutOfSyncSubmoduleShowsAsAPointerChangeAndStagingRecordsIt
     }
     QVERIFY(sawGitmodules);
 
-    // Restore the URL so the only change left is the pointer, then stage it.
     QVERIFY(git(m_parent, {"config", "-f", ".gitmodules", "submodule.lib.url", m_lib}));
 
     QVERIFY2(session.stageFile(QStringLiteral("lib"), &error), qPrintable(error));
@@ -368,7 +361,6 @@ void SubmoduleTest::anOutOfSyncSubmoduleShowsAsAPointerChangeAndStagingRecordsIt
     QVERIFY(staged->submodule);
     QVERIFY(staged->staged);
 
-    // Committing the pointer brings the submodule back in sync.
     QVERIFY(session.createCommit(QStringLiteral("update pointer"), nullptr, &error));
     QCOMPARE(findSubmodule(session.submodules(), QStringLiteral("lib"))->state,
              SubmoduleState::InSync);
@@ -398,7 +390,6 @@ void SubmoduleTest::theAutoUpdateHookRestoresTheRecordedPointer() {
                                  &error));
     QVERIFY(git(m_parent, {"commit", "-q", "-m", "add lib"}));
 
-    // Move the checkout off the recorded commit, the state the hook exists to fix.
     QVERIFY(writeFile(m_lib, QStringLiteral("b.txt"), QStringLiteral("new\n")));
     QVERIFY(git(m_lib, {"add", "-A"}));
     QVERIFY(git(m_lib, {"commit", "-q", "-m", "advance"}));
@@ -407,13 +398,11 @@ void SubmoduleTest::theAutoUpdateHookRestoresTheRecordedPointer() {
     QCOMPARE(findSubmodule(session.submodules(), QStringLiteral("lib"))->state,
              SubmoduleState::OutOfSync);
 
-    // The hook, asynchronously — exactly the call the window makes on its worker.
     QSignalSpy spy(&session, &RepoSession::submodulesUpdated);
     session.requestAutoUpdateSubmodules(/*remote=*/false);
     QTRY_COMPARE(spy.count(), 1);
     QVERIFY(spy.at(0).at(0).toBool());
 
-    // With `remote = false` the checkout returns to the commit the parent records.
     QCOMPARE(findSubmodule(session.submodules(), QStringLiteral("lib"))->state,
              SubmoduleState::InSync);
 }

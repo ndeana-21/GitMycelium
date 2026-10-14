@@ -69,7 +69,6 @@ private:
     /// Three commits, each on its own day, oldest first in real time so the graph
     /// order is unambiguous.
     void buildDatedRepo();
-    /// Waits for a page to arrive after a grouping switch, then reports.
     QStringList report(MainWindow& window, const QString& op);
 
     std::unique_ptr<QTemporaryDir> m_dir;
@@ -134,14 +133,12 @@ void TimelineTest::dayGroupingInsertsOneSeparatorPerDay() {
     QTRY_VERIFY(window.commitsAreLoaded());
     const QStringList r = report(window, QStringLiteral("show"));
     QCOMPARE(field(r, QStringLiteral("period")), QStringLiteral("day"));
-    // Three commits, three different days: a separator opens each of them.
     QCOMPARE(field(r, QStringLiteral("separators")), QStringLiteral("3"));
     const QStringList labels = separatorLabels(r);
     QCOMPARE(labels.size(), 3);
     for (const QString& label : labels) {
         QVERIFY(!label.isEmpty());
     }
-    // Rows are commits plus separators, not one or the other.
     QCOMPARE(field(r, QStringLiteral("rows")), QStringLiteral("6"));
 }
 
@@ -171,7 +168,6 @@ void TimelineTest::aSeparatorIsNotACommit() {
                     .toString()
                     .isEmpty());
         QVERIFY(!(model->flags(model->index(row, CommitModel::Message)) & Qt::ItemIsSelectable));
-        // It carries a label and nothing else.
         QVERIFY(!model->index(row, CommitModel::Message).data(Qt::DisplayRole).toString().isEmpty());
         QVERIFY(model->index(row, CommitModel::Author).data(Qt::DisplayRole).toString().isEmpty());
     }
@@ -206,7 +202,6 @@ void TimelineTest::theGraphIsUnaffectedBySeparators() {
     report(window, QStringLiteral("day"));
     QTRY_VERIFY(window.commitsAreLoaded());
 
-    // A separator takes no lane, so the linear history is still one lane.
     QCOMPARE(model->laneCount(), lanesOff);
     QCOMPARE(lanesOff, 1);
 }

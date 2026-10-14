@@ -17,12 +17,8 @@ class PatchOps {
 public:
     explicit PatchOps(std::string workDir);
 
-    /// True when `file` starts with format-patch's mbox separator (`From <sha>`).
-    /// A plain diff starts with `diff --git`.
     static bool isMailbox(const std::string& file);
 
-    /// Applies `file`: `git am --3way` for a mailbox, `git apply` into the working
-    /// tree for a diff. Never throws; the failure is the binary's own message.
     SyncResult apply(const std::string& file) const;
 
     const std::string& workDir() const { return m_workDir; }

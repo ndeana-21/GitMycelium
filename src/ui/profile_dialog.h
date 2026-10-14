@@ -9,10 +9,6 @@ class QListWidget;
 
 namespace gk {
 
-/// Defines identity profiles and picks the one to use. The dialog owns no
-/// repository: it writes the definitions and returns the name the reader chose to
-/// apply, and the window performs the config write, so a profile can never take
-/// effect without the window knowing which repository it lands in.
 class ProfileDialog : public QDialog {
     Q_OBJECT
 

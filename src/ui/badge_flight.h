@@ -43,8 +43,6 @@ int badgeWidthFor(const QString& branch, const QFontMetrics& metrics);
 /// handlers where it cannot be tested without a display.
 class BadgeFlight {
 public:
-    /// Time for the badge to leave its row, and to come back. Quick enough not to feel
-    /// like waiting, slow enough that the eye can follow which badge moved where.
     static constexpr int kLiftMs = 150;
     static constexpr int kLandMs = 130;
 
@@ -64,7 +62,6 @@ public:
     void advance(int elapsedMs);
 
     bool lifted() const { return !m_branch.isEmpty(); }
-    /// Off its row and still moving.
     bool flying() const;
     /// Home, or never left. The invariant worth asserting.
     bool grounded() const { return !lifted(); }
@@ -81,7 +78,6 @@ private:
     QPoint m_home;
     QPoint m_anchor;
     Phase m_phase = Phase::None;
-    /// Where the current leg started, so a landing part-way is smooth.
     QPoint m_from;
     int m_elapsed = 0;
     int m_legStart = 0;

@@ -75,7 +75,6 @@ void DateFormatTest::theKeyRoundTripsAndFallsBack() {
           CommitDateFormat::Relative}) {
         QCOMPARE(commitDateFormatFromKey(commitDateFormatKey(format)), format);
     }
-    // An unknown key keeps the fallback rather than picking one at random.
     QCOMPARE(commitDateFormatFromKey(QStringLiteral("martian"), CommitDateFormat::Us),
              CommitDateFormat::Us);
 }

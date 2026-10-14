@@ -68,7 +68,6 @@ bool SparseOps::enabled() const {
 std::vector<std::string> SparseOps::list() const {
     const ProcessResult run = runGit({"sparse-checkout", "list"}, m_workDir);
     if (run.exitCode != 0) {
-        // Not an error: sparse checkout that was never enabled has an empty list.
         return {};
     }
     return parseSparseList(run.out);

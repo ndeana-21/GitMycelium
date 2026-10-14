@@ -93,8 +93,6 @@ CloneDialog::CloneDialog(QWidget* parent) : QDialog(parent) {
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
-    // A clone with nowhere to come from or go to cannot start; saying so up front
-    // beats a dialog that closes and then a failure in the status bar.
     QPushButton* ok = buttons->button(QDialogButtonBox::Ok);
     const auto refresh = [this, ok] {
         ok->setEnabled(!m_url->text().trimmed().isEmpty() &&

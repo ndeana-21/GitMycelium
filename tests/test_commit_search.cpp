@@ -145,7 +145,6 @@ void CommitSearchTest::aShaResolvesToOneCommit() {
         session.searchCommitsBlocking(head.left(8), CommitSearchField::Sha, 50);
     QCOMPARE(abbreviated.size(), std::size_t(1));
 
-    // Something that names no commit is an empty answer, not an error.
     QVERIFY(session.searchCommitsBlocking(QStringLiteral("deadbeefdeadbeef"),
                                           CommitSearchField::Sha, 50)
                 .empty());
@@ -185,7 +184,6 @@ void CommitSearchTest::theWindowSearchesAndReveals() {
     QVERIFY2(revealed.join(QLatin1Char('\n')).contains(QStringLiteral("revealed row ")),
              qPrintable(revealed.join(QLatin1Char('\n'))));
 
-    // A commit the graph does not have is reported, not silently ignored.
     const QStringList missing = window.searchForDiagnostics(
         QStringLiteral("fix"), QStringLiteral("grep"), QStringLiteral("deadbeefdeadbeef"));
     QVERIFY2(missing.join(QLatin1Char('\n')).contains(QStringLiteral("not found")),

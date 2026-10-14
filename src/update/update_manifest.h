@@ -9,7 +9,6 @@
 
 namespace gk::update {
 
-/// One downloadable package of a release, as `update.json` names it.
 struct UpdateAsset {
     QUrl url;
     QString sha256;
@@ -35,7 +34,6 @@ std::optional<UpdateManifest> parseManifest(const QByteArray& json, QString* err
 /// component counts as 0.
 int compareVersions(const QString& a, const QString& b);
 
-/// Newer version, or the same version from a later build.
 bool isNewer(const UpdateManifest& manifest, const QString& version, int build);
 
 /// The `assets` key this binary installs from: "linux-x86_64", "macos-arm64", or
@@ -44,7 +42,6 @@ QString platformAssetKey();
 
 QString currentVersion();
 int currentBuild();
-/// "1.1.0 (build 12)", or just the version for a build made outside CI.
 QString describeVersion(const QString& version, int build);
 
 /// Where the newest release's manifest lives. `GMC_UPDATE_MANIFEST` replaces it

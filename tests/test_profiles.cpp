@@ -76,7 +76,6 @@ void ProfilesTest::definitionsRoundTrip() {
     QCOMPARE(loaded.userName, QStringLiteral("Ada"));
     QCOMPARE(loaded.email, QStringLiteral("ada@work"));
 
-    // Saving twice does not duplicate the name.
     profiles::save(make(QStringLiteral("Work"), QStringLiteral("Ada"), QStringLiteral("new@work")));
     QCOMPARE(profiles::names().count(QStringLiteral("Work")), 1);
     QCOMPARE(profiles::load(QStringLiteral("Work")).email, QStringLiteral("new@work"));
@@ -92,7 +91,6 @@ void ProfilesTest::applyingAProfileWritesTheLocalConfig() {
     QVERIFY(window.openRepository(m_path));
     window.profilesForDiagnostics(QStringLiteral("use"), QStringLiteral("Work"));
 
-    // The repository now commits as the profile, and it is the *local* config.
     QCOMPARE(configValue(m_path, QStringLiteral("user.name")), QStringLiteral("Ada"));
     QCOMPARE(configValue(m_path, QStringLiteral("user.email")), QStringLiteral("ada@work"));
     QCOMPARE(configValue(m_path, QStringLiteral("commit.gpgsign")), QStringLiteral("false"));

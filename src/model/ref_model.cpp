@@ -15,8 +15,6 @@ namespace {
 
 constexpr int kRowIconSide = 14;
 
-/// Everything up to the last slash, with a trailing slash: the folder a name
-/// lives in. Empty for a name with no slash.
 QString prefixOf(const QString& name) {
     const int slash = name.lastIndexOf(QLatin1Char('/'));
     return slash < 0 ? QString() : name.left(slash + 1);
@@ -304,8 +302,6 @@ bool RefModel::isGraphHidden(const RefInfo& ref) const {
 
 void RefModel::appendFolderContents(QStandardItem* parentItem, const PathFolder& folder,
                                     const std::vector<const RefInfo*>& items) const {
-    // Folders first, then the references that live directly here — the order every
-    // file tree uses, so the shape of the group is readable at a glance.
     for (const PathFolder& child : folder.folders) {
         QStandardItem* item = makeFolderItem(child);
         parentItem->appendRow(item);
@@ -314,8 +310,6 @@ void RefModel::appendFolderContents(QStandardItem* parentItem, const PathFolder&
     for (const int index : folder.items) {
         const RefInfo& ref = *items.at(static_cast<std::size_t>(index));
         const QString name = QString::fromStdString(ref.shortName);
-        // Inside a folder the row shows the tail of the name; the folder above it
-        // already said the rest.
         parentItem->appendRow(makeRefItem(ref, name.mid(folder.prefix.size())));
     }
 }
@@ -455,8 +449,6 @@ void RefModel::appendWorktrees() {
     appendRow(group);
 }
 
-/// One row per submodule, at its full path: a nested submodule already reads where
-/// it lives, so no second tree is built for what the path says.
 void RefModel::appendSubmodules() {
     if (m_submodules.empty()) {
         return;
@@ -554,8 +546,6 @@ void RefModel::appendPinned() {
         for (const RefInfo& ref : m_refs) {
             const QString name = QString::fromStdString(ref.shortName);
             if (name == pin && matches(name)) {
-                // Pinned on its own, with no folder above it, so it keeps its
-                // whole name — there is nothing else to say where it lives.
                 group->appendRow(makeRefItem(ref, name));
                 break;
             }
@@ -572,11 +562,9 @@ void RefModel::appendPinned() {
 Qt::ItemFlags RefModel::flags(const QModelIndex& index) const {
     Qt::ItemFlags base = QStandardItemModel::flags(index);
     if (!index.isValid()) {
-        // The viewport itself: dropping here has no meaning.
         return base;
     }
     if (!isRef(index)) {
-        // A section or a folder is not a reference and cannot be a drop target.
         return base & ~Qt::ItemIsDropEnabled;
     }
     return base | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled;
@@ -659,8 +647,6 @@ bool RefModel::canDropMimeData(const QMimeData* data, Qt::DropAction action, int
     if (decode(data).shortName.isEmpty()) {
         return false;
     }
-    // Only a drop onto a real reference is meaningful: folders and sections are
-    // not things you can merge into.
     return isRef(parent);
 }
 

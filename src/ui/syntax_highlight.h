@@ -6,8 +6,6 @@
 
 namespace gk {
 
-/// The languages the highlighter knows. Anything else renders as plain text, which
-/// is the honest answer for a language nobody has taught it.
 enum class Language {
     None,
     C,
@@ -40,7 +38,6 @@ struct HighlightState {
     enum class Block { None, Comment, String };
     Block block = Block::None;
     QString terminator;
-    /// True while inside a triple-quoted string, where quotes do not end it.
     bool tripleQuoted = false;
 };
 
@@ -56,7 +53,6 @@ struct SyntaxRun {
 /// so lines must be fed in order.
 QVector<SyntaxRun> highlightLine(const QString& line, Language language, HighlightState& state);
 
-/// The colour of the run covering `at`, or an invalid colour if none does.
 QColor colourAt(const QVector<SyntaxRun>& runs, int at);
 
 /// HTML for one line's body: syntax colours, with `emphasis` ranges carrying a

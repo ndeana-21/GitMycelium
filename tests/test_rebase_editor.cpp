@@ -41,8 +41,6 @@ void RebaseEditorTest::anActionAndAReorderDriveTheSteps() {
     RebaseEditor editor;
     editor.setCandidates(threeCandidates());
 
-    // Drop the oldest, then drag it to the end. The steps must follow the list, not the
-    // original range order.
     editor.setAction(0, RewriteAction::Drop);
     editor.moveRow(0, 2);
     QCOMPARE(editor.actionAt(2), RewriteAction::Drop);
@@ -68,7 +66,6 @@ void RebaseEditorTest::aRewordCarriesItsMessageIntoTheSteps() {
     RebaseEditor editor;
     editor.setCandidates(threeCandidates());
     editor.setAction(1, RewriteAction::Reword);
-    // A reword with no message is not runnable yet.
     QVERIFY(!editor.refusal().isEmpty());
     editor.setMessage(1, QStringLiteral("a better message"));
     QVERIFY(editor.refusal().isEmpty());

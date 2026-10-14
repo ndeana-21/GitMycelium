@@ -127,7 +127,6 @@ void StagingLinesTest::stagingAWholeHunkLeavesTheOtherUnstaged() {
     const QString staged = gitOut(m_path, {"show", ":file.txt"});
     QVERIFY(staged.contains("line2-changed"));
     QVERIFY(!staged.contains("line18-changed"));
-    // The second hunk is still waiting in the working tree.
     QVERIFY(gitOut(m_path, {"diff"}).contains("line18-changed"));
     QVERIFY(!gitOut(m_path, {"diff", "--cached"}).contains("line18-changed"));
 }
@@ -255,7 +254,6 @@ void StagingLinesTest::theGitBinaryAppliesTheSamePatchToTheSameIndex() {
 }
 
 void StagingLinesTest::unstagingAHunkPutsItBackIntoTheWorkingTree() {
-    // Stage both hunks first, whole files.
     QByteArray modified = readFile(m_path, "file.txt");
     modified.replace("line2\n", "line2-changed\n");
     modified.replace("line18\n", "line18-changed\n");
@@ -273,7 +271,6 @@ void StagingLinesTest::unstagingAHunkPutsItBackIntoTheWorkingTree() {
                                         anchorOf(staged, 0), &error),
              qPrintable(error));
 
-    // The first hunk is back in the working tree, the second is still staged.
     QVERIFY(gitOut(m_path, {"show", ":file.txt"}).contains("line18-changed"));
     QVERIFY(!gitOut(m_path, {"show", ":file.txt"}).contains("line2-changed"));
     QVERIFY(gitOut(m_path, {"diff"}).contains("line2-changed"));
@@ -342,7 +339,6 @@ void StagingLinesTest::stagingLinesOfANewFile() {
     const QString staged = gitOut(m_path, {"show", ":new.txt"});
     QVERIFY(staged.contains("alpha"));
     QVERIFY(!staged.contains("gamma"));
-    // The rest is still on disk, untracked-ish: staged differs from the file.
     QVERIFY(readFile(m_path, "new.txt").contains("gamma"));
 }
 

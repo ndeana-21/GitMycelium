@@ -174,7 +174,6 @@ void PanelsTest::aRailTheReaderHidStaysHidden() {
     window.setRefsPanelVisible(false);
     QVERIFY(!window.refsPanelVisible());
 
-    // Opening and closing a diff must not undo a choice the reader made.
     window.showDiffPage();
     QVERIFY(!window.refsPanelVisible());
     window.showGraphPage();
@@ -226,7 +225,6 @@ void PanelsTest::theCommitFormIsUpForTheWorkingTree() {
     QVERIFY(tabs);
     QCOMPARE(tabs->tabText(0), QStringLiteral("Commit"));
     QCOMPARE(tabs->tabText(1), QStringLiteral("Stash"));
-    // The unstaged list comes first, so its file is the one picked for the diff.
     QCOMPARE(panel.firstFilePath(), QStringLiteral("src/main.cpp"));
     QVERIFY(!panel.firstFileIsStaged());
     QCOMPARE(panel.selectedPaths(), QStringList{QStringLiteral("src/main.cpp")});
@@ -243,7 +241,6 @@ void PanelsTest::theCommitButtonWaitsForAMessage() {
     QVERIFY2(!commit->isEnabled(), "an empty message is not a commit");
     QCOMPARE(commit->text(), QStringLiteral("Type a Message to Commit"));
 
-    // A description alone is not a message: the summary is the line git shows.
     description->setPlainText(QStringLiteral("Only a body"));
     QVERIFY(!commit->isEnabled());
 
@@ -286,7 +283,6 @@ void PanelsTest::theSectionButtonsReportTheirSide() {
     QCOMPARE(unstageAll.count(), 1);
     QCOMPARE(panel.stagedPaths(), QStringList{QStringLiteral("b.txt")});
 
-    // Folding one list gives the other the whole height.
     auto* toggle = panel.findChild<QToolButton*>(QStringLiteral("unstagedToggle"));
     auto* unstaged = panel.findChild<QTreeView*>(QStringLiteral("unstagedFiles"));
     QVERIFY(toggle && unstaged);
@@ -333,7 +329,6 @@ void PanelsTest::amendingRestoresTheDraftWhenUnticked() {
     auto* amend = panel.findChild<QCheckBox*>(QStringLiteral("amendCommit"));
     auto* commit = panel.findChild<QPushButton*>(QStringLiteral("commitButton"));
     QVERIFY(amend && commit);
-    // The window answers the tick with HEAD's message.
     connect(&panel, &CommitDetailsPanel::amendToggled, &panel, [&panel](bool on) {
         if (on) {
             panel.setCommitMessage(QStringLiteral("Previous subject\n\nPrevious body"));
@@ -342,7 +337,6 @@ void PanelsTest::amendingRestoresTheDraftWhenUnticked() {
     amend->setChecked(true);
     QVERIFY(panel.amendRequested());
     QCOMPARE(panel.commitMessage(), QStringLiteral("Previous subject\n\nPrevious body"));
-    // An amend can reword with nothing staged.
     QVERIFY(commit->isEnabled());
     QCOMPARE(commit->text(), QStringLiteral("Amend Previous Commit"));
 
@@ -370,7 +364,6 @@ void PanelsTest::theStashFormWaitsForATitle() {
     title->setText(QStringLiteral("WIP login"));
     description->setPlainText(QStringLiteral("half done"));
     QVERIFY(stash->isEnabled());
-    // A path changed on both sides is one file to stash.
     QCOMPARE(stash->text(), QStringLiteral("Stash Changes to 2 Files"));
 
     QSignalSpy requested(&panel, &CommitDetailsPanel::stashAllRequested);
@@ -401,7 +394,6 @@ void PanelsTest::theCoauthorButtonAsksForTheDialog() {
     QSignalSpy requested(&panel, &CommitDetailsPanel::coauthorsRequested);
     QPushButton* button = buttonNamed(&panel, QStringLiteral("Co-authors…"));
     QVERIFY(button);
-    // It lives under "Commit options", folded away until the reader opens them.
     auto* options = panel.findChild<QToolButton*>(QStringLiteral("commitOptions"));
     QVERIFY(options);
     QVERIFY(button->parentWidget()->isHidden());

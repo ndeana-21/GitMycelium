@@ -92,8 +92,6 @@ LfsDialog::LfsDialog(bool available, const QString& version, bool configured,
     connect(close, &QDialogButtonBox::rejected, this, &QDialog::reject);
     root->addWidget(close);
 
-    // Nothing acts without git-lfs, so the mutating controls are greyed rather than
-    // answering "not a git command" from four buttons.
     const QList<QPushButton*> mutating{trackButton, untrackButton, install, checkout, fetch,
                                        pull,      push,         prune};
     for (QPushButton* button : mutating) {

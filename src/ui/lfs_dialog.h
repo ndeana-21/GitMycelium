@@ -10,12 +10,6 @@ class QPushButton;
 
 namespace gk {
 
-/// Git LFS: what is tracked, what is under it, and the operations that act on it.
-///
-/// The dialog performs nothing itself — it returns the action the reader asked for
-/// and the window runs it, so a button can never act on a repository that moved
-/// underneath it. The window reopens the dialog after each action, which is how one
-/// can track several patterns in a row.
 class LfsDialog : public QDialog {
     Q_OBJECT
 

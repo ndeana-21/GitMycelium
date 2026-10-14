@@ -107,7 +107,6 @@ void ExternalToolsTest::theToolChoiceRoundTrips() {
     QVERIFY(ops.setTool(true, "vimdiff", &error));
     QCOMPARE(QString::fromStdString(ops.tool(true)), QStringLiteral("vimdiff"));
 
-    // An empty name returns to git's default rather than pinning an empty tool.
     QVERIFY(ops.setTool(false, "", &error));
     QCOMPARE(QString::fromStdString(ops.tool(false)), QString());
 }
@@ -164,7 +163,6 @@ void ExternalToolsTest::theMergeToolIsInvokedAndResolves() {
     const SyncResult result = ops.runMerge("a.txt");
     QVERIFY2(result.ok, result.output.c_str());
     QVERIFY2(readFile(m_log).contains(QStringLiteral("merge")), "the tool must have run");
-    // git stages what the tool wrote, so the conflict is gone.
     QVERIFY(gitOut(m_path, {"ls-files", "-u"}).isEmpty());
 }
 

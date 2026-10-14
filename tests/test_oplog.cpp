@@ -249,7 +249,6 @@ void OplogTest::aNewOperationDropsTheRedoStack() {
     QVERIFY(session.stageAll(&error));
     QString second;
     QVERIFY2(session.createCommit("C", &second, &error), qPrintable(error));
-    // A new operation makes the redo future unreachable, as in any editor.
     QVERIFY(!session.canRedo());
 }
 
@@ -286,7 +285,6 @@ void OplogTest::refusesWhileAnOperationIsOpen() {
     QCOMPARE(result.status, MergeStatus::Conflicted);
     QVERIFY(session.mergeInProgress());
 
-    // An undo belongs to completed work, not to the middle of a merge.
     QString label;
     QVERIFY(!session.undo(&label, &error));
     QVERIFY(!error.isEmpty());

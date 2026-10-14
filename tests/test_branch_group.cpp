@@ -69,8 +69,6 @@ private:
     bool commitFile(const QString& name, const QString& content, const QString& message);
     bool branchExists(const QString& name) const;
     bool remoteTrackingExists(const QString& name) const;
-    /// main (checked out), `merged-1` and `merged-2` merged into it, `unmerged`
-    /// carrying a commit of its own.
     void buildMergedAndUnmerged();
 
     std::unique_ptr<QTemporaryDir> m_dir;
@@ -132,7 +130,6 @@ void BranchGroupTest::mergedIntoFindsOnlyTheMergedBranches() {
     QStringList found = session.branchesMergedInto(QStringLiteral("refs/heads/main"));
     found.sort();
 
-    // The oracle: git's own answer for what is already in main.
     const QString mergedByGit = gitOut(m_path, {"branch", "--format=%(refname:short)",
                                                 "--merged", "main"});
     QStringList oracle = mergedByGit.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
@@ -224,13 +221,11 @@ void BranchGroupTest::aBranchMergedOnlyIntoTheTargetIsDeletedWithoutForce() {
     QVERIFY(session.open(m_path, &error));
 
     RepoSession::BranchBatchResult result;
-    // Against HEAD the branch carries unreachable commits, so this is refused.
     QVERIFY(session.deleteBranches({QStringLiteral("merged-1")}, QString(),
                                    /*forceUnmerged=*/false, &result, &error));
     QCOMPARE(result.failed.size(), 1);
     QVERIFY(branchExists(QStringLiteral("merged-1")));
 
-    // Against the target it is merged, so no force is needed.
     result = RepoSession::BranchBatchResult{};
     QVERIFY(session.deleteBranches({QStringLiteral("merged-1")},
                                    QStringLiteral("refs/heads/main"), /*forceUnmerged=*/false,
@@ -271,7 +266,6 @@ void BranchGroupTest::setUpstreamsOnlyWhereTheRemoteTrackingBranchExists() {
     QCOMPARE(result.failed.size(), 1);
     QVERIFY(result.failed.front().startsWith(QStringLiteral("never-pushed")));
 
-    // git is the oracle for the config, not our own report.
     QCOMPARE(gitOut(m_path, {"config", "--get", "branch.pushed.merge"}),
              QStringLiteral("refs/heads/pushed"));
     QVERIFY(!git(m_path, {"config", "--get", "branch.never-pushed.merge"}));

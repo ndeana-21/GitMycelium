@@ -45,7 +45,6 @@ FileHistoryDialog::FileHistoryDialog(const QString& path,
     buttons->addWidget(close);
     layout->addLayout(buttons);
 
-    // Double-click a commit to jump to it; a single click only highlights.
     connect(m_list, &QListWidget::itemDoubleClicked, this, [this] { accept(); });
 }
 

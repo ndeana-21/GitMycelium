@@ -6,13 +6,10 @@
 
 namespace gk {
 
-/// The maintenance verbs a reader can invoke. `Optimize` is the composite the
-/// "Optimize Repository" action runs.
 enum class MaintenanceTask { Gc, Fsck, CommitGraph, MultiPackIndex, Maintenance, Optimize };
 
 const char* maintenanceTaskName(MaintenanceTask task);
 
-/// Resolves a name from `maintenanceTaskName` back to the task.
 bool maintenanceTaskFromName(const std::string& name, MaintenanceTask* task);
 
 /// Repository maintenance, delegated to the `git` binary.

@@ -45,8 +45,6 @@ std::vector<RebasePlanRow> parseRebaseSpec(const std::string& spec,
                                            const std::vector<RebaseCandidate>& candidates,
                                            std::string* errorOut);
 
-/// The plan as text, oldest first: `<action> <sha> <subject>`, one per line. For the
-/// headless runs that cannot open the editor.
 std::string rebasePlanText(const std::vector<RebasePlanRow>& rows);
 
 } // namespace gk

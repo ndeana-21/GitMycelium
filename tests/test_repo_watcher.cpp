@@ -144,7 +144,6 @@ void RepoWatcherTest::whatGitIgnoresIsNotReported() {
     QTest::qWait(1200);
     QCOMPARE(spy.count(), 0);
 
-    // The control: the same write outside the ignored directory is reported.
     QVERIFY(touch(m_work + QStringLiteral("/src/kept.txt")));
     QTRY_VERIFY_WITH_TIMEOUT(spy.count() >= 1, 5000);
 }

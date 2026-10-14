@@ -8,7 +8,6 @@
 
 namespace gk {
 
-/// Hex object id (40 chars for SHA-1 backends).
 using Oid = std::string;
 
 enum class RefKind { LocalBranch, RemoteBranch, Tag, Other };
@@ -110,7 +109,6 @@ struct FileChange {
     std::string path;
     ChangeKind kind = ChangeKind::Modified;
     bool staged = false;
-    /// True when the path is a submodule (a gitlink), a pointer change rather than a file.
     bool submodule = false;
     /// For a submodule: the gitlink in the parent's index, and the commit checked out
     /// inside it (empty when not initialized).
@@ -158,7 +156,6 @@ inline TimelinePeriod timelinePeriodFromKey(const std::string& key) {
     return TimelinePeriod::None;
 }
 
-/// How much of the working state `git reset` throws away.
 enum class ResetMode {
     Soft,
     Mixed,
@@ -192,7 +189,6 @@ struct RepoInfo {
 /// HEAD (`refs/remotes/*/HEAD`) are deliberately left out, so a restore never
 /// turns one into a direct reference.
 struct RefState {
-    /// Full direct-ref name (`refs/heads/main`) to the object id it names.
     std::map<std::string, std::string> refs;
     /// HEAD's symbolic target (`refs/heads/main`); empty when HEAD is detached.
     std::string headRef;
@@ -208,7 +204,6 @@ struct RefState {
     bool operator==(const RefState&) const = default;
 };
 
-/// A file touched by a commit (relative to its first parent).
 struct ChangedFile {
     std::string path;
     std::string oldPath; ///< differs from `path` on rename/copy
@@ -252,7 +247,6 @@ struct FileDiff {
     std::vector<DiffHunk> hunks;
 };
 
-/// How the three index stages of a conflicted path relate to each other.
 enum class ConflictKind {
     BothModified,
     BothAdded,
@@ -351,7 +345,6 @@ enum class RewriteAction {
 struct RewriteStep {
     Oid commit;
     RewriteAction action = RewriteAction::Keep;
-    /// The new message for Reword. Ignored otherwise.
     std::string message;
 };
 
@@ -377,7 +370,6 @@ struct ReflogEntry {
     std::string selector;
     std::string id;
     std::string shortId;
-    /// The verb git recorded: `commit`, `checkout`, `rebase (finish)`, `reset`.
     std::string action;
     std::string message;
     std::string author;

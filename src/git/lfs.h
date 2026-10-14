@@ -18,7 +18,6 @@ struct LfsFile {
 
 struct LfsPattern {
     std::string pattern;
-    /// ".gitattributes", or `.git/info/attributes`.
     std::string source;
 };
 
@@ -42,16 +41,12 @@ class GitLfsOps {
 public:
     explicit GitLfsOps(std::string workDir);
 
-    /// True when `git lfs version` succeeds.
     bool available() const;
-    /// The first line of `git lfs version`, or empty when it is not installed.
     std::string version() const;
-    /// True while the LFS clean filter is configured.
     bool configured() const;
 
     std::vector<LfsPattern> trackedPatterns() const;
     std::vector<LfsFile> files() const;
-    /// `git lfs status`, verbatim.
     std::string statusReport() const;
 
     /// `git lfs install --local`: writes `filter.lfs.*` into the repository's config
@@ -62,10 +57,7 @@ public:
     /// is left unstaged; committing it is the reader's.
     SyncResult track(const std::string& pattern) const;
     SyncResult untrack(const std::string& pattern) const;
-    /// `git lfs checkout`: materialises the content of the tracked files from
-    /// `.git/lfs/objects`.
     SyncResult checkout() const;
-    /// `git lfs prune`: removes unreferenced objects from `.git/lfs/objects`.
     SyncResult prune(bool dryRun) const;
 
     SyncResult fetch(const std::string& remote) const;

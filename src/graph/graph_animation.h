@@ -8,14 +8,12 @@
 
 namespace gk {
 
-/// One row of the graph at one moment — all the animator needs to diff.
 struct GraphRowKey {
     std::string oid;
     int row = 0;
     int lane = 0;
 };
 
-/// What the graph is doing to one commit (or one label) between two snapshots.
 enum class GraphMotion {
     Appear,   ///< a commit the model did not have a moment ago
     Vanish,   ///< a commit that left (dropped, hidden branch, working tree clean)
@@ -25,7 +23,6 @@ enum class GraphMotion {
     LabelOut,
 };
 
-/// One transition, stamped with the moment it started.
 struct GraphTransition {
     GraphMotion motion = GraphMotion::Appear;
     std::string oid;
@@ -63,7 +60,6 @@ public:
     void baseline(const std::vector<GraphRowKey>& rows, const std::set<std::string>& labels,
                   const std::string& headOid);
 
-    /// Forgets everything, including the baseline; the next `observe` starts fresh.
     void clear();
 
     bool advance(std::int64_t nowMs);
@@ -72,11 +68,8 @@ public:
 
     const std::vector<GraphTransition>& transitions() const { return m_transitions; }
 
-    /// Interpolation of a transition, clamped to [0, 1].
     static double progress(const GraphTransition& t, std::int64_t nowMs);
 
-    /// The transition of a kind for a commit, or nullptr. Linear in the (small)
-    /// number of transitions held for that commit.
     const GraphTransition* find(const std::string& oid, GraphMotion kind) const;
     const GraphTransition* findLabel(const std::string& label, GraphMotion kind) const;
 

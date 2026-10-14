@@ -44,7 +44,6 @@ void Oplog::push(const QString& label, const RefState& before, const RefState& a
     if (m_undo.size() > kMaxEntries) {
         m_undo.pop_front();
     }
-    // A new operation makes the redo future unreachable, exactly as in any editor.
     m_redo.clear();
 }
 

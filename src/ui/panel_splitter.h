@@ -6,12 +6,6 @@
 
 namespace gk {
 
-/// The window's three columns: a side panel on each edge and the content between.
-///
-/// A side panel folds away and comes back from a button on its handle, and the
-/// handle stays on screen while it is folded, with its arrow pointing at where the
-/// panel is — dragging a panel against the window edge was the only way to hide it,
-/// and nothing then said there was anything left to bring back.
 class PanelSplitter : public QSplitter {
     Q_OBJECT
 

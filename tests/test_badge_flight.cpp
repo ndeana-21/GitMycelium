@@ -43,7 +43,6 @@ void BadgeFlightTest::theBadgeArrivesAtTheAnchor() {
 
     flight.advance(BadgeFlight::kLiftMs);
     QCOMPARE(flight.position(), QPoint(200, 60));
-    // Parked: still off its row, waiting for the reader, and no longer moving.
     QVERIFY(flight.lifted());
     QVERIFY(!flight.flying());
 }
@@ -125,8 +124,6 @@ void BadgeFlightTest::theListOpensToTheRightOfTheBadge() {
 
 void BadgeFlightTest::theListIsPressedBackInsideItsRoom() {
     GraphOperationPanel panel;
-    // A room the list comfortably fits in, with the badge in its bottom-right corner:
-    // without clamping the list would hang over both edges.
     const QRect room(0, 0, 800, 600);
     panel.present(QStringLiteral("feature/conflict-a"), QStringLiteral("main"), QPoint(780, 560),
                   room);
@@ -147,7 +144,6 @@ void BadgeFlightTest::thePanelReportsOneSignalPerPresentation() {
     QCOMPARE(dismissed.count(), 1);
     QCOMPARE(chosen.count(), 0);
 
-    // A second presentation gets its own single answer.
     panel.present(QStringLiteral("feature"), QStringLiteral("main"), QPoint(0, 0));
     panel.dismiss();
     QCOMPARE(dismissed.count(), 2);
@@ -182,8 +178,6 @@ void BadgeFlightTest::theInteractiveEntryIsLiveAndReportsItself() {
             break;
         }
     }
-    // The entry spent a long time disabled and saying "not built yet" while the
-    // editor behind it existed; the badge must be able to reach it.
     QVERIFY(interactive);
     QVERIFY(interactive->isEnabled());
     interactive->click();

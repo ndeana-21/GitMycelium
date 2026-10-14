@@ -55,8 +55,6 @@ GraphOperationPanel::GraphOperationPanel(QWidget* parent) : QWidget(parent) {
                                .arg(theme::textDim().name()));
     layout->addWidget(m_title);
 
-    // The prediction sits with the choice: a reader should not learn about a conflict
-    // only after picking Merge.
     m_preview = new QLabel(this);
     m_preview->setWordWrap(true);
     m_preview->setMaximumWidth(280);

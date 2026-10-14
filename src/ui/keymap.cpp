@@ -24,9 +24,6 @@ QKeySequence Keymap::effective(const QString& id, const QKeySequence& fallback) 
 }
 
 void Keymap::setOverride(const QString& id, const QKeySequence& sequence) {
-    // Stored even when empty: an empty override is a command the reader unbound,
-    // which is not the same as no override at all. `reset` is what returns a
-    // command to its default.
     QSettings settings;
     settings.setValue(settingsKey(id), sequence.toString(QKeySequence::PortableText));
 }

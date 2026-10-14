@@ -18,7 +18,6 @@ public:
     void paint(QPainter* painter, const QStyleOptionViewItem& option,
                const QModelIndex& index) const override;
 
-    /// Wide enough for a node with two letters plus the line passing beside it.
     static int laneWidth() { return 26; }
     /// Inset of the first lane from the cell's left edge. A fixed distance, not a
     /// share of the cell: lane 0 must not move when the column is resized.

@@ -42,7 +42,6 @@ void RebasePlanTest::actionNamesRoundTrip() {
     }
     RewriteAction parsed = RewriteAction::Keep;
     QVERIFY(!rewriteActionFromName("nonsense", &parsed));
-    // git's own single-letter aliases are accepted too.
     QVERIFY(rewriteActionFromName("s", &parsed));
     QCOMPARE(parsed, RewriteAction::Squash);
 }
@@ -102,7 +101,6 @@ void RebasePlanTest::aSpecNamesEveryCommitOnceInTheGivenOrder() {
                         threeCandidates(), &error);
     QVERIFY2(error.empty(), error.c_str());
     QCOMPARE(rows.size(), std::size_t(3));
-    // The order is the spec's, not the range's.
     QCOMPARE(QString::fromStdString(rows[0].subject), QStringLiteral("two"));
     QCOMPARE(rows[0].action, RewriteAction::Drop);
     QCOMPARE(QString::fromStdString(rows[1].subject), QStringLiteral("three"));
@@ -118,7 +116,6 @@ void RebasePlanTest::anAbbreviatedPrefixResolves() {
                         threeCandidates(), &error);
     QVERIFY2(error.empty(), error.c_str());
     QCOMPARE(rows.size(), std::size_t(3));
-    // The reword stays first because the spec said so, with its message.
     QCOMPARE(QString::fromStdString(rows[0].subject), QStringLiteral("three"));
     QCOMPARE(rows[0].action, RewriteAction::Reword);
     QCOMPARE(QString::fromStdString(rows[0].message), QStringLiteral("hello"));

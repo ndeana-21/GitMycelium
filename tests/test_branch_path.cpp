@@ -1,5 +1,3 @@
-/// The traced branch of a selected commit: up its own lane to the tip, then down the
-/// first-parent chain into the branches it was cut from, each from the fork down.
 
 #include "graph/branch_path.h"
 #include "graph/graph_layout.h"
@@ -90,7 +88,6 @@ void BranchPathTest::theForkIsWhereTheLineBendsIntoTheParentBranch() {
     const Traced t = trace({mk("H", {"G"}), mk("F", {"E"}), mk("D", {"C"}), mk("G", {"E"}),
                             mk("E", {"B"}), mk("C", {"B"}), mk("B", {"A"}), mk("A", {})},
                            "H");
-    // H's line runs through F and D in its own lane...
     for (int row : {1, 2}) {
         const auto pieces = t.path.piecesAt(row);
         QCOMPARE(pieces.size(), std::size_t{1});

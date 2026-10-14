@@ -65,10 +65,6 @@ enum class Icon {
     SortDescending,
 };
 
-/// `which`, drawn in `color` at `side` device-independent pixels. The SVGs are
-/// monochrome, so the colour is applied when the pixmap is rendered rather than
-/// shipped once per variant. The result is cached and owned by the caller's
-/// QIcon (implicitly shared), so callers may keep or discard it freely.
 QIcon icon(Icon which, const QColor& color, int side = 18);
 
 QIcon icon(Icon which);

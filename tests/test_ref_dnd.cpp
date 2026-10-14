@@ -31,9 +31,6 @@ public:
 
 } // namespace
 
-/// Drag-and-drop cannot be exercised by clicking in a headless run, so the
-/// model contract is pinned here instead: a drag must carry a decodable
-/// payload, and only a drop onto another reference may ask for an operation.
 class RefDndTest : public QObject {
     Q_OBJECT
 
@@ -51,7 +48,6 @@ private:
     QModelIndex indexOf(const QString& text) const;
 
     std::unique_ptr<RefModel> m_model;
-
 
 };
 
@@ -91,7 +87,6 @@ void RefDndTest::encodesAndDecodesADraggedBranch() {
     QCOMPARE(decoded.target, QStringLiteral("bbbb"));
     QCOMPARE(decoded.kind, RefKind::LocalBranch);
 
-    // Foreign payloads must decode to nothing rather than to garbage.
     QMimeData foreign;
     foreign.setText(QStringLiteral("just text"));
     QVERIFY(RefModel::decode(&foreign).shortName.isEmpty());
@@ -102,9 +97,7 @@ void RefDndTest::groupHeadersAreNotDraggable() {
     QVERIFY(group.isValid());
     QVERIFY(!group.parent().isValid());
 
-    // No drag payload from a header...
     QVERIFY(m_model->mimeData({group}) == nullptr);
-    // ...and it is not a drop target either.
     const QModelIndex feature = indexOf(QStringLiteral("feature/ui"));
     std::unique_ptr<QMimeData> data(m_model->mimeData({feature}));
     QVERIFY(data != nullptr);
@@ -125,7 +118,6 @@ void RefDndTest::dropOnAnotherBranchEmitsIntent() {
     QVERIFY(m_model->dropMimeData(data.get(), Qt::MoveAction, -1, -1, main));
     QCOMPARE(spy.count(), 1);
 
-    // The model reports the intent; the window decides merge vs rebase.
     const auto args = spy.takeFirst();
     const auto source = args.at(0).value<RefModel::DraggedRef>();
     QCOMPARE(source.shortName, QStringLiteral("feature/login"));
@@ -138,11 +130,9 @@ void RefDndTest::dropOnAGroupOrItselfIsRefused() {
     QVERIFY(data != nullptr);
 
     QSignalSpy spy(m_model.get(), &RefModel::refDroppedOnRef);
-    // Dropping a branch onto itself is a no-op, not an operation.
     QVERIFY(!m_model->dropMimeData(data.get(), Qt::MoveAction, -1, -1, feature));
     QCOMPARE(spy.count(), 0);
 }
-
 
 /// The menu a drop leads to must open where the drop is. The cursor position is not
 /// usable for that — during a drag it can still report where the drag began, which

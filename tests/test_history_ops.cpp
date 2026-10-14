@@ -46,9 +46,6 @@ QByteArray readFile(const QString& path) {
 
 } // namespace
 
-/// The one-off operations the commit context menu offers. Each of these can
-/// rewrite history or drop work, so every one is checked against real git
-/// state rather than against its own return value.
 class HistoryOperationsTest : public QObject {
     Q_OBJECT
 
@@ -109,7 +106,6 @@ private slots:
         QVERIFY(git(m_path, {"branch", "other"}));
 
         auto repo = open();
-        // Silently overwriting `other` would lose whatever it pointed at.
         QVERIFY_THROWS_EXCEPTION(GitError, repo->renameBranch("main", "other"));
         QCOMPARE(branchTip("other"), branchTip("main"));
     }
@@ -150,18 +146,15 @@ private slots:
             repo->resetTo(firstId.toStdString(), ResetMode::Soft);
         }
         QCOMPARE(headId(), firstId);
-        // Soft: the change is still staged and still in the working tree.
         QVERIFY(!git(m_path, {"diff", "--cached", "--quiet"}));
         QCOMPARE(readFile(m_path + "/a.txt"), QByteArray("two\n"));
 
-        // Put the branch back before testing the next mode.
         QVERIFY(git(m_path, {"reset", "--hard", secondId}));
         {
             auto repo = open();
             repo->resetTo(firstId.toStdString(), ResetMode::Mixed);
         }
         QCOMPARE(headId(), firstId);
-        // Mixed: the index matches HEAD again, but the working tree keeps "two".
         QVERIFY(git(m_path, {"diff", "--cached", "--quiet"}));
         QCOMPARE(readFile(m_path + "/a.txt"), QByteArray("two\n"));
     }
@@ -240,12 +233,9 @@ private slots:
         QVERIFY_THROWS_EXCEPTION(GitError,
                                 repo->fastForwardBranch("ahead", mainTip.toStdString()));
         repo.reset();
-        // Nothing moved: refusing has to be as safe as it sounds.
         QCOMPARE(branchTip("ahead"), aheadTip);
         QCOMPARE(branchTip("main"), mainTip);
 
-        // Now a real fast-forward: rewind main to the fork point, then move it
-        // up to the side branch.
         const QString base = gitOut(m_path, {"rev-parse", "main~1"});
         QVERIFY(git(m_path, {"reset", "--hard", base}));
         auto repo2 = open();
@@ -262,7 +252,6 @@ private slots:
         const std::string patch = repo->formatPatch(headId().toStdString());
         repo.reset();
 
-        // The two lines that make it applyable with `git am`.
         QVERIFY2(patch.rfind("From ", 0) == 0, "patch must start with the From line");
         QVERIFY(patch.find("Subject: [PATCH] add b") != std::string::npos);
         QVERIFY(patch.find("+two") != std::string::npos);

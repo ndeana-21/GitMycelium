@@ -1,7 +1,3 @@
-/// The theme is mutable state: a mode switch swaps every token at once, and the
-/// zoom scales the base font and the geometry tokens together. These are pure
-/// checks — no window — so a regression says "the palette moved" rather than
-/// showing up as a wrong pixel in one widget's snapshot.
 
 #include "theme/theme.h"
 
@@ -84,10 +80,8 @@ void ThemeTest::thePaletteFollowsTheMode() {
 void ThemeTest::aBranchLabelReadsTheOtherWayOnLight() {
     const QColor branch = theme::branchColor(0);
 
-    // On a dark row the text is lifted towards white...
     QVERIFY(lighterThan(theme::branchLabelText(branch), branch));
 
-    // ...and on a light one it must sink towards black, or it disappears.
     theme::setMode(theme::ThemeMode::Light);
     QVERIFY(theme::branchLabelText(branch).lightness() < branch.lightness());
 }
@@ -121,7 +115,6 @@ void ThemeTest::theGenerationChangesWithTheLook() {
     theme::setZoomPercent(125);
     QVERIFY(theme::generation() > afterMode);
 
-    // Setting the same value is not a change.
     const int afterZoom = theme::generation();
     theme::setZoomPercent(125);
     QCOMPARE(theme::generation(), afterZoom);

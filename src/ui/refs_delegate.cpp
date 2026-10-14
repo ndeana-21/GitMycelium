@@ -12,16 +12,12 @@
 namespace gk {
 namespace {
 
-/// The row's first cell carries the accent bar that marks the current commit.
 void paintSelectedRowStart(QPainter* painter, const QRect& rect, const QBrush& fill) {
     painter->fillRect(rect, fill);
     painter->fillRect(QRect(rect.left(), rect.top(), theme::scaledPixels(2), rect.height()),
                       theme::accent());
 }
 
-
-/// A monitor for a local branch, a cloud for a remote. The glyphs come from
-/// theme/glyphs so the graph and the branch tree cannot drift apart.
 void drawKindIcon(QPainter* painter, const QRectF& box, RefKind kind, const QColor& color) {
     const Glyph glyph = kind == RefKind::RemoteBranch ? Glyph::Cloud : Glyph::Monitor;
     paintGlyph(painter, glyph, box, color);

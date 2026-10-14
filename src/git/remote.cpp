@@ -21,7 +21,6 @@ SyncResult toSyncResult(const ProcessResult& process) {
     return result;
 }
 
-/// Splits "origin\thttps://host/repo.git (fetch)" into its three parts.
 bool parseRemoteLine(const std::string& line, RemoteInfo* info) {
     const std::size_t tab = line.find('\t');
     if (tab == std::string::npos) {

@@ -7,8 +7,6 @@
 
 namespace gk {
 
-/// How a commit's date reads in the list and the details panel. One choice for the
-/// whole window, so a date cannot read one way in the header and another in a row.
 enum class CommitDateFormat {
     /// `yyyy-MM-dd HH:mm` — the default.
     Iso = 0,

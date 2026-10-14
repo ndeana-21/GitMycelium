@@ -25,13 +25,6 @@ class Skeleton;
 
 class FileActionDelegate;
 
-/// The Commit Panel: what is about to be committed. From the top: discard everything, how many files changed on which
-/// branch, the sort and Path/Tree switches, the unstaged and the staged files (each
-/// in a list of its own, sharing the height while both are open), a handle that
-/// moves the boundary, and the Commit and Stash forms.
-///
-/// Like the details panel it is a view: every action is a signal, and the window,
-/// which owns the session, carries it out.
 class WorkingTreePanel : public QWidget {
     Q_OBJECT
 
@@ -39,10 +32,8 @@ public:
     explicit WorkingTreePanel(QWidget* parent = nullptr);
 
     void setChanges(const std::vector<FileChange>& changes);
-    /// Skeleton rows over both lists while the status is still being read.
     void setLoading(bool loading);
     bool loading() const;
-    /// The branch the commit will land on. An empty name is a detached HEAD.
     void setBranch(const QString& name, const QColor& color);
     void setMode(CommitFilesModel::Mode mode);
 
@@ -72,11 +63,8 @@ public:
     int stagedCount() const;
     QStringList stagedPaths() const;
     int unstagedCount() const;
-    /// Distinct paths with any change: what a stash takes.
     int changedCount() const;
 
-    /// Re-applies the sizes that come from the theme (the summary's font) after a
-    /// theme or zoom change.
     void refreshTheme();
 
 signals:

@@ -18,7 +18,6 @@ class CommitFilesModel : public QStandardItemModel {
 public:
     enum ItemType { FileItem = 0, FolderItem, GroupItem };
     enum Mode { PathMode, TreeMode };
-    /// ByStatus sorts by kind first, then by path inside a group.
     enum Sort { PathAscending, PathDescending, ByStatus };
     enum Role {
         PathRole = Qt::UserRole, ///< for a folder, its prefix
@@ -44,7 +43,6 @@ public:
     bool workingTree() const { return m_workingTree; }
     void setMode(Mode mode);
     void setSort(Sort sort);
-    /// Empty shows the whole commit.
     void setFolderFilter(const QString& prefix);
     QString folderFilter() const { return m_folderFilter; }
 
@@ -56,10 +54,8 @@ public:
     bool hasUnstaged() const;
 
     static bool isFile(const QModelIndex& index);
-    /// Empty for a folder.
     static QString pathOf(const QModelIndex& index);
     static ChangeKind statusOf(const QModelIndex& index);
-    /// False for a commit's files, which are neither staged nor unstaged.
     static bool isStaged(const QModelIndex& index);
 
 private:

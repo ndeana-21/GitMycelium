@@ -6,17 +6,12 @@
 
 namespace gk {
 
-/// Placeholder bars drawn over a view whose data is still being read, in the shape
-/// of what will appear: list rows, graph rows (a node and a line), or one line of
-/// text. It covers its target and follows its size; while it is up, the mouse goes
-/// to it, not to the stale content underneath.
 class Skeleton : public QWidget {
     Q_OBJECT
 
 public:
     enum class Shape { List, Graph, Line };
 
-    /// Covers `target` (a view's viewport, or a label). Hidden until `setActive(true)`.
     Skeleton(QWidget* target, Shape shape);
 
     void setActive(bool active);

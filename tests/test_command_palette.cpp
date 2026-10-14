@@ -1,7 +1,3 @@
-/// The command palette: a command is data, so it can be listed, filtered and run
-/// without a menu. The registry's matching is the part worth pinning down — a
-/// palette whose order changes between runs is a palette nobody can use from the
-/// keyboard — and the window's headless report proves a command really runs.
 
 #include "git/cli.h"
 #include "model/commit_model.h"

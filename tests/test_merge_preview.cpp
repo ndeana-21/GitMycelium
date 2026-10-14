@@ -116,7 +116,6 @@ void MergePreviewTest::aConflictingPairNamesItsFiles() {
     QCOMPARE(preview.conflictedPaths.size(), std::size_t(1));
     QCOMPARE(QString::fromStdString(preview.conflictedPaths.at(0)), QStringLiteral("a.txt"));
 
-    // The prediction changed nothing: there is still no merge in progress.
     QVERIFY(!session.mergeInProgress());
     QVERIFY(gitOut(m_path, {"ls-files", "-u"}).trimmed().isEmpty());
 }

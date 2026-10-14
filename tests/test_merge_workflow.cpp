@@ -142,7 +142,6 @@ void MergeWorkflowTest::fastForwardsWhenTargetIsAhead() {
 
     QCOMPARE(result.status, MergeStatus::FastForward);
     QCOMPARE(QString::fromStdString(repo->info().headId), QString::fromStdString(featureHead));
-    // A fast-forward must not create a merge commit.
     bool hasMore = false;
     const auto commits = repo->commits(0, 1, &hasMore);
     QCOMPARE(commits.size(), static_cast<std::size_t>(1));
@@ -226,11 +225,9 @@ void MergeWorkflowTest::resolvingAConflictStagesTheResult() {
     repo->resolveConflict("a.txt", "line1\nline2-resolved\nline3\n");
 
     QVERIFY(repo->conflicts().empty());
-    // The merge is still in progress: resolving only stages the file.
     QVERIFY(repo->mergeInProgress());
     QCOMPARE(readWorktree("a.txt"), QStringLiteral("line1\nline2-resolved\nline3\n"));
 
-    // Staged result shows up as a staged change, not a conflict.
     bool sawStaged = false;
     for (const FileChange& change : repo->status()) {
         if (change.path == "a.txt") {

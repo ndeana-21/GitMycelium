@@ -1,5 +1,3 @@
-/// "Apply a patch" is two operations: a mailbox carries commits and goes through
-/// `git am`, a plain diff belongs in the working tree.
 
 #include "core/types.h"
 #include "git/cli.h"
@@ -142,7 +140,6 @@ void PatchOpsTest::aPlainDiffLandsInTheWorkingTreeUnstaged() {
     QVERIFY(out.open(QIODevice::WriteOnly | QIODevice::Truncate));
     out.write(gitOut(m_path, {"diff"}).toUtf8());
     out.close();
-    // Back to the committed text; the working tree is clean when the patch is applied.
     QVERIFY(git(m_path, {"checkout", "--", "a.txt"}));
     QVERIFY(gitOut(m_path, {"status", "--porcelain"}).trimmed().isEmpty());
 

@@ -94,7 +94,6 @@ void GraphPagingTest::anIdleViewHoldsOnePageAndScrollingLoadsTheRest() {
     QCOMPARE(model.rowCount(), page);
     QVERIFY(model.hasMore());
 
-    // Reaching the end of what is loaded asks for more, until the history runs out.
     for (int attempt = 0; attempt < 50 && model.hasMore(); ++attempt) {
         view.scrollToBottom();
         const int before = model.rowCount();

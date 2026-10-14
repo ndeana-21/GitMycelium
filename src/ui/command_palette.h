@@ -13,12 +13,6 @@ class QTreeWidget;
 
 namespace gk {
 
-/// One thing the window can do, in the form a palette can list and run it.
-///
-/// It is data, not a QAction: the same entry feeds the palette, a future
-/// configurable keymap (K2) and the headless command report. A QAction built
-/// inside a function cannot be discovered or re-bound, which is what kept the
-/// window's commands out of reach until now.
 struct Command {
     QString id;
     QString title;
@@ -43,8 +37,6 @@ public:
     void add(Command command) { m_commands.push_back(std::move(command)); }
     const std::vector<Command>& commands() const { return m_commands; }
 
-    /// Commands matching `query`, best matches first. An empty query returns
-    /// everything, sorted by title.
     std::vector<const Command*> search(const QString& query) const;
 
 private:
@@ -62,7 +54,6 @@ class CommandPalette : public QDialog {
 public:
     explicit CommandPalette(const CommandRegistry& registry, QWidget* parent = nullptr);
 
-    /// The id chosen, or empty when the palette was dismissed.
     QString chosenId() const { return m_chosenId; }
 
     /// The ids the palette would show for `query`, in order — for headless checks

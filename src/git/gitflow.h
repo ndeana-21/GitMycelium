@@ -38,10 +38,7 @@ class GitFlowOps {
 public:
     explicit GitFlowOps(std::string workDir);
 
-    /// True while `gitflow.branch.master` is set, which is what `git flow init` writes.
     bool initialized() const;
-    /// The configured names and prefixes, with gitflow's own defaults for the keys
-    /// that are unset.
     GitFlowConfig config() const;
 
     /// Writes the config and creates `develop` from the master branch when it does

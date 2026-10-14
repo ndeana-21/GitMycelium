@@ -37,7 +37,6 @@ struct CommitPage {
     quint64 skip = 0;
     QVector<CommitInfo> commits;
     bool hasMore = false;
-    /// Set when the page could not be read; `commits` is then empty.
     QString error;
 };
 
@@ -76,7 +75,6 @@ struct SessionSnapshot {
     quint64 epoch = 0;
     RepoInfo info;
     std::vector<RefInfo> refs;
-    /// Every ref, grouped by commit; `refsByCommit` filters it per request.
     std::unordered_map<std::string, std::vector<RefInfo>> refsByCommit;
     std::vector<FileChange> status;
     std::vector<StashEntry> stashes;
@@ -208,9 +206,7 @@ public:
     std::vector<ChangedFile> workdirChangedFilesAgainst(const QString& revision) const;
     FileDiff workdirFileDiffAgainst(const QString& revision, const QString& path) const;
 
-    /// Per-line provenance of a path, at `revision` (empty = the working tree).
     std::vector<BlameLine> blame(const QString& path, const QString& revision = {}) const;
-    /// The commits that touched a path, newest first, following renames.
     std::vector<FileHistoryEntry> fileHistory(const QString& path) const;
 
     /// Puts `path` back the way `revision` has it: into the working tree, or into the
@@ -226,11 +222,8 @@ public:
     /// HEAD's tree against the index — the staged change, for the Staged side of
     /// the working tree.
     FileDiff stagedFileDiff(const QString& path) const;
-    /// The bytes `path` holds in the index, or empty when it is not there.
     std::string indexFileContent(const QString& path) const;
 
-    /// Stages a path, unstages it, stages everything, or discards its unstaged
-    /// changes. None of them throw; the reason comes back through `errorOut`.
     bool stageFile(const QString& path, QString* errorOut);
     bool unstageFile(const QString& path, QString* errorOut);
     bool stageAll(QString* errorOut);
@@ -301,7 +294,6 @@ public:
     /// empty file would stage a file git never had.
     bool deleteConflictFile(const QString& path, QString* errorOut);
     QStringList resolvedConflictPaths() const;
-    /// Reopens a resolved file's conflict; the working-tree file is left alone.
     bool markConflicted(const QString& path, QString* errorOut);
     /// Writes a partial resolution to the working tree, markers and all, and leaves
     /// the index conflicted. The reader's draft is saved without pretending the file
@@ -321,8 +313,6 @@ public:
     SemanticJsonMerge semanticMergeJson(const QString& path) const;
     QString resolveRevision(const QString& revision) const;
 
-    /// The reflog, newest first, up to `limit` entries. Read-only; empty when the
-    /// repository has no reflog yet.
     std::vector<ReflogEntry> reflog(std::size_t limit) const;
 
     struct AutoResolveOutcome {
@@ -367,7 +357,6 @@ public:
         bool needsAPerson = false;
         std::size_t hunksResolved = 0;
         QStringList autoStaged;
-        /// Per-file reasons for what was settled, "path: reason x n".
         QStringList autoDetail;
         QStringList needsAPersonPaths;
         QString error;
@@ -386,7 +375,6 @@ public:
     /// create tracking for a branch the remote has never seen.
     bool setUpstream(const QString& branch, const QString& upstream, QString* errorOut);
     bool checkoutBranch(const QString& name, QString* errorOut);
-    /// Deletes a branch. Refuses when it carries commits nothing else reaches.
     bool deleteBranch(const QString& name, QString* errorOut);
     /// Deletes it whether or not those commits are reachable elsewhere. Only after
     /// the reader has been told what it costs.
@@ -445,7 +433,6 @@ public:
     bool commitMerge(const QString& message, QString* errorOut);
     bool abortMerge(QString* errorOut);
 
-    /// True while MERGE_HEAD exists, i.e. a merge still needs committing.
     bool mergeInProgress() const;
 
     /// `git merge --squash`: stages the branch's change without committing. Content,
@@ -455,7 +442,6 @@ public:
     /// True while SQUASH_MSG exists, i.e. a squash is staged but not yet committed.
     /// A squash never writes MERGE_HEAD, so mergeInProgress() does not see it.
     bool squashInProgress() const;
-    /// Commits a squash as an ordinary commit; an empty message uses git's own.
     bool commitSquash(const QString& message, QString* newCommitOut, QString* errorOut);
 
     bool rebaseOnto(const QString& branch, const QString& onto, RebaseResult* resultOut,
@@ -470,7 +456,6 @@ public:
     bool moveBranchForced(const QString& name, const QString& targetCommit, QString* errorOut);
 
     bool canFastForward(const QString& branch, const QString& target) const;
-    /// The best common ancestor of two revisions, or empty when unrelated.
     QString mergeBase(const QString& a, const QString& b) const;
     bool fastForwardBranch(const QString& branch, const QString& target, QString* errorOut);
     bool renameBranch(const QString& from, const QString& to, QString* errorOut);
@@ -478,15 +463,12 @@ public:
     /// Copies the given commits onto the checked-out branch, oldest first.
     bool cherryPick(const std::vector<QString>& commitIds, QString* newCommitOut, QString* errorOut);
 
-    /// True when `onto..tip` is one uninterrupted line of first parents.
     bool rangeIsLinear(const QString& onto, const QString& tip, QString* errorOut) const;
 
-    /// The id the checked-out branch points at, empty when it cannot be resolved.
     QString headTipId() const;
     bool resetTo(const QString& commitId, ResetMode mode, QString* errorOut);
 
     bool amendHeadMessage(const QString& message, QString* errorOut);
-    /// The same, resigning when `sign` is set; the tree is kept.
     bool amendHeadMessage(const QString& message, bool sign, QString* errorOut);
     bool amendHead(const QString& message, bool sign, QString* newCommitOut, QString* errorOut);
     /// Amends the commit a stopped rebase is sitting on, with the staged index. An
@@ -501,7 +483,6 @@ public:
     bool rewriteHistory(const QString& upstream, const std::vector<RewriteStep>& steps,
                         QString* errorOut, const QString& onto = {}, const QString& branch = {});
 
-    /// The commits a rewrite would replay, oldest first — git's own todo for the range.
     std::vector<RebaseCandidate> rebaseCandidates(const QString& upstream,
                                                   const QString& tip) const;
 
@@ -513,8 +494,6 @@ public:
     bool deleteTag(const QString& name, QString* errorOut);
     bool formatPatch(const QString& commitId, QString* patchOut, QString* errorOut) const;
 
-    /// Tracking relationship of a branch (ahead/behind upstream). An empty
-    /// `branch` means HEAD.
     UpstreamInfo upstreamInfo(const QString& branch = QString{}) const;
 
     /// Full ref of the repository's target/base branch for Smart Visibility —
@@ -531,7 +510,6 @@ public:
     /// branch, and reading it on the GUI thread would stall on a large repository.
     void requestRefMeta();
 
-    /// One configuration value (repository + global), empty when unset.
     QString configValue(const QString& key) const;
 
     /// Writes a value into the repository's own config; empty removes the key.
@@ -552,10 +530,7 @@ public:
     bool removeLocalExcludePattern(const QString& pattern, QString* errorOut);
     QStringList skipWorktreePaths() const;
     bool setSkipWorktree(const QStringList& paths, bool skip, QString* errorOut);
-    /// Removes every tracked path matching a pathspec from the index, leaving the
-    /// files on disk.
     bool untrackPathspec(const QString& pathspec, QString* errorOut);
-    /// The message with a `Co-authored-by:` trailer per author, through git itself.
     QString withCoAuthors(const QString& message, const std::vector<CoAuthor>& authors) const;
     QString commitTemplate() const;
     std::vector<CoAuthor> recentAuthors(int limit) const;
@@ -563,9 +538,7 @@ public:
     /// The hooks git would run for this repository: name, path and state. Read-only.
     /// The directory is resolved by git, so `core.hooksPath` is honoured.
     std::vector<HookEntry> hooks() const;
-    /// The resolved hooks directory, empty when git cannot answer.
     QString hooksPath() const;
-    /// The hook's text, empty when the file does not exist.
     QString hookContent(const QString& name) const;
 
     /// Writes a hook's content. Files, not pointers: guarded, not recorded — the
@@ -586,10 +559,8 @@ public:
     /// the working tree against `base`; `cached` diffs HEAD against the index.
     SyncResult runExternalDiffTool(const QString& base, const QString& target,
                                    const QString& path, bool cached = false) const;
-    /// Opens a conflicted path in the external merge tool. Blocking.
     SyncResult runExternalMergeTool(const QString& path) const;
 
-    /// The stash entries, newest first. Empty when there is no stash.
     std::vector<StashEntry> stashList() const;
 
     /// Stashes the working tree. `paths` empty means everything; otherwise only
@@ -611,11 +582,6 @@ public:
     /// to call on any repository, bare included.
     std::vector<WorktreeEntry> worktrees() const;
 
-    /// One `WorktreeWip` per worktree with uncommitted changes, the one this session
-    /// was opened on first. The current checkout is read through libgit2; a linked
-    /// one through `git status --porcelain`, because it is a different working tree
-    /// and opening a second handle for the same repository is what this guards
-    /// against. Read whenever the working tree is refreshed.
     std::vector<WorktreeWip> worktreeWip() const;
     /// The same, with the current checkout's status already in hand: on a large
     /// working tree a status is the most expensive read a refresh makes.
@@ -637,7 +603,6 @@ public:
     bool unlockWorktree(const QString& path, QString* errorOut);
     bool pruneWorktrees(QString* errorOut);
 
-    /// `git submodule status --recursive` joined with each `.gitmodules`. Read-only.
     std::vector<SubmoduleEntry> submodules() const;
 
     /// `git submodule add`. `branch` empty leaves the tracked branch unset; an
@@ -687,8 +652,6 @@ public:
     /// rather than through it.
     void requestPushTag(const QString& remote, const QString& tag);
     SyncResult pushTagBlocking(const QString& remote, const QString& tag) const;
-    /// Deletes a tag on a remote (`git push <remote> :refs/tags/<tag>`). The local
-    /// tag is untouched; deleting it here is a separate call.
     SyncResult deleteRemoteTagBlocking(const QString& remote, const QString& tag) const;
 
     /// Applies a patch file through the binary: a mailbox becomes commits
@@ -733,9 +696,7 @@ public:
     QStringList lfsFiles() const;
     QString lfsStatusReport() const;
 
-    /// `git lfs install --local`: the filter config and hooks, this repository only.
     bool lfsInstall(QString* errorOut);
-    /// Appends the pattern to `.gitattributes`; the file is left unstaged.
     bool lfsTrack(const QString& pattern, QString* errorOut);
     bool lfsUntrack(const QString& pattern, QString* errorOut);
     bool lfsCheckout(QString* errorOut);
@@ -764,8 +725,6 @@ public:
     std::vector<CommitInfo> searchCommitsBlocking(const QString& query, CommitSearchField field,
                                                   quint32 limit, std::size_t skip = 0) const;
 
-    /// References grouped by the commit they point at, for the graph labels.
-    /// `filter`'s `visibleRefs` limits which labels come back.
     std::unordered_map<std::string, std::vector<RefInfo>> refsByCommit(
         const HistoryFilter& filter = HistoryFilter{}) const;
 
@@ -775,7 +734,6 @@ public:
     void invalidateCommitWalk() const;
 
 signals:
-    /// A snapshot is installed; `snapshot()` answers until the next write.
     void snapshotReady();
     void commitsLoaded(gk::CommitPage page);
     void commitSearchFinished(gk::CommitSearchResults results);
@@ -784,14 +742,9 @@ signals:
     /// A read the window asked for synchronously failed; the caller got an empty
     /// answer, and this carries why.
     void readFailed(QString message);
-    /// `output` is git's own output, shown verbatim in the log panel.
     void syncFinished(bool ok, QString summary, QString output);
-    /// gc/fsck finished: `task` is "gc" or "fsck", `output` git's own.
     void maintenanceFinished(bool ok, QString task, QString output);
-    /// The auto-update hook finished; `output` is git's own message on failure.
     void submodulesUpdated(bool ok, QString output);
-    /// An LFS network/checkout operation finished; `task` is its name, `output`
-    /// git's own.
     void lfsFinished(bool ok, QString task, QString output);
 
 private:
@@ -854,7 +807,6 @@ private:
     /// had to read enough commits outside the graph to be worth indexing.
     void indexHistoryIfWorthIt(std::size_t readOutsideGraph, const std::string& dir);
 
-    /// Reads one snapshot on the calling thread; installing it is separate.
     std::shared_ptr<SessionSnapshot> readSnapshot() const;
     bool installSnapshot(std::shared_ptr<SessionSnapshot> snapshot);
     void runSnapshotWorker();
@@ -868,7 +820,6 @@ private:
     mutable std::atomic<quint64> m_snapshotEpoch{1};
     mutable QMutex m_snapshotMutex;
     std::shared_ptr<const SessionSnapshot> m_snapshot;
-    /// Guarded by `m_snapshotMutex`.
     bool m_snapshotRunning = false;
     bool m_snapshotAgain = false;
     /// Set lock-free by `invalidateCommitWalk`, consumed by the next page under the lock.

@@ -26,7 +26,6 @@ public:
     std::uint32_t size() const { return m_total; }
     std::uint32_t find(const unsigned char* oid) const;
     const unsigned char* oidAt(std::uint32_t pos) const;
-    /// Topological level: greater than every parent's.
     std::uint32_t generation(std::uint32_t pos) const;
     std::int64_t commitTime(std::uint32_t pos) const;
     void parents(std::uint32_t pos, std::vector<std::uint32_t>& out) const;

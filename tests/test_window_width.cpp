@@ -127,13 +127,11 @@ void WindowWidthTest::aSidePanelFoldsAndComesBackFromItsHandle() {
     QTRY_VERIFY(history->sizes().at(2) > 0);
     const int detailsWidth = history->sizes().at(2);
 
-    // The handle before the details panel: its button sits halfway down.
     QSplitterHandle* handle = history->handle(2);
     QVERIFY(handle);
     const QPoint button(handle->width() / 2, handle->height() / 2);
     QTest::mouseClick(handle, Qt::LeftButton, {}, button);
     QTRY_COMPARE(history->sizes().at(2), 0);
-    // Folded, not gone: the handle is still there to bring it back.
     QVERIFY(!handle->isHidden());
     QVERIFY(handle->width() > 0);
 
@@ -141,7 +139,6 @@ void WindowWidthTest::aSidePanelFoldsAndComesBackFromItsHandle() {
     QTRY_VERIFY(history->sizes().at(2) > 0);
     QCOMPARE(history->sizes().at(2), detailsWidth);
 
-    // The branch rail answers the menu entry the same way, handle and all.
     QVERIFY(window.refsPanelVisible());
     window.setRefsPanelVisible(false);
     QCOMPARE(history->sizes().at(0), 0);

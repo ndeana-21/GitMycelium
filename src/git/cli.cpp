@@ -125,8 +125,6 @@ void closeInChild(posix_spawn_file_actions_t* actions, int fd) {
 ProcessResult runGit(const std::vector<std::string>& args, const std::string& workDir) {
     ProcessResult result;
 
-    // No shell: the arguments reach git as they are, so nothing needs quoting and
-    // the environment is set on git itself rather than on a command before it.
     std::vector<std::string> argv = {"git"};
     if (!workDir.empty()) {
         argv.push_back("-C");
@@ -137,8 +135,6 @@ ProcessResult runGit(const std::vector<std::string>& args, const std::string& wo
     std::vector<char*> argvPointers = pointersTo(argv);
     std::vector<char*> envPointers = pointersTo(env);
 
-    // Close-on-exec, so a git spawned concurrently by another thread does not inherit
-    // our write ends and keep these pipes open after this child has exited.
     int outPipe[2] = {-1, -1};
     int errPipe[2] = {-1, -1};
     if (makePipe(outPipe) != 0 || makePipe(errPipe) != 0) {
@@ -156,7 +152,6 @@ ProcessResult runGit(const std::vector<std::string>& args, const std::string& wo
     posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
     posix_spawn_file_actions_adddup2(&actions, outPipe[1], STDOUT_FILENO);
     posix_spawn_file_actions_adddup2(&actions, errPipe[1], STDERR_FILENO);
-    // The dups are in place; the child must not hold the pipe ends themselves.
     closeInChild(&actions, outPipe[0]);
     closeInChild(&actions, outPipe[1]);
     closeInChild(&actions, errPipe[0]);

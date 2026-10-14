@@ -23,15 +23,6 @@ class Skeleton;
 class DiffMinimap;
 class ElidedLabel;
 
-/// One file's changes, and the file they happened to.
-///
-/// Two things can be shown: what changed, and what the file says. The second is
-/// not decoration — the answer to "what does this change do" is regularly "show me
-/// the rest of the function", and opening an editor for that is a detour.
-///
-/// Content arrives as raw bytes. Git stores bytes and records no encoding, so the
-/// decoding happens here, by a codec that is visible and changeable rather than
-/// assumed.
 class DiffView : public QWidget {
     Q_OBJECT
 
@@ -51,7 +42,6 @@ public:
         bool hasWorking = false;
         /// What the File View is showing: "HEAD", a short hash, "Index", "Working tree".
         QString contentLabel;
-        /// Which way a hunk or line moves. `None` for a commit's diff.
         Staging staging = Staging::None;
         /// True for the unstaged side of a working tree, where a change can also be
         /// thrown away. Discarding destroys content, so the caller confirms it.
@@ -61,10 +51,7 @@ public:
     explicit DiffView(QWidget* parent = nullptr);
 
     void show(const Document& document);
-    /// What is on screen: the document's path (empty when cleared) and its diff.
     const Document& document() const { return m_document; }
-    /// Skeleton rows over the text while the next document is being read; `show`
-    /// takes them down.
     void setLoading(bool loading);
     bool loading() const;
     void clear();
@@ -74,7 +61,6 @@ public:
     /// than merely repainted.
     void refreshTheme();
 
-    /// Chosen codec; empty means "detect it from the bytes".
     QString codec() const { return m_codec; }
     void setCodec(const QString& codec);
     /// Switches between the diff and the file's content. Used by the headless
@@ -89,8 +75,6 @@ public:
     /// Supplies the blame for the file currently shown. The window fetches it, because
     /// the viewer holds no repository.
     void setBlame(const std::vector<BlameLine>& lines);
-    /// Soft-wraps long lines instead of scrolling sideways. A toggle, not a mode: it
-    /// applies to whichever view is showing.
     bool wrapEnabled() const { return m_wrap; }
     void setWrap(bool on);
     /// Test seam: the number of rendered blocks on a split pane (0 = left, 1 = right).
@@ -111,12 +95,10 @@ public:
     /// drive them: a click cannot be delivered to an offscreen window.
     void goToNextChange();
     void goToPreviousChange();
-    /// Index of the change the cursor is on, or -1 before the first jump.
     int currentChange() const { return m_currentHunk; }
     int changeCount() const { return m_hunkHeaders.size(); }
 
 signals:
-    /// The user closed the diff: the graph should come back.
     void closeRequested();
     /// The user picked a codec. The caller remembers it: a project written in
     /// CP1251 is written in CP1251 in every file.
@@ -153,7 +135,6 @@ private:
     /// One side of the side-by-side view as HTML. The two sides are built from the
     /// same aligned rows, so a change reads across and the rows stay in step.
     QString renderSplit(bool left);
-    /// The file with a per-line provenance gutter. Empty when no blame was supplied.
     QString renderBlame() const;
     void updateHunkHeaders();
     void gotoChange(int delta);
@@ -180,7 +161,6 @@ private:
     bool m_blame = false;
     bool m_wrap = false;
     bool m_syncingScroll = false;
-    /// Blame by line number (1-based). The window fetches it; the viewer only draws it.
     QHash<int, BlameLine> m_blameByLine;
 
     ElidedLabel* m_pathLabel = nullptr;
@@ -196,11 +176,9 @@ private:
     QToolButton* m_external = nullptr;
     QToolButton* m_previous = nullptr;
     QToolButton* m_next = nullptr;
-    /// Holds the single browser (unified or file) or the splitter (side by side).
     QStackedWidget* m_pages = nullptr;
     Skeleton* m_skeleton = nullptr;
     QSplitter* m_splitter = nullptr;
-    /// The overview beside the viewer; hidden when there is nothing to mark.
     DiffMinimap* m_minimap = nullptr;
     /// A text browser, not a plain text edit: the per-hunk stage buttons are links,
     /// and a read-only browser is what makes them clickable.

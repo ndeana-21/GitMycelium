@@ -172,7 +172,6 @@ void LfsTest::trackAndUntrackEditGitattributes() {
     QVERIFY(QFile::exists(m_path + "/.gitattributes"));
     QVERIFY(readFile(m_path + "/.gitattributes").contains("filter=lfs"));
     QVERIFY(session.lfsTrackedPatterns().join(QLatin1Char(';')).contains(QStringLiteral("*.bin")));
-    // Tracking writes the file but does not stage it — committing it is the reader's.
     QVERIFY(!gitOut(m_path, {"diff", "--cached", "--name-only"}).contains(QStringLiteral(".gitattributes")));
 
     QVERIFY2(session.lfsUntrack(QStringLiteral("*.bin"), &error), qPrintable(error));
@@ -194,10 +193,8 @@ void LfsTest::lfsFilesListCommittedFiles() {
 
     const QStringList files = session.lfsFiles();
     QCOMPARE(files.size(), 1);
-    // `* <oid> <path>`: the object is present locally.
     QVERIFY2(files.first().startsWith(QStringLiteral("* ")), qPrintable(files.join(QLatin1Char(';'))));
     QVERIFY(files.first().endsWith(QStringLiteral(" blob.bin")));
-    // The commit holds a pointer, not the bytes.
     QVERIFY(gitOut(m_path, {"show", "HEAD:blob.bin"}).startsWith(QStringLiteral("version https://git-lfs")));
 }
 
@@ -222,7 +219,6 @@ void LfsTest::pushAndPullRoundTripThroughALocalRemote() {
     if (!lfsPresent()) {
         QSKIP("git-lfs is not installed");
     }
-    // A second temp dir holds the bare remote and the clone.
     QTemporaryDir sandbox;
     QVERIFY(sandbox.isValid());
     const QString bare = sandbox.path() + "/origin.git";
@@ -254,7 +250,6 @@ void LfsTest::pushAndPullRoundTripThroughALocalRemote() {
     QVERIFY2(copy.lfsInstall(&error), qPrintable(error));
     const SyncResult pulled = copy.lfsBlocking(LfsTask::Pull, QStringLiteral("origin"), {});
     QVERIFY2(pulled.ok, pulled.output.c_str());
-    // …and the pull materialises the real bytes, identical to the source.
     QCOMPARE(readFile(clone + "/blob.bin"), body);
 }
 
@@ -281,7 +276,6 @@ void LfsTest::absentGitLfsIsReportedNotThrown() {
     }
     QVERIFY(version.empty());
     QVERIFY(!install.ok);
-    // git's own words, not a throw: the caller can show them and carry on.
     QVERIFY(!install.output.empty());
 }
 

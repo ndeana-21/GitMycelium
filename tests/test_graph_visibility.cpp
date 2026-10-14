@@ -80,7 +80,6 @@ HistoryFilter hiding(const RepoSession& session, const QSet<QString>& hidden) {
     return filter;
 }
 
-/// Soloing: only the named branches (plus HEAD) stay, tags always stay.
 HistoryFilter soloing(const RepoSession& session, const QStringList& soloed) {
     HistoryFilter filter;
     filter.scope = HistoryScope::AllRefs;
@@ -277,8 +276,6 @@ void GraphVisibilityTest::theModelWalksAndLabelsTheFilteredSet() {
     model.reset();
     QTRY_COMPARE(model.rowCount(), 2);
 
-    // The hidden branch's exclusive commit is not merely unlabelled: it is not a
-    // row at all.
     QVERIFY(model.rowForCommit(gitOut(m_path, {"rev-parse", "main"})) >= 0);
     QVERIFY(model.rowForCommit(gitOut(m_path, {"rev-parse", "feature-a"})) < 0);
 
@@ -393,7 +390,6 @@ void GraphVisibilityTest::theTreeMarksHiddenBranches() {
     QVERIFY(shown->foreground().color() != theme::textDim());
     QVERIFY(head->foreground().color() != theme::textDim());
 
-    // Solo marks the same way: everything not soloed is dimmed.
     model.setVisibility({}, {QStringLiteral("feature-b")});
     QCOMPARE(refItem(model.invisibleRootItem(), QStringLiteral("feature-a"))->foreground().color(),
              theme::textDim());

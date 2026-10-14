@@ -17,7 +17,6 @@ class QNetworkReply;
 
 namespace gk::update {
 
-/// How this copy was installed, which decides whether it can replace itself.
 enum class InstallKind {
     None,      ///< built from source or unpacked from a tarball: download it by hand
     AppImage,  ///< `$APPIMAGE` names the file; it is replaced in place
@@ -26,7 +25,6 @@ enum class InstallKind {
 
 struct InstallTarget {
     InstallKind kind = InstallKind::None;
-    /// The AppImage file, or the `.app` directory.
     QString path;
 };
 
@@ -52,16 +50,13 @@ public:
 
     void check();
     void install();
-    /// Starts the installed update once this process has exited; the caller quits.
     bool restart();
 
     bool busy() const { return m_busy; }
     const std::optional<UpdateManifest>& manifest() const { return m_manifest; }
     bool updateAvailable() const;
-    /// Why `install()` cannot run, or empty when it can.
     QString installRefusal() const;
     bool installed() const { return m_installed; }
-    /// The new bundle waiting beside the running one (macOS), once installed.
     const QString& stagedBundle() const { return m_stagedBundle; }
 
 signals:

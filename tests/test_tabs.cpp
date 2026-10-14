@@ -166,18 +166,15 @@ void TabsTest::perRepositoryStateDoesNotLeak() {
     MainWindow window;
     QVERIFY(window.openRepository(m_a));
     QVERIFY(window.openRepository(m_b));
-    // Pin a branch in beta.
     const QStringList pinned =
         window.visibilityForDiagnostics(QStringLiteral("pin"), QStringLiteral("feature"));
     QVERIFY(lineText(pinned, QStringLiteral("pinned")).contains(QStringLiteral("feature")));
 
-    // Alpha must not inherit beta's pin.
     window.tabsForDiagnostics(QStringLiteral("activate"), {QStringLiteral("0")});
     const QStringList alpha =
         window.visibilityForDiagnostics(QStringLiteral("show"), QString());
     QVERIFY(!lineText(alpha, QStringLiteral("pinned")).contains(QStringLiteral("feature")));
 
-    // Switching back brings beta's own pin with it.
     window.tabsForDiagnostics(QStringLiteral("activate"), {QStringLiteral("1")});
     const QStringList betaAgain =
         window.visibilityForDiagnostics(QStringLiteral("show"), QString());
@@ -248,14 +245,12 @@ void TabsTest::closingAllTabsLeavesOneEmpty() {
 void TabsTest::theTabStripIsAboveTheMainToolbar() {
     MainWindow window;
     window.resize(900, 600);
-    // Geometry is only meaningful once the window has been laid out.
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
     auto* tabs = window.findChild<QToolBar*>(QStringLiteral("tabsToolBar"));
     auto* main = window.findChild<QToolBar*>(QStringLiteral("mainToolBar"));
     QVERIFY(tabs);
     QVERIFY(main);
-    // The "+" is a control on the strip, not a menu entry somewhere else.
     QVERIFY(window.findChild<QToolButton*>(QStringLiteral("newTabButton")));
     QVERIFY(tabs->mapTo(&window, QPoint(0, 0)).y() < main->mapTo(&window, QPoint(0, 0)).y());
 }
@@ -334,7 +329,6 @@ void TabsTest::thePlusOpensAStartPageTab() {
     QVERIFY(window.startPageForDiagnostics().join(QLatin1Char('\n'))
                 .contains(QStringLiteral("visible: yes")));
 
-    // A second "+" brings the empty tab forward instead of stacking another.
     window.tabsForDiagnostics(QStringLiteral("new"), {});
     report = window.tabsForDiagnostics(QStringLiteral("list"), {});
     QCOMPARE(lineValue(report, QStringLiteral("count")), 2);
@@ -435,7 +429,6 @@ void TabsTest::tabsAndAliasesSurviveARestart() {
     QCOMPARE(lineValue(report, QStringLiteral("active")), 1);
     QVERIFY(report.join(QLatin1Char('\n')).contains(QStringLiteral("BetaTab")));
 
-    // Only the active tab was opened at startup; the other waits for a switch.
     QCOMPARE(restored.currentBranchName(), std::string("feature"));
     QVERIFY(report.join(QLatin1Char('\n')).contains(QStringLiteral("opened=no")));
 

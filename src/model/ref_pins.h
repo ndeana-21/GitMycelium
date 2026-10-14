@@ -14,7 +14,6 @@ namespace gk {
 class RefPins {
 public:
     RefPins();
-    /// Uses `storePath` instead — how a test gets its own file.
     explicit RefPins(QString storePath);
 
     /// Loads the pins recorded for `repoPath`. A missing or unreadable file is
@@ -28,7 +27,6 @@ public:
     /// slash, so `feature` the folder and `feature` the branch stay distinct.
     void setPinned(const QString& name, bool pinned);
 
-    /// Oldest first.
     const QStringList& names() const { return m_names; }
 
     void clear();

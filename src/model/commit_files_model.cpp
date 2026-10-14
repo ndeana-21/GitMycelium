@@ -17,8 +17,6 @@ namespace {
 
 constexpr int kRowIconSide = 14;
 
-/// A file change says four things, so it needs four glyphs: a single "changed"
-/// marker forces the user to open the diff to find out which.
 struct StatusLook {
     Glyph glyph;
     QColor colour;
@@ -178,8 +176,6 @@ void CommitFilesModel::rebuild() {
     std::vector<int> order;
     order.reserve(m_files.size());
     for (std::size_t i = 0; i < m_files.size(); ++i) {
-        // A folder filter narrows the list before it is ordered or folded, so both
-        // shapes obey it and neither needs a second code path.
         if (!m_folderFilter.isEmpty() &&
             !QString::fromStdString(m_files.at(i).path).startsWith(m_folderFilter)) {
             continue;
@@ -245,7 +241,6 @@ void CommitFilesModel::rebuild() {
         }
         item->setToolTip(tip);
         if (file.kind == ChangeKind::Deleted) {
-            // A file that is gone reads as gone even before the icon is noticed.
             item->setForeground(theme::textDim());
         }
         return item;
@@ -287,8 +282,6 @@ void CommitFilesModel::rebuild() {
     }
     const PathFolder root = buildPathTree(names, order);
 
-    // A folder row: the same folder glyph the branch tree uses, so "folder" means
-    // one thing in this window.
     const std::function<void(QStandardItem*, const PathFolder&)> fill =
         [&](QStandardItem* parent, const PathFolder& folder) {
             for (const PathFolder& child : folder.folders) {

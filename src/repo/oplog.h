@@ -23,7 +23,6 @@ struct OplogEntry {
 /// pending start and written when it finally finishes, so an abort records nothing.
 class Oplog {
 public:
-    /// At most this many operations are kept; the oldest is dropped.
     static constexpr std::size_t kMaxEntries = 100;
 
     void clear();

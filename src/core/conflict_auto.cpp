@@ -115,7 +115,6 @@ bool changesFromBase(const std::vector<std::string>& base, const std::vector<std
     return true;
 }
 
-/// The lines of a side, one per line, for the trace.
 std::string joinForTrace(const std::vector<std::string>& lines) {
     std::string out;
     for (const std::string& line : lines) {
@@ -208,7 +207,6 @@ std::vector<std::string> applyBoth(const std::vector<std::string>& base,
         out.push_back(base[pos]);
         ++pos;
     }
-    // Anything left over (a change at the very end of the base).
     for (; oi < ours.size(); ++oi) {
         out.insert(out.end(), ours[oi].lines.begin(), ours[oi].lines.end());
     }

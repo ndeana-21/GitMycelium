@@ -12,13 +12,11 @@
 
 namespace gk {
 
-/// One drawn branch/tag label inside the graph's label column.
 struct RefPill {
     QRect rect;
     /// Kept here rather than recomputed by the painter, so the text cannot drift
     /// from the icon beside it.
     QRect textRect;
-    /// Null when the kind has no icon.
     QRect iconRect;
     /// The remote counterpart's cloud, when a local branch is drawn with its
     /// remote-tracking branch. Null otherwise.
@@ -34,7 +32,6 @@ struct RefPill {
     QString shortName; ///< full name, for the drag payload
     int colorIndex = 0;
     RefKind kind = RefKind::Other;
-    /// A local branch drawn with its remote-tracking counterpart at the same commit.
     bool hasRemote = false;
     bool overflow = false; ///< the "+N" badge rather than a real reference
     int hiddenCount = 0;   ///< how many labels the badge stands for

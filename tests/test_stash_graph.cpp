@@ -1,5 +1,3 @@
-/// Stashes in the graph are stashes, not commits, and what is hidden "only for me"
-/// stays out of everyone else's way.
 
 #include "git/cli.h"
 #include "git/repository.h"
@@ -100,7 +98,6 @@ private slots:
             const GraphNode* node = model->graphNodeAt(model->rowForCommit(id));
             QCOMPARE(node->type, GraphNodeType::Stash);
         }
-        // Neither stash's index commit is drawn.
         QCOMPARE(model->rowForCommit(gitOut(m_repo, {"rev-parse", "stash@{1}^2"})), -1);
     }
 
@@ -196,7 +193,6 @@ private slots:
         view.move(&over);
         QCOMPARE(view.dropTargetForDiagnostics(), QStringLiteral("topic"));
 
-        // Off the label, onto empty space: the promise is withdrawn.
         QDragMoveEvent away(QPoint(view.viewport()->width() - 5, view.viewport()->height() - 5),
                             Qt::MoveAction, mime.get(), Qt::LeftButton, Qt::NoModifier);
         view.move(&away);
@@ -252,8 +248,6 @@ private slots:
         for (const QString& path : {QStringLiteral("local.log"), QStringLiteral("a.txt")}) {
             window.ignoreForDiagnostics(path, QStringLiteral("exclude"), QStringLiteral("file"));
         }
-        // Nothing to commit for anyone: no .gitignore, nothing staged, and both gone
-        // from the status.
         QVERIFY(!QFile::exists(m_repo + QStringLiteral("/.gitignore")));
         QCOMPARE(gitOut(m_repo, {"status", "--porcelain"}), QString());
         QCOMPARE(gitOut(m_repo, {"diff", "--cached", "--name-only"}), QString());
@@ -262,7 +256,6 @@ private slots:
         QCOMPARE(session.localExcludePatterns(), QStringList{QStringLiteral("/local.log")});
         QCOMPARE(session.skipWorktreePaths(), QStringList{QStringLiteral("a.txt")});
 
-        // And both come back from the dialog's edits.
         QVERIFY(window.applyLocalIgnore({QStringLiteral("*.tmp")}, {QStringLiteral("/local.log")},
                                         {QStringLiteral("a.txt")}));
         QCOMPARE(session.localExcludePatterns(), QStringList{QStringLiteral("*.tmp")});

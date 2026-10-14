@@ -19,15 +19,12 @@ struct GitProfile {
 
 namespace profiles {
 
-/// Every profile name, in the order they were added.
 QStringList names();
-/// The profile, or an empty one when no definition carries that name.
 GitProfile load(const QString& name);
 /// Adds or replaces a profile. An empty name is refused by the caller, not here.
 void save(const GitProfile& profile);
 void remove(const QString& name);
 
-/// The profile applied to a repository, empty when none was chosen.
 QString activeFor(const QString& repositoryPath);
 void setActiveFor(const QString& repositoryPath, const QString& name);
 

@@ -56,9 +56,6 @@ DiffView::Document documentWith(int hunks) {
 
 } // namespace
 
-/// The diff viewer's own behaviour: which change the arrows land on, and which of
-/// the two views is showing. Both are things a click would drive, and a click
-/// cannot be delivered to an offscreen window.
 class DiffViewTest : public QObject {
     Q_OBJECT
 
@@ -96,8 +93,6 @@ void DiffViewTest::arrowWalksForwardAndWraps() {
     QCOMPARE(view.currentChange(), 1);
     view.goToNextChange();
     QCOMPARE(view.currentChange(), 2);
-    // Past the last one is the first one: a reader pressing "next" at the end wants
-    // the top, not a dead button.
     view.goToNextChange();
     QCOMPARE(view.currentChange(), 0);
 }
@@ -120,7 +115,6 @@ void DiffViewTest::switchingToFileViewHidesTheChanges() {
     QCOMPARE(view.changeCount(), 2);
 
     view.setFileView(true);
-    // The File View has no hunks to walk, and the arrows must not pretend it does.
     view.goToNextChange();
     QCOMPARE(view.currentChange(), -1);
 
@@ -237,8 +231,6 @@ void DiffViewTest::theMinimapMarksChangesAndHidesInTheFileView() {
     QVERIFY(view.minimapVisible());
     QVERIFY(view.minimapMarkCount() > 0);
 
-    // A file has no changes to mark, so the minimap goes away rather than show an
-    // empty bar.
     view.setFileView(true);
     QVERIFY(!view.minimapVisible());
 

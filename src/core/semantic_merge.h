@@ -5,7 +5,6 @@
 
 namespace gk {
 
-/// Outcome of a structural three-way merge of a JSON object.
 struct SemanticMergeResult {
     bool applicable = false;   ///< every input parsed as a top-level object
     bool hasConflicts = false;

@@ -13,7 +13,6 @@ namespace gk {
 /// "nothing to predict" is said out loud rather than left blank.
 QString describeMergePreview(const MergePreview& preview);
 
-/// What a branch badge can be asked to do once it has been dropped on another branch.
 enum class RefOperation {
     Rebase,
     Merge,

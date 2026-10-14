@@ -25,9 +25,6 @@ std::vector<Oid> ids(std::initializer_list<const char*> list) {
 
 } // namespace
 
-/// The rules that decide what a multi-commit selection may be asked to do. They are the
-/// difference between a rewrite that means what the reader meant and one that quietly means
-/// something else, so each of them is pinned here.
 class SelectionPlanTest : public QObject {
     Q_OBJECT
 
@@ -89,7 +86,7 @@ private slots:
         QVERIFY(!plan.canSquash);
         QVERIFY(!plan.canCherryPick);
         QCOMPARE(plan.branchCommits, ids({"b"}));
-        QVERIFY(!plan.squashRefusal.empty()); // the reason is stated, not hidden
+        QVERIFY(!plan.squashRefusal.empty());
     }
 
     void consecutiveCommitsOfThisBranchCanBeSquashed() {
@@ -98,7 +95,6 @@ private slots:
         QVERIFY(plan.canDrop);
         QVERIFY(plan.canSquash);
         QVERIFY(plan.squashRefusal.empty());
-        // Oldest first: that is the order a rewrite replays them in.
         QCOMPARE(plan.branchCommits, ids({"c", "b"}));
     }
 
@@ -126,7 +122,6 @@ private slots:
         QVERIFY(plan.canCherryPick);
         QVERIFY(!plan.canDrop);
         QVERIFY(!plan.canSquash);
-        // Oldest first again: a cherry-pick replays in the order it is handed.
         QCOMPARE(plan.pickedCommits, ids({"side2", "side"}));
     }
 

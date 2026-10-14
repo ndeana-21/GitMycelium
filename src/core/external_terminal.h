@@ -6,8 +6,6 @@
 
 namespace gk {
 
-/// A command that opens a terminal emulator in a directory. `valid` is false when no
-/// emulator was found.
 struct TerminalLaunch {
     std::string program;
     std::vector<std::string> args;

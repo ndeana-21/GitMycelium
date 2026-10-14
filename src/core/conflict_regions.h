@@ -25,7 +25,6 @@ struct ConflictRegion {
     std::vector<std::string> raw;
 };
 
-/// A run of the marked file: either plain text or one conflict region, in order.
 struct ConflictPiece {
     bool isRegion = false;
     std::vector<std::string> lines; ///< plain text when `!isRegion`
@@ -42,7 +41,6 @@ struct ConflictDocument {
 
 enum class ConflictMarker { None, Ours, Base, Split, Theirs };
 
-/// git's default marker length, and the shortest run a marker can be.
 constexpr std::size_t kDefaultConflictMarkerSize = 7;
 
 /// The length of the marker run when `line` opens a conflict block (`<<<<<<<` and
@@ -68,8 +66,6 @@ std::size_t safeConflictMarkerSize(const std::vector<std::string_view>& texts);
 /// about how to settle them.
 ConflictDocument parseConflictDocument(const std::string& marked);
 
-/// Where each region sits in our side of the file, as line numbers a reader can go to:
-/// the plain runs and the regions' our-side lines, counted in order.
 std::vector<LineSpan> oursLineSpans(const ConflictDocument& document);
 
 /// What a region's answer is. `Lines` is the per-line one: some lines of each

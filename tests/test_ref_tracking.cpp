@@ -1,11 +1,3 @@
-/// The ahead/behind badge on a branch pill.
-///
-/// Two properties matter. The badge must be *inside* the pill it widened, with no
-/// pixel shared with the name or the kind icon — a badge drawn over the text is
-/// worse than no badge. And the pill that is painted and the pill that is
-/// hit-tested must be the same rectangle: the delegate and the view are handed the
-/// four parallel lists by one model call (`refPillData`), and this pins that the
-/// tracking list reaches both with the same values.
 
 #include "git/cli.h"
 #include "model/commit_model.h"
@@ -105,7 +97,6 @@ void RefTrackingTest::init() {
     QVERIFY(git(m_path, {"commit", "-qam", "ahead 1"}));
     QVERIFY(git(m_path, {"tag", "ahead"}));
 
-    // `behind`: the upstream has a commit it lacks.
     QVERIFY(git(m_path, {"checkout", "-q", "-b", "behind", "main"}));
     trackTo(QStringLiteral("behind"), QStringLiteral("refs/remotes/origin/behind"), base);
     QVERIFY(git(m_path, {"checkout", "-q", "-b", "tmp", "main"}));
@@ -115,7 +106,6 @@ void RefTrackingTest::init() {
     QVERIFY(git(m_path, {"update-ref", "refs/remotes/origin/behind", remoteOnly}));
     QVERIFY(git(m_path, {"checkout", "-q", "behind"}));
 
-    // `main` is level with its upstream.
     trackTo(QStringLiteral("main"), QStringLiteral("refs/remotes/origin/main"), base);
 }
 
@@ -138,8 +128,6 @@ void RefTrackingTest::theBadgeWidensThePillAndSitsInsideIt() {
     const RefPill& pill = tracked.front();
     QVERIFY(pill.badgeRect.isValid());
     QCOMPARE(pill.trackingText, QStringLiteral("\u2191"));
-    // The badge is not free: the pill that carries one is wider than the same pill
-    // without it.
     QVERIFY(pill.rect.width() > plain.front().rect.width());
     QVERIFY(pill.rect.contains(pill.badgeRect));
     QVERIFY2(pill.badgeRect.left() > pill.textRect.right(),
@@ -150,14 +138,12 @@ void RefTrackingTest::theBadgeWidensThePillAndSitsInsideIt() {
     QVERIFY(pill.iconRect.isValid());
     QVERIFY(pill.badgeRect.right() < pill.iconRect.left());
 
-    // The badge belongs to the pill: a click on it resolves the branch.
     const RefPill* hit = RefPillLayout::hitTest(tracked, pill.badgeRect.center());
     QVERIFY(hit != nullptr);
     QCOMPARE(hit->shortName, QStringLiteral("main"));
 }
 
 void RefTrackingTest::bothDirectionsDrawBothArrows() {
-    // The one spelling of the badge, shared by the layout and the reveal overlay.
     QCOMPARE(RefPillLayout::trackingText(1), QStringLiteral("\u2191"));
     QCOMPARE(RefPillLayout::trackingText(2), QStringLiteral("\u2193"));
     QCOMPARE(RefPillLayout::trackingText(3), QStringLiteral("\u2191\u2193"));
@@ -224,7 +210,6 @@ void RefTrackingTest::theModelFillsTrackingFromTheRefMetaSnapshot() {
     model.reset();
     QTRY_VERIFY(model.rowCount() >= 1);
 
-    // The metadata comes back on a worker and is delivered by a queued signal.
     QTRY_COMPARE(model.refTrackingFlags(QStringLiteral("ahead")), 1);
     QCOMPARE(model.refTrackingFlags(QStringLiteral("behind")), 2);
     QCOMPARE(model.refTrackingFlags(QStringLiteral("main")), 0);
@@ -233,8 +218,6 @@ void RefTrackingTest::theModelFillsTrackingFromTheRefMetaSnapshot() {
     const int row = model.rowForCommit(gitOut(m_path, {"rev-parse", "refs/heads/ahead"}));
     QVERIFY(row >= 0);
     const CommitModel::RefPillData data = model.refPillData(row);
-    // The four lists are parallel: a caller that reads them positionally cannot
-    // pair a colour with the wrong name.
     QCOMPARE(data.labels.size(), data.colors.size());
     QCOMPARE(data.labels.size(), data.kinds.size());
     QCOMPARE(data.labels.size(), data.trackings.size());
@@ -279,8 +262,6 @@ void RefTrackingTest::theModelFillsTrackingFromTheRefMetaSnapshot() {
         QCOMPARE(viaView.at(i).badgeRect, direct.at(i).badgeRect);
     }
 
-    // The branch pill carries the arrow through the view's own path, and the tag does
-    // not.
     const auto branchPill = std::find_if(viaView.begin(), viaView.end(), [](const RefPill& p) {
         return p.trackingText == QStringLiteral("\u2191");
     });

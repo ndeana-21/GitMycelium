@@ -18,16 +18,6 @@ enum class Glyph;
 /// Payload: "fullName|shortName|target|kind" — see RefModel::mimeData().
 inline constexpr const char* kRefMimeType = "application/x-gitmycelium-ref";
 
-/// Tree of references that supports dragging a ref onto another ref.
-///
-/// The list is grouped first by kind (Pinned / Local / Remote / Tags) and then by
-/// the name's own slashes: `feature/conflict-a` lives in a `feature` folder. A
-/// chain of folders that each hold nothing but the next folder is shown as one
-/// row, so a branch called `origin/feature/wip` does not cost three levels.
-///
-/// The model only reports the *intent* of a drop; MainWindow decides which
-/// operation to run, because merge/rebase need a confirmation the model has no
-/// business showing.
 class RefModel : public QStandardItemModel {
     Q_OBJECT
 
@@ -37,7 +27,6 @@ public:
     /// anything.
     enum ItemType { SectionItem = 0, FolderItem, RefItem, StashItem, WorktreeItem, SubmoduleItem };
 
-    /// Rows carry these roles; the payload of a drag is built from them.
     enum Role {
         FullNameRole = Qt::UserRole,
         TargetRole,
@@ -74,12 +63,8 @@ public:
     /// which is why they are handed in beside the refs rather than as `RefInfo`s.
     void setStashes(const QStringList& messages, const QStringList& oids);
 
-    /// Replaces the worktrees section. One flat row per worktree; the current one
-    /// is marked, and a locked one says so. Empty hides the section.
     void setWorktrees(const std::vector<WorktreeEntry>& worktrees);
 
-    /// Replaces the submodules section. One row per submodule, ordered by path;
-    /// a nested one shows its full path. Empty hides the section.
     void setSubmodules(const std::vector<SubmoduleEntry>& submodules);
 
     void setHeadBranch(const QString& branch);
@@ -147,7 +132,6 @@ public:
     /// encoding — they only ever hand back what they were given.
     static QMimeData* mimeDataForRef(const RefInfo& ref);
 
-    /// Drag payload for a model index, or nullptr for a section or folder.
     static QMimeData* mimeDataForIndex(const QModelIndex& index);
 
 signals:
@@ -155,14 +139,10 @@ signals:
 
 private:
     void appendSection(const QString& title, RefKind kind);
-    /// Adds the Stash section, one flat row per entry. No folders: a stash subject
-    /// is prose, not a path.
     void appendStashes();
     /// Adds the Worktrees section, one flat row per linked working tree. Hidden
     /// when there is only the main worktree — the section would say "you are here".
     void appendWorktrees();
-    /// Adds the Submodules section, one flat row per submodule (full path, so a
-    /// nested one reads where it lives). Hidden when the repository has none.
     void appendSubmodules();
     void appendPinned();
     void appendFolderContents(QStandardItem* parentItem, const PathFolder& folder,
@@ -175,8 +155,6 @@ private:
     QStandardItem* makeRefItem(const RefInfo& ref, const QString& label) const;
 
     bool matches(const QString& name) const;
-    /// True when this reference is shown somewhere else because it, or a folder
-    /// above it, is pinned.
     bool isMovedToPinned(const RefInfo& ref) const;
     bool isGraphHidden(const RefInfo& ref) const;
 

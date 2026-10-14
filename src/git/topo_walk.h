@@ -16,7 +16,6 @@ struct WalkCommit {
     std::int64_t time = 0;
 };
 
-/// Reads the parents and the committer date out of a raw commit object.
 bool parseCommitHeader(const char* data, std::size_t size, WalkCommit& out);
 
 /// `git rev-list --topo-order`, one commit at a time.
@@ -44,7 +43,6 @@ public:
     void start(const std::vector<RawOid>& tips, const std::vector<RawOid>& firstParentOnly = {});
     bool next(RawOid& id);
 
-    /// Commits the graph did not hold, which the walk had to read one by one.
     std::size_t readOutsideGraph() const { return m_extras.size(); }
 
 private:
