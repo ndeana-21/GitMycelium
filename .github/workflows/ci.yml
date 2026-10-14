@@ -157,6 +157,21 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+      # ctest shows nothing of a failed test here, so each failure runs again with
+      # QtTest writing to a file.
+      - name: Show failed tests
+        if: failure()
+        run: |
+          export GIT_CONFIG_GLOBAL="$PWD/build/tests/gitconfig" GIT_CONFIG_NOSYSTEM=1 QT_QPA_PLATFORM=offscreen
+          export PATH="$QT_ROOT_DIR/bin:$RUNNER_TEMP/libgit2/bin:$PATH"
+          for name in $(cut -d: -f2 build/Testing/Temporary/LastTestsFailed.log); do
+            exe=build/tests/$name.exe
+            [ -e "$exe" ] || exe=build/tests/test_$name.exe
+            "$exe" -o "$name.txt,txt" || true
+            echo "=== $name"
+            grep -vE '^(PASS|QDEBUG|QINFO)' "$name.txt" || true
+          done
+
       - name: Package the folder
         run: |
           set -euo pipefail
