@@ -4,7 +4,7 @@ All notable changes to GitMycelium are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.2.1] - 2026-10-14
 
 ### Added
 
@@ -23,6 +23,12 @@ All notable changes to GitMycelium are recorded here. The format follows
   executable when the file system said so.
 - With `GIT_CONFIG_NOSYSTEM` set, libgit2 still read the system git config that the
   git binary skipped, so the two could disagree (on Windows about line endings).
+
+### Downloads
+
+- **Linux x86_64:** `GitMycelium-1.2.1-x86_64.AppImage`.
+- **macOS (Apple Silicon):** `GitMycelium-1.2.1-arm64.dmg`.
+- **Windows x86_64:** `GitMycelium-1.2.1-windows-x86_64.zip`.
 
 ## [1.2.0] - 2026-10-14
 
