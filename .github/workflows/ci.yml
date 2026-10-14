@@ -140,7 +140,8 @@ jobs:
         if: steps.libgit2-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          curl -fsSL "https://github.com/libgit2/libgit2/archive/refs/tags/v${LIBGIT2_VERSION}.tar.gz" | tar xz
+          curl -fsSL "https://github.com/libgit2/libgit2/archive/refs/tags/v${LIBGIT2_VERSION}.tar.gz" \
+            | tar xz --exclude='*/tests'
           cmake -S "libgit2-${LIBGIT2_VERSION}" -B libgit2-build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/libgit2" \
             -DBUILD_TESTS=OFF -DBUILD_CLI=OFF -DUSE_HTTPS=OFF -DUSE_SSH=OFF
