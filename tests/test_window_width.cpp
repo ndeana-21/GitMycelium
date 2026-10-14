@@ -104,6 +104,9 @@ void WindowWidthTest::openingALongPathKeepsTheWidth() {
     window.showDiffPage();
     QTest::qWait(50);
     const int before = window.minimumSizeHint().width();
+    // Not 1000: where the platform's fonts are missing (offscreen on Windows) the
+    // window already opens a pixel wider. The claim is that the path does not move it.
+    const int widthBefore = window.width();
     QSplitter* history = columns(window);
     QVERIFY(history);
     const QList<int> sizesBefore = history->sizes();
@@ -111,7 +114,7 @@ void WindowWidthTest::openingALongPathKeepsTheWidth() {
     emit details->fileSelected(m_longPath, false);
     QTest::qWait(50);
     QCOMPARE(window.minimumSizeHint().width(), before);
-    QCOMPARE(window.width(), 1000);
+    QCOMPARE(window.width(), widthBefore);
     QCOMPARE(history->sizes(), sizesBefore);
 }
 

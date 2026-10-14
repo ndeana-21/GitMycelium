@@ -164,7 +164,7 @@ jobs:
         run: |
           export GIT_CONFIG_GLOBAL="$PWD/build/tests/gitconfig" GIT_CONFIG_NOSYSTEM=1 QT_QPA_PLATFORM=offscreen
           export PATH="$QT_ROOT_DIR/bin:$RUNNER_TEMP/libgit2/bin:$PATH"
-          for name in $(cut -d: -f2 build/Testing/Temporary/LastTestsFailed.log); do
+          for name in $(cut -d: -f2 build/Testing/Temporary/LastTestsFailed.log | tr -d '\r'); do
             exe=build/tests/$name.exe
             [ -e "$exe" ] || exe=build/tests/test_$name.exe
             "$exe" -o "$name.txt,txt" || true

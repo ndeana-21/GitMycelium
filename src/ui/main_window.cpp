@@ -6545,7 +6545,7 @@ void MainWindow::savePatchForCommit(const QString& commitId) {
     }
 
     QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text) ||
+    if (!file.open(QIODevice::WriteOnly) ||
         file.write(patch.toUtf8()) < 0) {
         QMessageBox::warning(this, QStringLiteral("Create patch"),
                              QStringLiteral("Cannot write %1.").arg(path));

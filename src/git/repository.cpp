@@ -3642,18 +3642,18 @@ void Repository::rewriteHistory(const Oid& upstream, const std::vector<RewriteSt
         plan += std::string(action) + " " + step.commit;
         if (step.action == RewriteAction::Reword) {
             const std::string messageName = "msg-" + std::to_string(index);
-            std::ofstream(temp / messageName) << step.message;
+            std::ofstream(temp / messageName, std::ios::binary) << step.message;
             plan += " " + messageName;
         }
         plan += "\n";
     }
-    std::ofstream(temp / "plan") << plan;
+    std::ofstream(temp / "plan", std::ios::binary) << plan;
 
     // The sequence editor rebuilds the todo from the plan, in the plan's order. Full
     // hashes go into the todo; git resolves them. An `exec` line names its scripts through
     // `git rev-parse --git-path`, never by absolute path: the todo is run by the shell,
     // and a repository path holding a quote or a `$` would be read as shell syntax.
-    std::ofstream(temp / "sequence-editor") << R"SH(#!/bin/sh
+    std::ofstream(temp / "sequence-editor", std::ios::binary) << R"SH(#!/bin/sh
 plan="${0%/*}/plan"
 dir=gitmycelium-rewrite
 out="$1.new"
@@ -3678,13 +3678,13 @@ mv "$out" "$1"
 
     // Applies a message to the commit just replayed. A reword runs it from the todo; the
     // message is an argument, so nothing about it has to survive quoting.
-    std::ofstream(temp / "set-message") << R"(#!/bin/sh
+    std::ofstream(temp / "set-message", std::ios::binary) << R"(#!/bin/sh
 git commit --amend --only -F "$1" >/dev/null
 )";
 
     // The editor git opens on a message. A squash has the combined message git prepared,
     // which is what a reader expects, and a fixup does not open this at all.
-    std::ofstream(temp / "message-editor") << R"(#!/bin/sh
+    std::ofstream(temp / "message-editor", std::ios::binary) << R"(#!/bin/sh
 true
 )";
 
@@ -4204,7 +4204,7 @@ void Repository::amendStoppedCommit(const std::string& message) {
         std::error_code ec;
         std::filesystem::create_directories(temp, ec);
         const std::filesystem::path messageFile = temp / "amend-message";
-        std::ofstream(messageFile) << message;
+        std::ofstream(messageFile, std::ios::binary) << message;
         args.push_back("-F");
         args.push_back(messageFile.string());
     }
