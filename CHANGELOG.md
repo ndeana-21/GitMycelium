@@ -4,7 +4,7 @@ All notable changes to GitMycelium are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.2.0] - 2026-10-14
 
 ### Added
 
@@ -76,6 +76,11 @@ All notable changes to GitMycelium are recorded here. The format follows
 - The selection halo of a commit in the first lane was cut off on the left.
 - A stash of new files showed no files: they live in the stash's third parent.
 - Stash and Pop are greyed out when there is nothing to stash or pop.
+
+### Downloads
+
+- **Linux x86_64:** `GitMycelium-1.2.0-x86_64.AppImage`.
+- **macOS (Apple Silicon):** `GitMycelium-1.2.0-arm64.dmg`.
 
 ## [1.1.2] - 2026-10-13
 
