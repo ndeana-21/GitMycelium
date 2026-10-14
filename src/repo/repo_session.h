@@ -548,6 +548,10 @@ public:
     /// Writes a file, so it is guarded, not recorded: the operation log restores
     /// pointers and cannot un-write a `.gitignore`.
     bool ignorePath(const QString& pattern, bool globalExclude, QString* errorOut);
+    QStringList localExcludePatterns() const;
+    bool removeLocalExcludePattern(const QString& pattern, QString* errorOut);
+    QStringList skipWorktreePaths() const;
+    bool setSkipWorktree(const QStringList& paths, bool skip, QString* errorOut);
     /// Removes every tracked path matching a pathspec from the index, leaving the
     /// files on disk.
     bool untrackPathspec(const QString& pathspec, QString* errorOut);

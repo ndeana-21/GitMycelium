@@ -371,6 +371,9 @@ public:
 
     /// Hides, solos, pins or shows-all a branch, reporting what the graph is left showing.
     QStringList visibilityForDiagnostics(const QString& operation, const QString& branch);
+    /// Writes the Local Ignore Rules dialog's edits (also its test seam).
+    bool applyLocalIgnore(const QStringList& added, const QStringList& removed,
+                          const QStringList& unhidden);
 
 protected:
     /// The repository can be changed from outside — a commit in a terminal, a fetch
@@ -401,6 +404,7 @@ private slots:
     void onCommitContextMenu(const QString& commitId, const QPoint& globalPos);
     /// Keys the entries in QAction::data(); nothing is shown or executed here.
     void buildCommitMenu(QMenu& menu, const QString& commitId) const;
+    bool isStashCommit(const QString& commitId) const;
     void dispatchCommitMenuAction(const QString& key, const QString& commitId);
     void refreshRefs();
 
@@ -431,6 +435,7 @@ private:
     void onExternalToolFinished(bool ok, const QString& output, const QString& title, bool refresh);
     void openTerminal();
     void openHooks();
+    void openLocalIgnore();
     /// Writes the chosen trailers back into the commit message, so the field always
     /// shows what will be committed.
     void onCoauthorsRequested();
@@ -901,6 +906,7 @@ private:
     QStackedWidget* m_centerStack = nullptr;
     QAction* m_refsAction = nullptr;
     QAction* m_detailsAction = nullptr;
+    QAction* m_mergedRemotesAction = nullptr;
     PanelSplitter* m_history = nullptr;
     /// Set while the window folds or unfolds a panel itself (the diff page hides the
     /// branch rail), so that is not mistaken for the reader's choice.

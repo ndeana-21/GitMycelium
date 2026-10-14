@@ -542,6 +542,47 @@ void buildCommitDiff(git_repository* repo, const Oid& commitId,
     diffTrees(repo, out.parentTree, out.tree, paths, &out.diff);
 }
 
+/// Every stash, newest first (`stash@{0}`, `stash@{1}`, …): `refs/stash` names only
+/// the newest, the others live in its reflog.
+std::vector<git_oid> stashEntries(git_repository* repo) {
+    std::vector<git_oid> out;
+    git_reflog* log = nullptr;
+    if (git_reflog_read(&log, repo, "refs/stash") != 0) {
+        return out;
+    }
+    const std::size_t count = git_reflog_entrycount(log);
+    for (std::size_t i = 0; i < count; ++i) {
+        if (const git_reflog_entry* entry = git_reflog_entry_byindex(log, i)) {
+            out.push_back(*git_reflog_entry_id_new(entry));
+        }
+    }
+    git_reflog_free(log);
+    return out;
+}
+
+/// The tree of a stash's untracked files (its third parent), or null when the
+/// commit is not a stash or kept none. A stash made with untracked files holds them
+/// only there: diffing the stash against HEAD alone shows nothing for them.
+git_tree* stashUntrackedTree(git_repository* repo, git_commit* commit) {
+    if (git_commit_parentcount(commit) != 3) {
+        return nullptr;
+    }
+    const git_oid* id = git_commit_id(commit);
+    const std::vector<git_oid> stashes = stashEntries(repo);
+    if (std::none_of(stashes.begin(), stashes.end(),
+                     [id](const git_oid& stash) { return git_oid_equal(&stash, id) != 0; })) {
+        return nullptr;
+    }
+    git_commit* untracked = nullptr;
+    if (git_commit_parent(&untracked, commit, 2) != 0) {
+        return nullptr;
+    }
+    git_tree* tree = nullptr;
+    git_commit_tree(&tree, untracked);
+    git_commit_free(untracked);
+    return tree;
+}
+
 void fillFromPatch(git_patch* patch, FileDiff& out) {
     const std::size_t hunkCount = git_patch_num_hunks(patch);
     for (std::size_t hi = 0; hi < hunkCount; ++hi) {
@@ -1043,6 +1084,16 @@ std::vector<TopoWalk::RawOid> Repository::walkStarts(const HistoryFilter& filter
     for (const auto& entry : named) {
         tips.push_back(entry.second);
     }
+    // `refs/stash` is only the newest stash; the older ones are drawn too.
+    if (!m_walkStashes.empty()) {
+        const std::vector<git_oid> stashes = stashEntries(m_repo);
+        for (std::size_t i = 1; i < stashes.size(); ++i) {
+            TopoWalk::RawOid id;
+            std::memcpy(id.data(), stashes[i].id, id.size());
+            m_walkStashes.push_back(id);
+            tips.push_back(id);
+        }
+    }
     git_reference* head = nullptr;
     if (git_repository_head(&head, m_repo) == 0) {
         TopoWalk::RawOid id;
@@ -1153,6 +1204,15 @@ std::unordered_map<std::string, std::vector<RefInfo>> Repository::refsByCommit(
             }
         }
         out[commitId].push_back(ref);
+    }
+    // The older stashes are labelled like the newest, `stash@{n}`.
+    if (visible(RefInfo{"refs/stash", "stash", RefKind::Other, {}})) {
+        const std::vector<git_oid> stashes = stashEntries(m_repo);
+        for (std::size_t i = 1; i < stashes.size(); ++i) {
+            const std::string id = oidToString(&stashes[i]);
+            out[id].push_back(RefInfo{"refs/stash@{" + std::to_string(i) + "}",
+                                      "stash@{" + std::to_string(i) + "}", RefKind::Other, id});
+        }
     }
 
     // Local branches first, then remotes, then tags — the order the labels are
@@ -1499,6 +1559,101 @@ void Repository::addIgnorePattern(const std::string& pattern, bool globalExclude
     }
 }
 
+namespace {
+
+std::filesystem::path localExcludeFile(const RepoInfo& repositoryInfo) {
+    if (repositoryInfo.commonDir.empty()) {
+        fail("cannot find the git directory for the exclude file");
+    }
+    return std::filesystem::path(repositoryInfo.commonDir) / "info" / "exclude";
+}
+
+std::string readWhole(const std::filesystem::path& file) {
+    std::string text;
+    if (std::filesystem::exists(file)) {
+        std::ifstream in(file, std::ios::binary);
+        text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    return text;
+}
+
+} // namespace
+
+std::vector<std::string> Repository::localExcludePatterns() const {
+    std::vector<std::string> out;
+    std::istringstream lines(readWhole(localExcludeFile(info())));
+    std::string line;
+    while (std::getline(lines, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        if (!line.empty() && line.front() != '#') {
+            out.push_back(line);
+        }
+    }
+    return out;
+}
+
+void Repository::removeLocalExcludePattern(const std::string& pattern) {
+    const std::filesystem::path file = localExcludeFile(info());
+    std::istringstream lines(readWhole(file));
+    std::string kept;
+    std::string line;
+    while (std::getline(lines, line)) {
+        std::string bare = line;
+        if (!bare.empty() && bare.back() == '\r') {
+            bare.pop_back();
+        }
+        if (bare != pattern) {
+            kept += line + '\n';
+        }
+    }
+    std::ofstream out(file, std::ios::binary | std::ios::trunc);
+    out << kept;
+    if (!out) {
+        fail("cannot write " + file.string());
+    }
+}
+
+std::vector<std::string> Repository::skipWorktreePaths() const {
+    std::vector<std::string> out;
+    const std::string workDir = info().workDir;
+    if (workDir.empty()) {
+        return out;
+    }
+    // `-v` tags each entry; `S` is skip-worktree. `-z` so a path is a path.
+    const ProcessResult run = runGit({"ls-files", "-v", "-z"}, workDir);
+    if (run.exitCode != 0) {
+        fail("cannot list the index: " + failureText(run));
+    }
+    std::size_t start = 0;
+    while (start < run.out.size()) {
+        std::size_t end = run.out.find('\0', start);
+        if (end == std::string::npos) {
+            end = run.out.size();
+        }
+        if (end - start > 2 && run.out[start] == 'S' && run.out[start + 1] == ' ') {
+            out.emplace_back(run.out, start + 2, end - start - 2);
+        }
+        start = end + 1;
+    }
+    return out;
+}
+
+void Repository::setSkipWorktree(const std::vector<std::string>& paths, bool skip) {
+    const std::string workDir = info().workDir;
+    if (workDir.empty() || paths.empty()) {
+        return;
+    }
+    std::vector<std::string> args{"update-index", skip ? "--skip-worktree" : "--no-skip-worktree",
+                                  "--"};
+    args.insert(args.end(), paths.begin(), paths.end());
+    const ProcessResult run = runGit(args, workDir);
+    if (run.exitCode != 0) {
+        fail(failureText(run));
+    }
+}
+
 void Repository::untrackPathspec(const std::string& pathspec) {
     const RepoInfo repositoryInfo = info();
     if (repositoryInfo.workDir.empty()) {
@@ -1716,7 +1871,16 @@ std::vector<ChangedFile> Repository::changedFiles(const Oid& commitId) const {
     }
     CommitDiff cd;
     buildCommitDiff(m_repo, commitId, {}, cd);
-    return changedFilesFromDiff(cd.diff);
+    std::vector<ChangedFile> out = changedFilesFromDiff(cd.diff);
+    if (git_tree* untracked = stashUntrackedTree(m_repo, cd.commit)) {
+        git_diff* added = nullptr;
+        diffTrees(m_repo, nullptr, untracked, {}, &added);
+        std::vector<ChangedFile> more = changedFilesFromDiff(added);
+        out.insert(out.end(), more.begin(), more.end());
+        git_diff_free(added);
+        git_tree_free(untracked);
+    }
+    return out;
 }
 
 FileDiff Repository::commitFileDiff(const Oid& commitId, const std::string& path) const {
@@ -1729,6 +1893,16 @@ FileDiff Repository::commitFileDiff(const Oid& commitId, const std::string& path
     }
     CommitDiff cd;
     buildCommitDiff(m_repo, commitId, {path}, cd);
+    if (git_diff_num_deltas(cd.diff) == 0) {
+        if (git_tree* untracked = stashUntrackedTree(m_repo, cd.commit)) {
+            git_diff* added = nullptr;
+            diffTrees(m_repo, nullptr, untracked, {path}, &added);
+            FileDiff result = fileDiffFromDiff(added, path);
+            git_diff_free(added);
+            git_tree_free(untracked);
+            return result;
+        }
+    }
     return fileDiffFromDiff(cd.diff, path);
 }
 

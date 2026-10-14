@@ -16,6 +16,13 @@ All notable changes to GitMycelium are recorded here. The format follows
 - **Side panels fold from a button.** The handle beside each side panel carries an
   arrow that folds the panel away and brings it back; a folded panel leaves its
   handle at the window edge. View → Details panel joins View → Branches panel.
+- **Local ignore rules.** "Ignore… → Only for me" hides a file without touching the
+  shared `.gitignore`: an untracked path goes into `.git/info/exclude`, a tracked
+  file is hidden with skip-worktree (nothing is staged for anyone). Repository →
+  Local Ignore Rules… lists both and adds or removes them.
+- **Dragging a branch shows where it will land.** The label under the pointer
+  pulses, with what releasing there offers beside it.
+- Toolbar buttons are named under their icons.
 
 ### Changed
 
@@ -26,7 +33,13 @@ All notable changes to GitMycelium are recorded here. The format follows
   meet; a branch cut from it bends into it at the fork instead of the trunk
   appearing to branch off the checked-out line.
 - A stash is one node in the graph: the commits git keeps the index and the
-  untracked files in are no longer drawn beside it.
+  untracked files in are no longer drawn beside it. Every stash is drawn, not only
+  the newest, and a stash is not a commit: its menu offers apply, pop and delete,
+  and branches cannot be dropped on it or dragged from it.
+- Remote branches whose tip is a commit on the main branch's own line (a release
+  branch cut at a merge, a branch merged by fast-forward) no longer hang labels on
+  the main branch; they stay in the branch tree. View → Show Merged Remote
+  Branches brings the labels back.
 - The hover list behind `+N` names a local branch once, with the cloud, instead of
   listing its `origin/` twin as another branch.
 
@@ -61,6 +74,8 @@ All notable changes to GitMycelium are recorded here. The format follows
 - A hover badge on a commit of a merged (and deleted) branch named the branch it
   was merged into; it now names only the line the commit is drawn on.
 - The selection halo of a commit in the first lane was cut off on the left.
+- A stash of new files showed no files: they live in the stash's third parent.
+- Stash and Pop are greyed out when there is nothing to stash or pop.
 
 ## [1.1.2] - 2026-10-13
 

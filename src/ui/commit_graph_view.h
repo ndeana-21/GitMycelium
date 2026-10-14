@@ -11,6 +11,7 @@
 #include <QPoint>
 #include <QPixmap>
 #include <QTreeView>
+#include <QVariantAnimation>
 #include <QVector>
 
 #include <set>
@@ -102,6 +103,8 @@ public:
     /// where a frame caught mid-fade would make the output non-deterministic.
     void setAnimationsEnabled(bool on);
     bool animationsEnabled() const { return m_animationsEnabled; }
+    /// The branch a drag in flight would land on if released now; empty otherwise.
+    QString dropTargetForDiagnostics() const { return m_dropTarget; }
 
     /// Called when a repository is opened, so the first page is the starting point
     /// rather than a change from nothing.
@@ -175,6 +178,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
     void startDrag(Qt::DropActions supportedActions) override;
     void dragMoveEvent(QDragMoveEvent* event) override;
+    void dragLeaveEvent(QDragLeaveEvent* event) override;
     void dropEvent(QDropEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
     void hideEvent(QHideEvent* event) override;
@@ -315,6 +319,13 @@ private:
     QString m_dropPreview;
     bool m_dropPreviewWarns = false;
 
+    /// The branch label under a dragged branch: outlined and pulsing, with what
+    /// releasing would offer, so the drop's target is never a guess.
+    void setDropTarget(const QString& name, const QRect& pill);
+    void paintDropTarget(QPainter& painter);
+    QString m_dropTarget;
+    QRect m_dropTargetRect;
+    QVariantAnimation* m_dropPulse = nullptr;
 };
 
 } // namespace gk

@@ -135,6 +135,8 @@ add_library(gmc_ui STATIC
     ui/grip_splitter.h
     ui/panel_splitter.cpp
     ui/panel_splitter.h
+    ui/local_ignore_dialog.cpp
+    ui/local_ignore_dialog.h
     ui/file_history_dialog.cpp
     ui/reflog_dialog.cpp
     ui/reflog_dialog.h

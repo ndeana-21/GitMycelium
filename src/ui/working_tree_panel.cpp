@@ -412,7 +412,7 @@ void WorkingTreePanel::showContextMenu(Section& section, const QPoint& pos) {
             ->setData(QStringList{scope, QStringLiteral("dir")});
     };
     addScope(QStringLiteral("In .gitignore"), QStringLiteral("gitignore"));
-    addScope(QStringLiteral("In .git/info/exclude"), QStringLiteral("exclude"));
+    addScope(QStringLiteral("Only for me (.git/info/exclude)"), QStringLiteral("exclude"));
 
     QAction* chosen = menu.exec(section.view->viewport()->mapToGlobal(pos));
     if (!chosen) {

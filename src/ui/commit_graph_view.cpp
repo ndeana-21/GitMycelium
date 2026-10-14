@@ -718,6 +718,7 @@ void CommitGraphView::paintEvent(QPaintEvent* event) {
     QPainter hoverPainter(viewport());
     paintHoverExpansion(hoverPainter);
     paintGhostBadge(hoverPainter);
+    paintDropTarget(hoverPainter);
 
     if (!m_flight.lifted()) {
         return;
@@ -1598,8 +1599,9 @@ void CommitGraphView::startDrag(Qt::DropActions supportedActions) {
     } else {
         ref = refAt(m_pressPos, &shortName);
     }
-    if (!ref) {
-        // Not on a label: no drag. A half-working drag is worse than none.
+    if (!ref || ref->fullName.rfind("refs/stash", 0) == 0) {
+        // Not on a label: no drag. A half-working drag is worse than none. A stash
+        // is not a branch: nothing merges it, rebases it or moves it by dropping.
         return;
     }
 
@@ -1637,20 +1639,113 @@ void CommitGraphView::dragMoveEvent(QDragMoveEvent* event) {
     }
 
     QString target;
-    const RefInfo* ref = refAt(event->position().toPoint(), &target);
+    const QPoint pos = event->position().toPoint();
+    const RefInfo* ref = refAt(pos, &target);
+    if (ref && ref->fullName.rfind("refs/stash", 0) == 0) {
+        // Nothing merges into or rebases onto a stash.
+        setDropTarget(QString(), QRect());
+        event->ignore();
+        return;
+    }
     if (ref) {
         if (target == source) {
+            setDropTarget(QString(), QRect());
             event->ignore();
             return;
         }
-    } else if (!indexAt(event->position().toPoint()).isValid()) {
-        event->ignore();
-        return;
+        QRect pillRect;
+        if (const QModelIndex row = indexAt(pos); row.isValid()) {
+            for (const RefPill& pill : rowPills(row.row())) {
+                if (pill.shortName == target) {
+                    pillRect = pill.rect;
+                }
+            }
+        }
+        setDropTarget(target, pillRect);
+    } else {
+        setDropTarget(QString(), QRect());
+        if (!indexAt(pos).isValid()) {
+            event->ignore();
+            return;
+        }
     }
     event->acceptProposedAction();
 }
 
+void CommitGraphView::dragLeaveEvent(QDragLeaveEvent* event) {
+    setDropTarget(QString(), QRect());
+    QTreeView::dragLeaveEvent(event);
+}
+
+void CommitGraphView::setDropTarget(const QString& name, const QRect& pill) {
+    if (name == m_dropTarget && pill == m_dropTargetRect) {
+        return;
+    }
+    m_dropTarget = name;
+    m_dropTargetRect = name.isEmpty() ? QRect() : pill;
+    if (!m_dropPulse) {
+        m_dropPulse = new QVariantAnimation(this);
+        m_dropPulse->setStartValue(0.0);
+        m_dropPulse->setKeyValueAt(0.5, 1.0);
+        m_dropPulse->setEndValue(0.0);
+        m_dropPulse->setDuration(900);
+        m_dropPulse->setLoopCount(-1);
+        m_dropPulse->setEasingCurve(QEasingCurve::InOutSine);
+        connect(m_dropPulse, &QVariantAnimation::valueChanged, this,
+                [this] { viewport()->update(); });
+    }
+    if (m_dropTargetRect.isNull()) {
+        m_dropPulse->stop();
+    } else if (m_animationsEnabled && m_dropPulse->state() != QAbstractAnimation::Running) {
+        m_dropPulse->start();
+    }
+    viewport()->update();
+}
+
+void CommitGraphView::paintDropTarget(QPainter& painter) {
+    if (m_dropTargetRect.isNull()) {
+        return;
+    }
+    const qreal pulse =
+        m_dropPulse && m_dropPulse->state() == QAbstractAnimation::Running
+            ? m_dropPulse->currentValue().toReal()
+            : 1.0;
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    // A halo that breathes around the label: this is where the branch will land.
+    QColor glow = theme::accent();
+    glow.setAlphaF(0.18 + 0.22 * pulse);
+    const qreal spread = 2.0 + 3.0 * pulse;
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(glow);
+    painter.drawRoundedRect(QRectF(m_dropTargetRect).adjusted(-spread, -spread, spread, spread),
+                            4 + spread, 4 + spread);
+    QPen outline(theme::accent(), 2.0);
+    painter.setPen(outline);
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRoundedRect(QRectF(m_dropTargetRect).adjusted(-1.5, -1.5, 1.5, 1.5), 4, 4);
+
+    // What releasing here offers, beside the label.
+    const QString hint = QStringLiteral("Release: merge / rebase onto %1").arg(m_dropTarget);
+    const QFont font = theme::labelFont();
+    const QFontMetrics metrics(font);
+    QRect box(m_dropTargetRect.right() + 8, m_dropTargetRect.top(),
+              metrics.horizontalAdvance(hint) + 12, m_dropTargetRect.height());
+    if (box.right() > viewport()->width() - 2) {
+        box.moveRight(viewport()->width() - 2);
+        box.moveTop(m_dropTargetRect.bottom() + 4);
+    }
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(theme::surfaceAlt());
+    painter.drawRoundedRect(box, 3, 3);
+    painter.setPen(theme::accent());
+    painter.setFont(font);
+    painter.drawText(box, Qt::AlignCenter, hint);
+    painter.restore();
+}
+
 void CommitGraphView::dropEvent(QDropEvent* event) {
+    setDropTarget(QString(), QRect());
     // The menu for this drop opens where the drop is. The cursor position is not a
     // reliable answer while a drag is in flight.
     rememberDropPoint(viewport()->mapToGlobal(event->position().toPoint()));

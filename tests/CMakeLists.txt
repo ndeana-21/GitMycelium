@@ -392,6 +392,10 @@ add_executable(test_window_width test_window_width.cpp ${CMAKE_SOURCE_DIR}/src/t
 target_link_libraries(test_window_width PRIVATE gmc_ui gmc_model gmc_repo gmc_git gmc_core gmc_theme Qt6::Widgets Qt6::Test)
 add_test(NAME window_width COMMAND test_window_width)
 
+add_executable(test_stash_graph test_stash_graph.cpp ${CMAKE_SOURCE_DIR}/src/theme/icons.qrc)
+target_link_libraries(test_stash_graph PRIVATE gmc_ui gmc_model gmc_repo gmc_git gmc_core gmc_theme Qt6::Widgets Qt6::Test)
+add_test(NAME stash_graph COMMAND test_stash_graph)
+
 
 # A test's outcome must not depend on the machine. git refuses to commit without an
 # identity and a fresh CI runner has none, while a developer's global settings

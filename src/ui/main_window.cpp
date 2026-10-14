@@ -1,4 +1,5 @@
 #include "ui/main_window.h"
+#include "ui/local_ignore_dialog.h"
 #include "ui/panel_splitter.h"
 
 #include "ui/badge_flight.h"
@@ -535,6 +536,9 @@ void MainWindow::saveActiveState() {
 void MainWindow::adoptContext(RepoContext* context) {
     m_session = context->session.get();
     m_commitModel = context->commitModel.get();
+    if (m_mergedRemotesAction) {
+        m_commitModel->setShowMergedRemotes(m_mergedRemotesAction->isChecked());
+    }
     m_refModel = context->refModel.get();
     m_pins = context->pins;
     m_visibility = context->visibility;
@@ -1153,6 +1157,22 @@ void MainWindow::buildUi() {
     m_refsAction->setChecked(true);
     m_refsAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+B")));
     connect(m_refsAction, &QAction::toggled, this, &MainWindow::setRefsPanelVisible);
+    // Remote branches parked on the trunk's line (release branches cut at a merge,
+    // branches merged by fast-forward) are left unlabelled unless asked for.
+    m_mergedRemotesAction = viewMenu->addAction(QStringLiteral("Show Merged Remote Branches"));
+    m_mergedRemotesAction->setCheckable(true);
+    m_mergedRemotesAction->setChecked(
+        QSettings().value(QStringLiteral("ui/showMergedRemotes"), false).toBool());
+    m_mergedRemotesAction->setToolTip(
+        QStringLiteral("Label remote branches whose tip is a commit on the main branch's line"));
+    connect(m_mergedRemotesAction, &QAction::toggled, this, [this](bool show) {
+        if (!m_headless) {
+            QSettings().setValue(QStringLiteral("ui/showMergedRemotes"), show);
+        }
+        if (m_commitModel) {
+            m_commitModel->setShowMergedRemotes(show);
+        }
+    });
     m_detailsAction = viewMenu->addAction(QStringLiteral("&Details panel"));
     m_detailsAction->setCheckable(true);
     m_detailsAction->setChecked(true);
@@ -1293,6 +1313,7 @@ void MainWindow::buildUi() {
     addThemedAction(repoMenu, Icon::Terminal, QStringLiteral("Open in Terminal"), this,
                     &MainWindow::openTerminal);
     addThemedAction(repoMenu, Icon::Gear, QStringLiteral("Hooks…"), this, &MainWindow::openHooks);
+    repoMenu->addAction(QStringLiteral("Local Ignore Rules…"), this, &MainWindow::openLocalIgnore);
     addThemedAction(repoMenu, Icon::Folder, QStringLiteral("Sparse Checkout…"), this,
                     &MainWindow::editSparseCheckout);
     addThemedAction(repoMenu, Icon::Command, QStringLiteral("Identity Profiles…"), this,
@@ -1515,7 +1536,9 @@ void MainWindow::buildToolBar() {
     m_toolBar = toolbar;
     toolbar->setMovable(false);
     toolbar->setIconSize(QSize(theme::iconSize(), theme::iconSize()));
-    toolbar->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    // Each operation is named under its icon, as GitKraken does: an icon alone is a
+    // guessing game for anything but undo.
+    toolbar->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
 
     const auto addIcon = [&](Icon which, const QString& text, const QString& tip, IconTint tint) {
         QAction* action = toolbar->addAction(text);
@@ -1523,11 +1546,15 @@ void MainWindow::buildToolBar() {
         action->setToolTip(tip);
         return action;
     };
+    // The caption under the icon: one short word, whatever the menu text says.
+    const auto caption = [](QAction* action, const QString& word) { action->setIconText(word); };
 
     // Undo/Redo are the same actions the Edit menu shows: one enabled state, one
     // label, two places to reach them.
     toolbar->addAction(m_undoAction);
     toolbar->addAction(m_redoAction);
+    caption(m_undoAction, QStringLiteral("Undo"));
+    caption(m_redoAction, QStringLiteral("Redo"));
     toolbar->addSeparator();
 
     m_fetchAction = addIcon(Icon::Fetch, QStringLiteral("Fetch"),
@@ -1542,6 +1569,7 @@ void MainWindow::buildToolBar() {
     m_pullButton = new QToolButton(toolbar);
     m_pullButton->setObjectName(QStringLiteral("pullButton"));
     m_pullButton->setDefaultAction(m_pullAction);
+    m_pullButton->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
     m_pullButton->setPopupMode(QToolButton::MenuButtonPopup);
     // A menu button reserves room for the arrow inside its own width; the property
     // lets the stylesheet give that arrow its own space instead of squeezing the icon.
@@ -1569,6 +1597,7 @@ void MainWindow::buildToolBar() {
     m_pushButton = new QToolButton(toolbar);
     m_pushButton->setObjectName(QStringLiteral("pushButton"));
     m_pushButton->setDefaultAction(m_pushAction);
+    m_pushButton->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
     m_pushButton->setPopupMode(QToolButton::MenuButtonPopup);
     m_pushButton->setProperty("variant", QStringLiteral("menu"));
     auto* pushMenu = new QMenu(m_pushButton);
@@ -1587,10 +1616,12 @@ void MainWindow::buildToolBar() {
     auto* newBranch = addIcon(Icon::Branch, QStringLiteral("New Branch…"),
                               QStringLiteral("Create a branch at the selected commit"), IconTint::Text);
     connect(newBranch, &QAction::triggered, this, &MainWindow::createBranchFromSelection);
+    caption(newBranch, QStringLiteral("Branch"));
 
     auto* merge = addIcon(Icon::Merge, QStringLiteral("Merge…"),
                           QStringLiteral("Merge a branch into the current one"), IconTint::Text);
     connect(merge, &QAction::triggered, this, &MainWindow::mergeBranchIntoCurrent);
+    caption(merge, QStringLiteral("Merge"));
 
     auto* checkout = addIcon(Icon::Checkout, QStringLiteral("Checkout"),
                              QStringLiteral("Switch to the selected branch"), IconTint::Text);
@@ -1605,6 +1636,7 @@ void MainWindow::buildToolBar() {
     m_popStashAction = addIcon(Icon::Pop, QStringLiteral("Pop Stash"),
                                QStringLiteral("Restore the most recent stash"), IconTint::Text);
     connect(m_popStashAction, &QAction::triggered, this, &MainWindow::popTopStash);
+    caption(m_popStashAction, QStringLiteral("Pop"));
 
     auto* conflicts = addIcon(Icon::Conflicts, QStringLiteral("Conflicts"),
                               QStringLiteral("Open the three-pane merge editor"), IconTint::Text);
@@ -1619,9 +1651,11 @@ void MainWindow::buildToolBar() {
     auto* palette = addIcon(Icon::Search, QStringLiteral("Command Palette"),
                             QStringLiteral("Command palette (Ctrl+P)"), IconTint::Text);
     connect(palette, &QAction::triggered, this, &MainWindow::showCommandPalette);
+    caption(palette, QStringLiteral("Search"));
     m_notificationsAction = addIcon(Icon::Alert, QStringLiteral("Notifications"),
                                     QStringLiteral("Recent notifications"), IconTint::Text);
     connect(m_notificationsAction, &QAction::triggered, this, &MainWindow::showNotifications);
+    caption(m_notificationsAction, QStringLiteral("Alerts"));
     connect(&m_notifications, &NotificationLog::changed, this, [this] {
         if (!m_notificationsAction) {
             return;
@@ -1634,6 +1668,7 @@ void MainWindow::buildToolBar() {
     auto* preferences = addIcon(Icon::Gear, QStringLiteral("Preferences"),
                                 QStringLiteral("Preferences (Ctrl+,)"), IconTint::Text);
     connect(preferences, &QAction::triggered, this, &MainWindow::openPreferences);
+    caption(preferences, QStringLiteral("Settings"));
 }
 
 QWidget* MainWindow::buildReferencePanel() {
@@ -3890,6 +3925,41 @@ QString MainWindow::ignorePathspecFor(const QString& path, const QString& kind) 
     return QStringLiteral(":(literal)%1").arg(path);
 }
 
+void MainWindow::openLocalIgnore() {
+    if (!m_session || !m_session->isOpen()) {
+        return;
+    }
+    LocalIgnoreDialog dialog(m_session->localExcludePatterns(), m_session->skipWorktreePaths(),
+                             this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    applyLocalIgnore(dialog.addedPatterns(), dialog.removedPatterns(), dialog.unhiddenFiles());
+}
+
+bool MainWindow::applyLocalIgnore(const QStringList& added, const QStringList& removed,
+                                  const QStringList& unhidden) {
+    QString error;
+    for (const QString& pattern : added) {
+        if (!m_session->ignorePath(pattern, true, &error)) {
+            reportFailure(QStringLiteral("Cannot add the rule"), error);
+            return false;
+        }
+    }
+    for (const QString& pattern : removed) {
+        if (!m_session->removeLocalExcludePattern(pattern, &error)) {
+            reportFailure(QStringLiteral("Cannot remove the rule"), error);
+            return false;
+        }
+    }
+    if (!unhidden.isEmpty() && !m_session->setSkipWorktree(unhidden, false, &error)) {
+        reportFailure(QStringLiteral("Cannot show the files again"), error);
+        return false;
+    }
+    refreshPanels();
+    return true;
+}
+
 void MainWindow::onIgnoreRequested(const QStringList& paths, const QString& scope,
                                    const QString& kind) {
     if (!m_session || !m_session->isOpen() || paths.isEmpty()) {
@@ -3897,6 +3967,39 @@ void MainWindow::onIgnoreRequested(const QStringList& paths, const QString& scop
     }
     const bool globalExclude = scope == QStringLiteral("exclude");
     QString error;
+    if (globalExclude) {
+        // "Only for me" must not change what anyone else gets: no `git rm --cached`
+        // (that stages a deletion for everyone). An untracked path gets a rule in
+        // `.git/info/exclude`; a tracked file cannot be ignored, so its changes are
+        // hidden here with skip-worktree instead.
+        QSet<QString> tracked;
+        for (const FileChange& change : m_session->status()) {
+            if (change.kind != ChangeKind::Untracked) {
+                tracked.insert(QString::fromStdString(change.path));
+            }
+        }
+        QStringList hide;
+        for (const QString& path : paths) {
+            if (kind == QStringLiteral("file") && tracked.contains(path)) {
+                hide << path;
+                continue;
+            }
+            const QString pattern = ignorePatternFor(path, kind);
+            if (!pattern.isEmpty() && !m_session->ignorePath(pattern, true, &error)) {
+                reportFailure(QStringLiteral("Cannot ignore the path"), error);
+                return;
+            }
+        }
+        if (!hide.isEmpty() && !m_session->setSkipWorktree(hide, true, &error)) {
+            reportFailure(QStringLiteral("Cannot hide the file"), error);
+            return;
+        }
+        refreshPanels();
+        setStatus(QStringLiteral("Hidden for you only: %1 (Repository → Local Ignore Rules… "
+                                 "brings it back)")
+                      .arg(paths.first()));
+        return;
+    }
     for (const QString& path : paths) {
         const QString pattern = ignorePatternFor(path, kind);
         const QString pathspec = ignorePathspecFor(path, kind);
@@ -3915,9 +4018,7 @@ void MainWindow::onIgnoreRequested(const QStringList& paths, const QString& scop
         }
     }
     refreshPanels();
-    setStatus(globalExclude ? QStringLiteral("Excluded %1 from the repository")
-                                  .arg(paths.first())
-                            : QStringLiteral("Ignoring %1").arg(paths.first()));
+    setStatus(QStringLiteral("Ignoring %1").arg(paths.first()));
 }
 
 void MainWindow::stageAllChanges() {
@@ -4286,6 +4387,9 @@ void MainWindow::buildCommands() {
     add(QStringLiteral("repo.terminal"), QStringLiteral("Open Repository in Terminal"),
         QStringLiteral("Repository"), {}, [this] { return m_session && m_session->isOpen(); },
         [this] { openTerminal(); });
+    add(QStringLiteral("repo.localIgnore"), QStringLiteral("Local Ignore Rules…"),
+        QStringLiteral("Repository"), {}, [this] { return m_session && m_session->isOpen(); },
+        [this] { openLocalIgnore(); });
     add(QStringLiteral("repo.hooks"), QStringLiteral("Git Hooks…"),
         QStringLiteral("Repository"), {}, [this] { return m_session && m_session->isOpen(); },
         [this] { openHooks(); });
@@ -5391,6 +5495,18 @@ void MainWindow::buildCommitMenu(QMenu& menu, const QString& commitId) const {
     }
 
     const std::vector<RefInfo> labels = m_commitModel->refsAt(row);
+    // A stash is not a commit to stand on or build from: it is put back or thrown
+    // away. Checkout, reset, cherry-pick, branch and the rest are not offered.
+    if (isStashCommit(commitId)) {
+        menu.addAction(QStringLiteral("Apply Stash"))->setData(QStringLiteral("stash-apply"));
+        menu.addAction(QStringLiteral("Pop Stash"))->setData(QStringLiteral("stash-pop"));
+        menu.addAction(QStringLiteral("Delete Stash"))->setData(QStringLiteral("stash-drop"));
+        menu.addSeparator();
+        menu.addAction(QStringLiteral("Copy commit SHA"))->setData(QStringLiteral("copy-sha"));
+        menu.addAction(QStringLiteral("Copy commit message"))
+            ->setData(QStringLiteral("copy-message"));
+        return;
+    }
     const RepoInfo repoInfo = m_session->info();
     const QString current = QString::fromStdString(repoInfo.headBranch);
     const bool onBranch = !current.isEmpty() && !repoInfo.detached;
@@ -5582,7 +5698,27 @@ void MainWindow::buildCommitMenu(QMenu& menu, const QString& commitId) const {
     add(QStringLiteral("Create tag here…"), QStringLiteral("tag"));
 }
 
+bool MainWindow::isStashCommit(const QString& commitId) const {
+    return std::any_of(m_stashes.begin(), m_stashes.end(), [&commitId](const StashEntry& entry) {
+        return QString::fromStdString(entry.oid) == commitId;
+    });
+}
+
 void MainWindow::dispatchCommitMenuAction(const QString& key, const QString& commitId) {
+    if (key.startsWith(QLatin1String("stash-"))) {
+        QString label = commitId.left(8);
+        for (std::size_t i = 0; i < m_stashes.size(); ++i) {
+            if (QString::fromStdString(m_stashes[i].oid) == commitId) {
+                label = QStringLiteral("stash@{%1}").arg(i);
+            }
+        }
+        if (key == QLatin1String("stash-drop")) {
+            dropStash(commitId, label);
+        } else {
+            restoreStash(commitId, key == QLatin1String("stash-pop"), label);
+        }
+        return;
+    }
     const int row = m_commitModel->rowForCommit(commitId);
     const CommitInfo* commit = row < 0 ? nullptr : m_commitModel->commitAt(row);
     const std::vector<RefInfo> labels = row < 0 ? std::vector<RefInfo>{} : m_commitModel->refsAt(row);
@@ -8010,6 +8146,10 @@ void MainWindow::onRefDroppedOnCommit(RefModel::DraggedRef source, QString commi
     if (!m_session->isOpen()) {
         return;
     }
+    if (isStashCommit(commitId)) {
+        setStatus(QStringLiteral("A stash is not a place for a branch — apply or pop it instead."));
+        return;
+    }
 
     const bool isBranch = source.kind == RefKind::LocalBranch;
 
@@ -9722,8 +9862,9 @@ void MainWindow::refreshStashes() {
         m_refModel->setStashes(messages, oids);
     }
     const bool open = m_session && m_session->isOpen() && !m_session->info().bare;
+    // Nothing changed is nothing to stash: the button says so before it is pressed.
     if (m_stashAction) {
-        m_stashAction->setEnabled(open);
+        m_stashAction->setEnabled(open && !m_session->status().empty());
     }
     if (m_popStashAction) {
         m_popStashAction->setEnabled(open && !m_stashes.empty());

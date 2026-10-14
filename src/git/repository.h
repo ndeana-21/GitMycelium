@@ -184,6 +184,16 @@ public:
     /// ignorable. A pathspec that matches nothing is not an error: ignoring an
     /// untracked file is the ordinary case.
     void untrackPathspec(const std::string& pathspec);
+    /// The patterns in `.git/info/exclude`, the ignore file that is the reader's own
+    /// (never committed, never shared); comments and blank lines left out.
+    std::vector<std::string> localExcludePatterns() const;
+    /// Removes every line that is exactly `pattern` from `.git/info/exclude`.
+    void removeLocalExcludePattern(const std::string& pattern);
+    /// Tracked files whose changes are hidden here only (`--skip-worktree`): an
+    /// ignore rule does nothing for a tracked file, this is the local way to stop
+    /// seeing one.
+    std::vector<std::string> skipWorktreePaths() const;
+    void setSkipWorktree(const std::vector<std::string>& paths, bool skip);
 
     /// Removes a path from the index *and* the working tree (`git rm -f`). This is
     /// how a delete/modify conflict is settled on the deleting side: `git rm` on a

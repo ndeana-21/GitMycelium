@@ -185,6 +185,9 @@ public:
     /// Labels attached to a commit, in stacking order (branches, then remotes,
     /// then tags). Empty for a commit no reference points at.
     const std::vector<RefInfo>& refsAt(int row) const;
+    /// Whether a remote branch whose tip sits on the trunk's line keeps its label.
+    void setShowMergedRemotes(bool show);
+    bool showMergedRemotes() const { return m_showMergedRemotes; }
 
     /// Palette index of a reference's colour — stable for the whole session so
     /// a branch keeps its colour across refreshes.
@@ -242,6 +245,7 @@ private:
     void rebuildTipColors();
     void rebuildTipPriority();
     bool isTrunk(const RefInfo& ref) const;
+    void ensureShownRefs() const;
     void rebuildHighlight();
     /// Relabels the graph nodes the commit list cannot classify on its own: the
     /// working-tree rows, date separators and the tip of `refs/stash`.
@@ -303,6 +307,11 @@ private:
     QString m_pathAnchor;
     mutable BranchPath m_path;
     mutable bool m_pathDirty = true;
+    /// The labels drawn: `m_refsByCommit` without the remote branches parked on the
+    /// trunk's line (`ensureShownRefs`), rebuilt lazily after any graph change.
+    mutable std::unordered_map<std::string, std::vector<RefInfo>> m_shownRefs;
+    mutable bool m_shownDirty = true;
+    bool m_showMergedRemotes = false;
     static const std::vector<RefInfo> kNoRefs;
 };
 

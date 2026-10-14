@@ -2016,6 +2016,51 @@ bool RepoSession::ignorePath(const QString& pattern, bool globalExclude, QString
     });
 }
 
+QStringList RepoSession::localExcludePatterns() const {
+    QStringList out;
+    QMutexLocker lock(&m_mutex);
+    if (!m_repo) {
+        return out;
+    }
+    try {
+        for (const std::string& pattern : m_repo->localExcludePatterns()) {
+            out << QString::fromStdString(pattern);
+        }
+    } catch (const std::exception&) {
+    }
+    return out;
+}
+
+bool RepoSession::removeLocalExcludePattern(const QString& pattern, QString* errorOut) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
+        repo.removeLocalExcludePattern(pattern.toStdString());
+    });
+}
+
+QStringList RepoSession::skipWorktreePaths() const {
+    QStringList out;
+    QMutexLocker lock(&m_mutex);
+    if (!m_repo) {
+        return out;
+    }
+    try {
+        for (const std::string& path : m_repo->skipWorktreePaths()) {
+            out << QString::fromStdString(path);
+        }
+    } catch (const std::exception&) {
+    }
+    return out;
+}
+
+bool RepoSession::setSkipWorktree(const QStringList& paths, bool skip, QString* errorOut) {
+    std::vector<std::string> list;
+    for (const QString& path : paths) {
+        list.push_back(path.toStdString());
+    }
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut,
+                   [&](Repository& repo) { repo.setSkipWorktree(list, skip); });
+}
+
 bool RepoSession::untrackPathspec(const QString& pathspec, QString* errorOut) {
     return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
         repo.untrackPathspec(pathspec.toStdString());

@@ -13,6 +13,8 @@
 #include <QStringList>
 
 #include <algorithm>
+#include <QSet>
+
 #include <string_view>
 
 namespace gk {
@@ -321,6 +323,7 @@ void CommitModel::setWorktreeWip(const std::vector<WorktreeWip>& list) {
             m_graph.setNodeTypeHints(nodeTypeHints());
             m_graph.setCommits(asVector(m_rows));
             m_pathDirty = true;
+            m_shownDirty = true;
             emit graphChanged();
         }
         applyGraphNodeTypes();
@@ -360,6 +363,7 @@ void CommitModel::setWorktreeWip(const std::vector<WorktreeWip>& list) {
     m_graph.setNodeTypeHints(nodeTypeHints());
     m_graph.setCommits(asVector(m_rows));
     m_pathDirty = true;
+    m_shownDirty = true;
     emit graphChanged();
     applyGraphNodeTypes();
 }
@@ -396,6 +400,7 @@ void CommitModel::setPathAnchor(const QString& commitId) {
     }
     m_pathAnchor = commitId;
     m_pathDirty = true;
+    m_shownDirty = true;
     emit highlightChanged();
 }
 
@@ -485,8 +490,83 @@ const std::vector<RefInfo>& CommitModel::refsAt(int row) const {
     if (!ci) {
         return kNoRefs;
     }
-    const auto it = m_refsByCommit.find(ci->id);
-    return it == m_refsByCommit.end() ? kNoRefs : it->second;
+    ensureShownRefs();
+    const auto it = m_shownRefs.find(ci->id);
+    return it == m_shownRefs.end() ? kNoRefs : it->second;
+}
+
+void CommitModel::setShowMergedRemotes(bool show) {
+    if (m_showMergedRemotes == show) {
+        return;
+    }
+    m_showMergedRemotes = show;
+    m_shownDirty = true;
+    if (!m_rows.isEmpty()) {
+        emit dataChanged(index(0, Refs), index(m_rows.size() - 1, Refs));
+    }
+}
+
+void CommitModel::ensureShownRefs() const {
+    if (!m_shownDirty) {
+        return;
+    }
+    m_shownDirty = false;
+    m_shownRefs = m_refsByCommit;
+    if (m_showMergedRemotes || m_trunkBranch.isEmpty()) {
+        return;
+    }
+    // A remote branch whose tip is on the trunk's own line (a release branch cut at a
+    // merge, a branch merged by fast-forward) names a trunk commit, not a line of its
+    // own: its badge hung on the trunk and read as the trunk's. It stays in the branch
+    // tree; a local branch, the trunk itself and a remote with a local twin are kept.
+    std::unordered_map<std::string_view, int> rowOf;
+    rowOf.reserve(static_cast<std::size_t>(m_rows.size()));
+    int trunkRow = -1;
+    QSet<QString> localNames;
+    for (const auto& [oid, bucket] : m_refsByCommit) {
+        for (const RefInfo& ref : bucket) {
+            if (ref.kind == RefKind::LocalBranch) {
+                localNames.insert(QString::fromStdString(ref.shortName));
+            }
+        }
+    }
+    for (int row = 0; row < m_rows.size(); ++row) {
+        const std::string& id = m_rows.at(row).id;
+        rowOf.emplace(id, row);
+        if (trunkRow >= 0) {
+            continue;
+        }
+        const auto labelled = m_refsByCommit.find(id);
+        if (labelled != m_refsByCommit.end() &&
+            std::any_of(labelled->second.begin(), labelled->second.end(),
+                        [this](const RefInfo& ref) { return isTrunk(ref); })) {
+            trunkRow = row;
+        }
+    }
+    for (int row = trunkRow; row >= 0;) {
+        const CommitInfo& commit = m_rows.at(row);
+        const auto bucket = m_shownRefs.find(commit.id);
+        if (bucket != m_shownRefs.end()) {
+            auto& refs = bucket->second;
+            refs.erase(std::remove_if(refs.begin(), refs.end(),
+                                      [&](const RefInfo& ref) {
+                                          if (ref.kind != RefKind::RemoteBranch || isTrunk(ref)) {
+                                              return false;
+                                          }
+                                          const QString name = QString::fromStdString(ref.shortName);
+                                          return !localNames.contains(name.section(QLatin1Char('/'), 1));
+                                      }),
+                       refs.end());
+            if (refs.empty()) {
+                m_shownRefs.erase(bucket);
+            }
+        }
+        if (commit.parents.empty()) {
+            break;
+        }
+        const auto parent = rowOf.find(commit.parents.front());
+        row = parent == rowOf.end() || parent->second <= row ? -1 : parent->second;
+    }
 }
 
 void CommitModel::applyGraphNodeTypes() {
@@ -519,7 +599,7 @@ std::unordered_map<std::string, GraphNodeType> CommitModel::nodeTypeHints() cons
     // drawn as a junction.
     for (const auto& [oid, bucket] : m_refsByCommit) {
         for (const RefInfo& ref : bucket) {
-            if (ref.fullName == "refs/stash") {
+            if (ref.fullName.rfind("refs/stash", 0) == 0) {
                 hints[oid] = GraphNodeType::Stash;
             }
         }
@@ -583,6 +663,7 @@ void CommitModel::refreshRefs() {
     if (!m_session || !m_session->isOpen()) {
         m_graph.setTipColors({});
         m_pathDirty = true;
+        m_shownDirty = true;
         applyGraphNodeTypes();
         return;
     }
@@ -591,6 +672,7 @@ void CommitModel::refreshRefs() {
     m_headBranch = QString::fromStdString(info.headBranch);
     m_trunkBranch = QString::fromStdString(info.trunkBranch);
     m_refsByCommit = m_session->refsByCommit(m_historyFilter);
+    m_shownDirty = true;
     // Ahead/behind is not something the ref walk answers, and `for-each-ref` over
     // every branch must not run here: this is the GUI thread. The labels show the
     // relation a worker delivers, and the badges appear when it arrives.
@@ -657,6 +739,7 @@ void CommitModel::rebuildTipColors() {
     }
     m_graph.setTipColors(m_tipColors);
     m_pathDirty = true;
+    m_shownDirty = true;
 }
 
 namespace {
@@ -690,7 +773,7 @@ void CommitModel::rebuildTipPriority() {
         // A stash alone ranks below everything: a branch never continues on it.
         int best = kStashPriority;
         for (const RefInfo& ref : bucket) {
-            if (ref.fullName == "refs/stash") {
+            if (ref.fullName.rfind("refs/stash", 0) == 0) {
                 continue;
             }
             best = std::min(best, 4);
@@ -724,6 +807,7 @@ void CommitModel::rebuildTipPriority() {
     }
     m_graph.setTipPriority(std::move(priority));
     m_pathDirty = true;
+    m_shownDirty = true;
     emit graphChanged();
 }
 
@@ -1141,6 +1225,7 @@ void CommitModel::onPage(CommitPage page) {
     m_graph.setNodeTypeHints(nodeTypeHints());
     m_graph.append(block);
     m_pathDirty = true;
+    m_shownDirty = true;
     endInsertRows();
     m_hasMore = page.hasMore;
     emit graphChanged();
@@ -1186,6 +1271,7 @@ void CommitModel::reset() {
     m_rows.clear();
     m_graph.reset();
     m_pathDirty = true;
+    m_shownDirty = true;
     m_wipCount = 0;
     m_currentWipRow = -1;
     m_wipInfo.clear();
