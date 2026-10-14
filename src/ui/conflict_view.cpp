@@ -4,6 +4,7 @@
 #include "model/word_diff.h"
 #include "theme/icons.h"
 #include "theme/theme.h"
+#include "ui/flow_layout.h"
 #include "ui/syntax_highlight.h"
 #include "ui/themed_icons.h"
 
@@ -355,12 +356,11 @@ ConflictView::ConflictView(RepoSession* session, QWidget* parent)
     m_deleteModifyPanel->setProperty("role", QStringLiteral("messageBox"));
     auto* deleteModifyLayout = new QVBoxLayout(m_deleteModifyPanel);
     deleteModifyLayout->addWidget(m_deleteModifyText);
-    auto* deleteModifyButtons = new QHBoxLayout;
+    auto* deleteModifyButtons = new FlowLayout;
     deleteModifyButtons->addWidget(m_keepModifiedButton);
     deleteModifyButtons->addWidget(m_keepBaseButton);
     deleteModifyButtons->addWidget(m_keepDiskButton);
     deleteModifyButtons->addWidget(m_deleteButton);
-    deleteModifyButtons->addStretch(1);
     deleteModifyLayout->addLayout(deleteModifyButtons);
     m_deleteModifyPanel->setVisible(false);
     rightLayout->insertWidget(0, m_deleteModifyPanel);
@@ -426,7 +426,9 @@ ConflictView::ConflictView(RepoSession* session, QWidget* parent)
     connect(m_result, &QTextBrowser::anchorClicked, this, &ConflictView::onRegionClicked);
     connect(m_syncScroll, &QCheckBox::toggled, this, &ConflictView::onSyncScrollToggled);
 
-    auto* buttons = new QHBoxLayout;
+    // A flow, not a row: fifteen controls in one line held the window 1600 px wide
+    // even while this page was hidden behind the graph.
+    auto* buttons = new FlowLayout;
     buttons->addWidget(takeOurs);
     buttons->addWidget(takeBase);
     buttons->addWidget(takeTheirs);
@@ -438,7 +440,6 @@ ConflictView::ConflictView(RepoSession* session, QWidget* parent)
     buttons->addWidget(m_stageWorkdirButton);
     buttons->addWidget(m_externalButton);
     buttons->addWidget(m_saveDraftButton);
-    buttons->addStretch(1);
     buttons->addWidget(m_syncScroll);
     buttons->addWidget(m_saveButton);
     buttons->addWidget(m_abortButton);

@@ -542,12 +542,7 @@ void buildCommitDiff(git_repository* repo, const Oid& commitId,
     diffTrees(repo, out.parentTree, out.tree, paths, &out.diff);
 }
 
-void fillFileDiff(git_diff* diff, std::size_t index, FileDiff& out) {
-    git_patch* patch = nullptr;
-    if (git_patch_from_diff(&patch, diff, index) < 0) {
-        fail("cannot create patch");
-    }
-
+void fillFromPatch(git_patch* patch, FileDiff& out) {
     const std::size_t hunkCount = git_patch_num_hunks(patch);
     for (std::size_t hi = 0; hi < hunkCount; ++hi) {
         const git_diff_hunk* rawHunk = nullptr;
@@ -602,6 +597,14 @@ void fillFileDiff(git_diff* diff, std::size_t index, FileDiff& out) {
     }
 
     git_patch_free(patch);
+}
+
+void fillFileDiff(git_diff* diff, std::size_t index, FileDiff& out) {
+    git_patch* patch = nullptr;
+    if (git_patch_from_diff(&patch, diff, index) < 0) {
+        fail("cannot create patch");
+    }
+    fillFromPatch(patch, out);
 }
 
 } // namespace
@@ -760,7 +763,7 @@ RefState Repository::snapshotRefs() const {
     if (git_repository_index(&index, m_repo) == 0) {
         // The binary writes the index too; a snapshot of libgit2's cached copy would
         // record the index as it was before the git command the operation just ran.
-        git_index_read(index, 1);
+        git_index_read(index, 0);
         if (!git_index_has_conflicts(index)) {
             git_oid tree;
             if (git_index_write_tree(&tree, index) == 0) {
@@ -789,22 +792,10 @@ void Repository::applyRefDelta(const RefState& target, const RefState& from,
     // (local changes in the way) must leave the repository exactly as it was. Moving
     // HEAD and the refs first and checking out last left a HEAD on one branch over the
     // working tree of another — every file reported as changed.
-    if (checkoutWorkingTree && headMovedToAnotherPlace && !target.headOid.empty() &&
-        externalFilterConfigured(m_repo, {})) {
+    if (checkoutWorkingTree && headMovedToAnotherPlace && !target.headOid.empty()) {
         readTreeWithGit(m_repo, target.headOid, false,
                         "the working tree would be overwritten; commit or stash those changes "
                         "first");
-    } else if (checkoutWorkingTree && headMovedToAnotherPlace && !target.headOid.empty()) {
-        git_oid oid;
-        check(git_oid_fromstr(&oid, target.headOid.c_str()), "bad HEAD object id");
-        git_object* commit = nullptr;
-        check(git_object_lookup(&commit, m_repo, &oid, GIT_OBJECT_COMMIT),
-              "cannot find the commit to return to");
-        git_checkout_options options = GIT_CHECKOUT_OPTIONS_INIT;
-        options.checkout_strategy = GIT_CHECKOUT_SAFE;
-        const int rc = git_checkout_tree(m_repo, commit, &options);
-        git_object_free(commit);
-        check(rc, "the working tree would be overwritten; commit or stash those changes first");
     }
 
     // HEAD next: deleting the branch it used to point at is only safe once it
@@ -1143,6 +1134,21 @@ std::vector<FileChange> Repository::status() const {
     if (workDir.empty()) {
         return {};
     }
+    std::vector<FileChange> out = worktreeStatus(workDir);
+    std::vector<FileChange> submodules = submoduleChanges(m_repo, workDir);
+    out.insert(out.end(), std::make_move_iterator(submodules.begin()),
+               std::make_move_iterator(submodules.end()));
+    return out;
+}
+
+std::vector<FileChange> Repository::submoduleStatus() const {
+    return submoduleChanges(m_repo, workDirOf(m_repo).string());
+}
+
+std::vector<FileChange> Repository::worktreeStatus(const std::string& workDir) {
+    if (workDir.empty()) {
+        return {};
+    }
     // The binary, not libgit2: it honours the reader's fsmonitor and untracked
     // cache, which libgit2 has neither of, and on a 100 000-file tree it answered
     // in 18 ms where libgit2 took 170 — a status the window reads on every refresh.
@@ -1156,11 +1162,7 @@ std::vector<FileChange> Repository::status() const {
     if (run.exitCode != 0) {
         fail("cannot read status: " + failureText(run));
     }
-    std::vector<FileChange> out = parsePorcelainStatus(run.out);
-    std::vector<FileChange> submodules = submoduleChanges(m_repo, workDir);
-    out.insert(out.end(), std::make_move_iterator(submodules.begin()),
-               std::make_move_iterator(submodules.end()));
-    return out;
+    return parsePorcelainStatus(run.out);
 }
 
 void Repository::stageFile(const std::string& path) {
@@ -1754,10 +1756,9 @@ FileDiff Repository::workdirFileDiff(const std::string& path) const {
     opts.flags = GIT_DIFF_INCLUDE_TYPECHANGE | GIT_DIFF_INCLUDE_UNTRACKED |
                  GIT_DIFF_SHOW_UNTRACKED_CONTENT;
 
-    // A pathspec keeps the walk to the one file. It is dropped only for an
-    // untracked file: libgit2 does not match one against a pathspec, and the delta
-    // would vanish. A targeted status call is what tells the two apart without
-    // paying for a whole-worktree diff on every tracked file.
+    // A pathspec keeps the walk to the one file. libgit2 does not match an untracked
+    // file against a pathspec, and without one it walks the whole work tree (a
+    // second on 300k files), so an untracked file is diffed from its own bytes.
     unsigned status = 0;
     const bool untracked =
         git_status_file(&status, m_repo, path.c_str()) == 0 && (status & GIT_STATUS_WT_NEW) != 0;
@@ -1767,11 +1768,12 @@ FileDiff Repository::workdirFileDiff(const std::string& path) const {
         const std::vector<FileDiff> parsed = parseUnifiedDiff(indexDiffCli(false, path));
         return parsed.empty() ? result : parsed.front();
     }
-    char* spec = const_cast<char*>(path.c_str());
-    if (!untracked) {
-        opts.pathspec.strings = &spec;
-        opts.pathspec.count = 1;
+    if (untracked) {
+        return untrackedFileDiff(path);
     }
+    char* spec = const_cast<char*>(path.c_str());
+    opts.pathspec.strings = &spec;
+    opts.pathspec.count = 1;
 
     check(git_diff_index_to_workdir(&diff, m_repo, nullptr, &opts), "cannot diff working tree");
     const std::size_t count = git_diff_num_deltas(diff);
@@ -1805,6 +1807,45 @@ FileDiff Repository::workdirFileDiff(const std::string& path) const {
     result.newMode = delta->new_file.mode;
     fillFileDiff(diff, index, result);
     git_diff_free(diff);
+    return result;
+}
+
+FileDiff Repository::untrackedFileDiff(const std::string& path) const {
+    FileDiff result;
+    result.oldPath = path;
+    result.newPath = path;
+    result.kind = ChangeKind::Untracked;
+
+    const std::filesystem::path workDir = workDirOf(m_repo);
+    if (workDir.empty()) {
+        return result;
+    }
+    const std::filesystem::path full = workDir / path;
+    std::error_code error;
+    const auto status = std::filesystem::symlink_status(full, error);
+    if (error) {
+        return result;
+    }
+    std::string bytes;
+    if (std::filesystem::is_symlink(status)) {
+        bytes = std::filesystem::read_symlink(full, error).string();
+        result.newMode = GIT_FILEMODE_LINK;
+    } else {
+        std::ifstream in(full, std::ios::binary);
+        bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+        const auto perms = status.permissions();
+        result.newMode = (perms & std::filesystem::perms::owner_exec) != std::filesystem::perms::none
+                             ? GIT_FILEMODE_BLOB_EXECUTABLE
+                             : GIT_FILEMODE_BLOB;
+    }
+
+    git_diff_options opts = GIT_DIFF_OPTIONS_INIT;
+    git_patch* patch = nullptr;
+    check(git_patch_from_buffers(&patch, nullptr, 0, nullptr, bytes.data(), bytes.size(),
+                                 path.c_str(), &opts),
+          "cannot diff an untracked file");
+    result.binary = (git_patch_get_delta(patch)->flags & GIT_DIFF_FLAG_BINARY) != 0;
+    fillFromPatch(patch, result);
     return result;
 }
 
@@ -1847,7 +1888,7 @@ FileDiff Repository::workdirFileDiffAgainst(const Oid& revision, const std::stri
 std::string Repository::indexFileContent(const std::string& path) const {
     git_index* index = nullptr;
     check(git_repository_index(&index, m_repo), "cannot read the index");
-    git_index_read(index, 1);
+    git_index_read(index, 0);
     const git_index_entry* entry = git_index_get_bypath(index, path.c_str(), 0);
     if (!entry) {
         git_index_free(index);
@@ -1905,7 +1946,7 @@ std::vector<ConflictEntry> Repository::conflicts() const {
     // keeps the copy it read when the repository was opened. Without this, a conflict
     // created by `git rebase` is invisible: the conflict page finds nothing to resolve
     // and the reader is told an operation stopped while nothing asks for them.
-    git_index_read(index, 1);
+    git_index_read(index, 0);
     if (git_index_has_conflicts(index) == 0) {
         git_index_free(index);
         return out;
@@ -2036,7 +2077,7 @@ std::string Repository::conflictMarkedContent(const std::string& path, bool* tex
     // keeps the copy it read when the repository was opened. Without this, a conflict
     // created by `git rebase` is invisible: the conflict page finds nothing to resolve
     // and the reader is told an operation stopped while nothing asks for them.
-    git_index_read(index, 1);
+    git_index_read(index, 0);
 
     bool anySideBinary = false;
     const auto stageText = [&](int stage, std::string* bytes) {
@@ -2133,7 +2174,7 @@ std::string Repository::conflictStageBytes(const std::string& path, ConflictSide
     }
     git_index* index = nullptr;
     check(git_repository_index(&index, m_repo), "cannot read the index");
-    git_index_read(index, 1);
+    git_index_read(index, 0);
 
     const int stage = side == ConflictSide::Ours     ? GIT_INDEX_STAGE_OURS
                       : side == ConflictSide::Base   ? GIT_INDEX_STAGE_ANCESTOR
@@ -2216,7 +2257,7 @@ void Repository::resolveConflict(const std::string& path, const std::string& con
 std::vector<std::string> Repository::resolvedConflictPaths() const {
     git_index* index = nullptr;
     check(git_repository_index(&index, m_repo), "cannot read the index");
-    git_index_read(index, 1);
+    git_index_read(index, 0);
     std::vector<std::string> out;
     const std::size_t count = git_index_reuc_entrycount(index);
     for (std::size_t i = 0; i < count; ++i) {
@@ -2363,26 +2404,10 @@ void Repository::checkoutBranch(const std::string& name) {
     git_reference* branch = nullptr;
     check(git_branch_lookup(&branch, m_repo, name.c_str(), GIT_BRANCH_LOCAL),
           "no such branch: " + name);
-
-    if (externalFilterConfigured(m_repo, {})) {
-        git_reference_free(branch);
-        switchWithGit(m_repo, {name});
-        return;
-    }
-
-    git_object* target = nullptr;
-    check(git_reference_peel(&target, branch, GIT_OBJECT_COMMIT), "cannot resolve branch target");
-
-    git_checkout_options options = GIT_CHECKOUT_OPTIONS_INIT;
-    options.checkout_strategy = GIT_CHECKOUT_SAFE;
-    const int rc = git_checkout_tree(m_repo, target, &options);
-    if (rc == 0) {
-        git_repository_set_head(m_repo, git_reference_name(branch));
-    }
-    git_object_free(target);
     git_reference_free(branch);
-
-    check(rc, "cannot switch to '" + name + "': local changes would be overwritten");
+    // The binary, not git_checkout_tree: on 300k files libgit2 took 1.6 s where `git
+    // switch` took 0.35 s, and it also runs the filters and post-checkout hook.
+    switchWithGit(m_repo, {name});
 }
 
 bool Repository::branchMergedIntoHead(const std::string& name) const {
@@ -3569,20 +3594,8 @@ void Repository::checkoutCommit(const Oid& commitId) {
     check(git_object_lookup(&target, m_repo, &oid, GIT_OBJECT_COMMIT),
           "cannot resolve commit " + commitId);
 
-    if (externalFilterConfigured(m_repo, {})) {
-        git_object_free(target);
-        switchWithGit(m_repo, {"--detach", commitId});
-        return;
-    }
-
-    git_checkout_options options = GIT_CHECKOUT_OPTIONS_INIT;
-    options.checkout_strategy = GIT_CHECKOUT_SAFE;
-    const int rc = git_checkout_tree(m_repo, target, &options);
-    if (rc == 0) {
-        git_repository_set_head_detached(m_repo, &oid);
-    }
     git_object_free(target);
-    check(rc, "cannot check out " + commitId + ": local changes would be overwritten");
+    switchWithGit(m_repo, {"--detach", commitId});
 }
 
 void Repository::moveBranch(const std::string& name, const Oid& target, bool force) {
@@ -3603,7 +3616,11 @@ void Repository::moveBranch(const std::string& name, const Oid& target, bool for
         git_reference_free(head);
     }
 
-    if (onHead && externalFilterConfigured(m_repo, {})) {
+    if (onHead) {
+        // Moving the branch you are standing on moves the working tree with it, and
+        // that can discard uncommitted work. The safe form refuses to do that;
+        // discarding it is the caller's explicit decision, never a side effect of
+        // dragging a label. The binary, as for every checkout.
         try {
             readTreeWithGit(m_repo, oidToString(&oid), force,
                             "moving '" + name + "' would discard uncommitted changes");
@@ -3611,18 +3628,6 @@ void Repository::moveBranch(const std::string& name, const Oid& target, bool for
             git_object_free(targetObject);
             git_reference_free(branch);
             throw;
-        }
-    } else if (onHead) {
-        // Moving the branch you are standing on moves the working tree with it, and
-        // that can discard uncommitted work. SAFE refuses to do that; discarding it
-        // is the caller's explicit decision, never a side effect of dragging a label.
-        git_checkout_options options = GIT_CHECKOUT_OPTIONS_INIT;
-        options.checkout_strategy = force ? GIT_CHECKOUT_FORCE : GIT_CHECKOUT_SAFE;
-        const int checkoutRc = git_checkout_tree(m_repo, targetObject, &options);
-        if (checkoutRc != 0) {
-            git_object_free(targetObject);
-            git_reference_free(branch);
-            fail("moving '" + name + "' would discard uncommitted changes");
         }
     }
 

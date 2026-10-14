@@ -4,6 +4,9 @@ target_link_libraries(test_git_repository PRIVATE gmc_git gmc_repo Qt6::Test Qt6
 add_executable(test_graph_layout test_graph_layout.cpp)
 target_link_libraries(test_graph_layout PRIVATE gmc_graph Qt6::Test Qt6::Core)
 
+add_executable(test_branch_path test_branch_path.cpp)
+target_link_libraries(test_branch_path PRIVATE gmc_graph Qt6::Test Qt6::Core)
+
 add_executable(test_merge_workflow test_merge_workflow.cpp)
 target_link_libraries(test_merge_workflow PRIVATE gmc_git Qt6::Test Qt6::Core)
 
@@ -27,6 +30,7 @@ target_link_libraries(test_history_ops PRIVATE gmc_git Qt6::Test Qt6::Core)
 
 add_test(NAME git_repository COMMAND test_git_repository)
 add_test(NAME graph_layout COMMAND test_graph_layout)
+add_test(NAME branch_path COMMAND test_branch_path)
 add_test(NAME merge_workflow COMMAND test_merge_workflow)
 add_test(NAME rebase_and_sync COMMAND test_rebase_and_sync)
 add_test(NAME badge_flight COMMAND test_badge_flight)
@@ -383,6 +387,10 @@ add_test(NAME update_dialog COMMAND test_update_dialog)
 add_executable(test_async_reads test_async_reads.cpp ${CMAKE_SOURCE_DIR}/src/theme/icons.qrc)
 target_link_libraries(test_async_reads PRIVATE gmc_ui gmc_model gmc_repo gmc_git gmc_core gmc_theme Qt6::Widgets Qt6::Test)
 add_test(NAME async_reads COMMAND test_async_reads)
+
+add_executable(test_window_width test_window_width.cpp ${CMAKE_SOURCE_DIR}/src/theme/icons.qrc)
+target_link_libraries(test_window_width PRIVATE gmc_ui gmc_model gmc_repo gmc_git gmc_core gmc_theme Qt6::Widgets Qt6::Test)
+add_test(NAME window_width COMMAND test_window_width)
 
 
 # A test's outcome must not depend on the machine. git refuses to commit without an

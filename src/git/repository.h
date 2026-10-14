@@ -62,6 +62,10 @@ public:
     /// HEAD~1 — to a commit id. Empty when it names nothing.
     std::string resolveRevision(const std::string& revision) const;
     std::vector<FileChange> status() const;
+    /// The two halves of `status()`. The work tree's comes from the binary and needs
+    /// no handle, so a caller holding the session lock can run it after releasing it.
+    static std::vector<FileChange> worktreeStatus(const std::string& workDir);
+    std::vector<FileChange> submoduleStatus() const;
 
     /// Walks history newest-first. `skip` commits are dropped first.
     /// `hasMore` is set to true when at least one more commit exists.
@@ -452,6 +456,8 @@ private:
     /// asked for with an explicit choice.
     bool gpgSignConfigured() const;
     explicit Repository(git_repository* repo);
+    /// An untracked file against nothing, read from disk: no work-tree walk.
+    FileDiff untrackedFileDiff(const std::string& path) const;
     /// `git cat-file`-backed content read, used when the repository is a partial
     /// (promisor) clone: libgit2 cannot read a blob that was filtered out, while the
     /// binary fetches it on demand.

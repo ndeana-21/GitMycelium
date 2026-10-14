@@ -4,6 +4,37 @@ All notable changes to GitMycelium are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **The selected commit's branch is traced in the graph.** Its line, from the
+  branch tip down, is drawn wider and lighter with a glow, and its commits get a
+  halo. Below the point where the branch was cut the trace follows the branch it
+  came from, and from there that branch's own origin, so each ancestor branch is
+  lit only from its fork down.
+
+### Changed
+
+- The graph column opens at most five lanes wide; drag the header for more.
+- Commit circles are larger, and their initials are sized to fit inside them.
+
+### Fixed
+
+- **Opening an untracked file in the working tree took a second** on a large
+  repository: the diff walked the whole work tree. It is now read from the file
+  itself (about 20 ms on 300k files). Reading the index no longer forces a reload
+  of an unchanged index file (170 ms each on a 40 MB index).
+- **Checking out froze the window.** The checkout ran libgit2 on the GUI thread
+  (1.6 s on 300k files, far longer on macOS). It now runs `git switch` (0.35 s) on
+  a worker, and the window stays responsive.
+- **The window grew wider while files were opened.** The file path above the diff
+  asked for its full width, the diff toolbar for all its words, and the hidden
+  merge editor for a 1600 px row of buttons. The path is elided, the toolbar drops
+  its words when narrow, the merge editor's buttons wrap, and a hidden page no
+  longer sets the window's minimum width. The side panels can now be widened as
+  far as the window allows.
+
 ## [1.1.2] - 2026-10-13
 
 ### Fixed

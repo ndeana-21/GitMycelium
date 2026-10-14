@@ -1,8 +1,10 @@
 #include "ui/diff_view.h"
+
 #include "ui/skeleton.h"
 
 #include "core/diff_rows.h"
 #include "ui/diff_minimap.h"
+#include "ui/elided_label.h"
 #include "ui/syntax_highlight.h"
 
 #include "model/text_encoding.h"
@@ -30,6 +32,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <array>
 
 namespace gk {
 namespace {
@@ -93,6 +96,7 @@ QString hunkChip(int hunkIndex, const QString& host, const QString& label) {
 
 DiffView::DiffView(QWidget* parent) : QWidget(parent) {
     buildUi();
+    fitToolbar();
     // A keyboard way to flip the diff, so the side-by-side view is reachable without
     // hunting for the toolbar button.
     auto* split = new QShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+S")), this);
@@ -105,13 +109,14 @@ void DiffView::buildUi() {
     layout->setSpacing(0);
 
     auto* bar = new QWidget(this);
+    m_bar = bar;
     auto* barLayout = new QHBoxLayout(bar);
     barLayout->setContentsMargins(6, 4, 6, 4);
     barLayout->setSpacing(6);
 
     // The file's own name, where the tab would be: the diff is one file's, and the
     // list below the commit can hold hundreds.
-    m_pathLabel = new QLabel(bar);
+    m_pathLabel = new ElidedLabel(bar);
     m_pathLabel->setStyleSheet(QStringLiteral("color: %1;").arg(theme::text().name()));
     barLayout->addWidget(m_pathLabel);
 
@@ -452,11 +457,40 @@ void DiffView::show(const Document& document) {
     rebuild();
 }
 
+void DiffView::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+    fitToolbar();
+}
+
+void DiffView::fitToolbar() {
+    const std::array<QToolButton*, 6> worded{m_diffMode, m_splitMode, m_fileMode,
+                                            m_blameMode, m_wrapMode, m_external};
+    const auto setCompact = [&](bool compact) {
+        for (QToolButton* button : worded) {
+            button->setToolButtonStyle(compact ? Qt::ToolButtonIconOnly
+                                               : Qt::ToolButtonTextBesideIcon);
+        }
+    };
+    if (m_fullBarWidth == 0) {
+        // The bar's floor is its icon-only width, so the pane, and the window, can be
+        // narrower than the words on the buttons.
+        setCompact(true);
+        const int compactWidth = m_bar->layout()->minimumSize().width();
+        setCompact(false);
+        m_fullBarWidth = m_bar->layout()->minimumSize().width();
+        m_bar->setMinimumWidth(compactWidth);
+    }
+    const bool compact = width() < m_fullBarWidth;
+    if (compact != (worded.front()->toolButtonStyle() == Qt::ToolButtonIconOnly)) {
+        setCompact(compact);
+    }
+}
+
 void DiffView::clear() {
     m_document = Document{};
     m_hunkHeaders.clear();
     m_currentHunk = -1;
-    m_pathLabel->clear();
+    m_pathLabel->setFullText(QString());
     if (m_split) {
         showSplitMessage(QStringLiteral("Select a file to see its changes"));
     } else {
@@ -465,6 +499,8 @@ void DiffView::clear() {
 }
 
 void DiffView::refreshTheme() {
+    m_fullBarWidth = 0;
+    fitToolbar();
     m_pathLabel->setStyleSheet(QStringLiteral("color: %1;").arg(theme::text().name()));
     if (!m_document.path.isEmpty()) {
         rebuild();
@@ -477,7 +513,7 @@ QString DiffView::decodeBytes(const std::string& bytes) const {
 
 void DiffView::rebuild() {
     if (m_document.path.isEmpty()) {
-        m_pathLabel->clear();
+        m_pathLabel->setFullText(QString());
         showMessage(QStringLiteral("Select a file to see its changes"));
         return;
     }
@@ -502,7 +538,7 @@ void DiffView::rebuild() {
     m_encoding->setToolTip(m_codec.isEmpty() ? QStringLiteral("Detected as %1").arg(detected)
                                              : QStringLiteral("Read as %1").arg(m_codec));
 
-    m_pathLabel->setText(m_document.path);
+    m_pathLabel->setFullText(m_document.path);
 
     m_fileMode->setEnabled(m_document.hasRevision || m_document.hasWorking);
     m_splitMode->setEnabled(!m_fileView);

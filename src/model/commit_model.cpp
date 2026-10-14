@@ -13,6 +13,7 @@
 #include <QStringList>
 
 #include <algorithm>
+#include <string_view>
 
 namespace gk {
 
@@ -318,6 +319,7 @@ void CommitModel::setWorktreeWip(const std::vector<WorktreeWip>& list) {
             rebuildTipColors();
             m_graph.setNodeTypeHints(nodeTypeHints());
             m_graph.setCommits(asVector(m_rows));
+            m_pathDirty = true;
             emit graphChanged();
         }
         applyGraphNodeTypes();
@@ -355,6 +357,7 @@ void CommitModel::setWorktreeWip(const std::vector<WorktreeWip>& list) {
     rebuildTipColors();
     m_graph.setNodeTypeHints(nodeTypeHints());
     m_graph.setCommits(asVector(m_rows));
+    m_pathDirty = true;
     emit graphChanged();
     applyGraphNodeTypes();
 }
@@ -383,6 +386,55 @@ const GraphNode* CommitModel::graphNodeAt(int row) const {
         return nullptr;
     }
     return &m_graph.node(static_cast<std::size_t>(row));
+}
+
+void CommitModel::setPathAnchor(const QString& commitId) {
+    if (commitId == m_pathAnchor) {
+        return;
+    }
+    m_pathAnchor = commitId;
+    m_pathDirty = true;
+    emit highlightChanged();
+}
+
+void CommitModel::setPathAnchorRow(int row) {
+    setPathAnchor(row >= 0 && row < m_rows.size() && !isTimelineRow(row)
+                      ? QString::fromStdString(m_rows.at(row).id)
+                      : QString());
+}
+
+const BranchPath& CommitModel::branchPath() const {
+    if (!m_pathDirty) {
+        return m_path;
+    }
+    m_pathDirty = false;
+    m_path = BranchPath{};
+    const int rows = static_cast<int>(m_rows.size());
+    if (m_pathAnchor.isEmpty() || static_cast<int>(m_graph.size()) != rows) {
+        return m_path;
+    }
+    const std::string anchor = m_pathAnchor.toStdString();
+    std::unordered_map<std::string_view, int> rowOf;
+    rowOf.reserve(static_cast<std::size_t>(rows));
+    int anchorRow = -1;
+    for (int row = 0; row < rows; ++row) {
+        const std::string& id = m_rows.at(row).id;
+        rowOf.emplace(id, row);
+        if (id == anchor) {
+            anchorRow = row;
+        }
+    }
+    m_path = BranchPath::trace(
+        anchorRow, rows, [this](int row) { return &m_graph.node(static_cast<std::size_t>(row)); },
+        [this, &rowOf](int row) {
+            const std::vector<Oid>& parents = m_rows.at(row).parents;
+            if (parents.empty()) {
+                return -1;
+            }
+            const auto found = rowOf.find(parents.front());
+            return found == rowOf.end() ? BranchPath::kNotLoaded : found->second;
+        });
+    return m_path;
 }
 
 int CommitModel::rowForCommit(const QString& commitId) const {
@@ -528,6 +580,7 @@ void CommitModel::refreshRefs() {
 
     if (!m_session || !m_session->isOpen()) {
         m_graph.setTipColors({});
+        m_pathDirty = true;
         applyGraphNodeTypes();
         return;
     }
@@ -599,6 +652,7 @@ void CommitModel::rebuildTipColors() {
         }
     }
     m_graph.setTipColors(m_tipColors);
+    m_pathDirty = true;
 }
 
 void CommitModel::rebuildTipPriority() {
@@ -627,6 +681,7 @@ void CommitModel::rebuildTipPriority() {
         priority[commitId] = best;
     }
     m_graph.setTipPriority(std::move(priority));
+    m_pathDirty = true;
     emit graphChanged();
 }
 
@@ -1043,6 +1098,7 @@ void CommitModel::onPage(CommitPage page) {
     // sees them; the walk needs that to skip a lane for a row that is not a commit.
     m_graph.setNodeTypeHints(nodeTypeHints());
     m_graph.append(block);
+    m_pathDirty = true;
     endInsertRows();
     m_hasMore = page.hasMore;
     emit graphChanged();
@@ -1087,6 +1143,7 @@ void CommitModel::reset() {
     beginResetModel();
     m_rows.clear();
     m_graph.reset();
+    m_pathDirty = true;
     m_wipCount = 0;
     m_currentWipRow = -1;
     m_wipInfo.clear();

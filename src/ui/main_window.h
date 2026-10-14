@@ -573,6 +573,12 @@ private:
     /// Reports failures and refreshes on success.
     void runWrite(const QString& what, const std::function<bool(QString*)>& action,
                   bool resetHistory = true);
+    /// A checkout, on a worker when reads are asynchronous: on a large work tree it
+    /// rewrites thousands of files. `done` runs after a successful one.
+    void runCheckout(const QString& what, const QString& target,
+                     std::function<bool(RepoSession&, QString*)> action,
+                     std::function<void()> done = {});
+    void checkoutLocalBranch(const QString& name);
 
     enum class StageOp { Stage, Unstage, Discard };
 
@@ -930,6 +936,7 @@ private:
     /// Kept so a zoom change can resize its icons without rebuilding it.
     QToolBar* m_toolBar = nullptr;
     bool m_syncRunning = false;
+    bool m_checkoutRunning = false;
     /// True while gc/fsck runs on its worker, so a second invocation is refused and the busy
     /// sweep has one owner.
     bool m_maintenanceRunning = false;

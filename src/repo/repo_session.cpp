@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <iterator>
 #include <sstream>
 
 #include <unordered_set>
@@ -153,7 +154,7 @@ std::shared_ptr<SessionSnapshot> RepoSession::readSnapshot() const {
             out->info = repo.info();
             out->refs = repo.refs();
             out->refsByCommit = repo.refsByCommit(HistoryFilter{HistoryScope::AllRefs, {}});
-            out->status = repo.status();
+            out->status = repo.submoduleStatus();
             out->upstream = repo.upstreamInfo(std::string{});
             out->merging = repo.mergeInProgress();
             out->rebasing = repo.rebaseInProgress();
@@ -178,9 +179,15 @@ std::shared_ptr<SessionSnapshot> RepoSession::readSnapshot() const {
         out->undoLabel = m_oplog.undoLabel();
         out->redoLabel = m_oplog.redoLabel();
     }
-    // The git binary needs only the directories, not the libgit2 handle.
+    // The git binary needs only the directories, not the libgit2 handle: `git status`
+    // alone is half a second on 300k files, and a diff the reader clicked would wait
+    // behind it.
     const std::string& workDir = out->info.workDir;
     try {
+        std::vector<FileChange> worktree = Repository::worktreeStatus(workDir);
+        worktree.insert(worktree.end(), std::make_move_iterator(out->status.begin()),
+                        std::make_move_iterator(out->status.end()));
+        out->status = std::move(worktree);
         if (!workDir.empty()) {
             out->stashes = StashOps(workDir).list();
             out->submodules = SubmoduleOps(workDir).list();

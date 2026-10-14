@@ -70,6 +70,8 @@ private slots:
     void aNewTabShowsSkeletonsUntilItsSnapshotLands();
     void aCommitsFilesLoadBehindASkeleton();
     void aTabShownBeforeComesBackWithoutSkeletons();
+    void aCheckoutRunsOnAWorker();
+    void anUntrackedFileDiffsWithoutWalkingTheTree();
 };
 
 void AsyncReadsTest::initTestCase() {
@@ -211,6 +213,36 @@ void AsyncReadsTest::aTabShownBeforeComesBackWithoutSkeletons() {
     QVERIFY2(state.contains(QStringLiteral("refs: ready")), qPrintable(state.join(", ")));
     QVERIFY2(state.contains(QStringLiteral("branch: ready")), qPrintable(state.join(", ")));
     QCOMPARE(window.currentBranchName(), std::string("main"));
+}
+
+void AsyncReadsTest::aCheckoutRunsOnAWorker() {
+    QVERIFY(git(m_repo, {"checkout", "-q", "--", "f.txt"}));
+    QVERIFY(git(m_repo, {"branch", "topic", "HEAD~1"}));
+    MainWindow window;
+    window.setHeadless(true);
+    window.setAsyncReadsEnabled(true);
+    QVERIFY(window.openRepository(m_repo));
+    QTRY_VERIFY_WITH_TIMEOUT(allReady(window.loadingStateForDiagnostics()), 5000);
+
+    window.commandPaletteForDiagnostics(QStringLiteral("Checkout topic"), true);
+    QTRY_COMPARE_WITH_TIMEOUT(window.currentBranchName(), std::string("topic"), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(allReady(window.loadingStateForDiagnostics()), 5000);
+    auto* branch = window.findChild<QLabel*>(QStringLiteral("statusBranch"));
+    QTRY_VERIFY_WITH_TIMEOUT(branch->text().contains(QStringLiteral("topic")), 5000);
+}
+
+void AsyncReadsTest::anUntrackedFileDiffsWithoutWalkingTheTree() {
+    QVERIFY(writeFile(QDir(m_repo).filePath(QStringLiteral("new.txt")),
+                      QStringLiteral("alpha\nbeta")));
+    RepoSession session;
+    QVERIFY(session.open(m_repo));
+    const FileDiff diff = session.workdirFileDiff(QStringLiteral("new.txt"));
+    QCOMPARE(diff.kind, ChangeKind::Untracked);
+    QCOMPARE(diff.added, 2);
+    QCOMPARE(diff.hunks.size(), std::size_t{1});
+    QCOMPARE(diff.hunks.front().lines.back().text, std::string("beta"));
+    QVERIFY(diff.hunks.front().lines.back().noNewline);
+    QCOMPARE(diff.newMode, 0100644);
 }
 
 QTEST_MAIN(AsyncReadsTest)

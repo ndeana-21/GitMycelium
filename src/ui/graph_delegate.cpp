@@ -5,6 +5,7 @@
 
 #include <QApplication>
 #include <QFont>
+#include <QFontMetricsF>
 #include <QPainter>
 #include <QPainterPath>
 #include <QStyle>
@@ -65,6 +66,16 @@ QPainterPath elbowConnector(const QPointF& from, const QPointF& corner, const QP
     path.cubicTo(arcStart + incoming * k, arcEnd - outgoing * k, arcEnd);
     path.lineTo(to);
     return path;
+}
+
+void strokeTraced(QPainter* painter, const QPainterPath& stroke, const QColor& color,
+                  qreal lineWidth) {
+    QColor glow = color;
+    glow.setAlpha(80);
+    painter->setPen(QPen(glow, lineWidth * 3.4, Qt::SolidLine, Qt::RoundCap));
+    painter->drawPath(stroke);
+    painter->setPen(QPen(color.lighter(135), lineWidth * 1.6, Qt::SolidLine, Qt::RoundCap));
+    painter->drawPath(stroke);
 }
 
 /// Roughly half a lane, so a turn reads as a turn without swallowing the lane.
@@ -256,6 +267,34 @@ void GraphDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
         painter->drawPath(path);
     }
 
+    // 3b. The traced branch of the selected commit, over the ordinary lines: wider and
+    //     lighter, with a soft glow, so where it came from can be followed by eye.
+    const BranchPath& path = model->branchPath();
+    for (const BranchPath::RowPiece& piece : path.piecesAt(index.row())) {
+        const GraphNode* from = model->graphNodeAt(piece.fromRow);
+        if (!from || (collapsed && from->lane != 0)) {
+            continue;
+        }
+        const int lane = from->lane;
+        int colorIndex = from->colorIndex;
+        for (const GraphRowEdge& edge : rowLanes) {
+            if (edge.lane == lane) {
+                colorIndex = edge.colorIndex;
+                break;
+            }
+        }
+        const qreal x = xOf(lane);
+        QPainterPath stroke;
+        if (piece.top && !piece.bottom && lane != node->lane && !collapsed) {
+            stroke = elbowConnector(QPointF(x, rect.top()), QPointF(x, centerY),
+                                    QPointF(xOf(node->lane), centerY), corner);
+        } else {
+            stroke.moveTo(x, piece.top ? rect.top() : centerY);
+            stroke.lineTo(x, piece.bottom ? bottom : centerY);
+        }
+        strokeTraced(painter, stroke, theme::branchColor(colorIndex), lineWidth);
+    }
+
     // 4. The backing strip, over the lines only: a lane that no longer fits fades into
     //    it rather than being cut off in mid-air, and the nodes are drawn after it so no
     //    commit is hidden by its own strip.
@@ -284,6 +323,14 @@ void GraphDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
     if (type == GraphNodeType::Commit && model->data(index, CommitModel::WipRole).toBool()) {
         // A caller that paints without the model having run still gets a ring, not a disc.
         type = GraphNodeType::WorkDir;
+    }
+
+    if (path.hasNode(index.row())) {
+        QColor halo = color.lighter(140);
+        halo.setAlpha(110);
+        painter->setPen(QPen(halo, 3.0));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawEllipse(center, radius + 2.5, radius + 2.5);
     }
 
     const auto ringNode = [&](const QColor& pen) {
@@ -369,9 +416,17 @@ void GraphDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
 
     const QString initials = model->data(index, Qt::UserRole).toString();
     if (!initials.isEmpty()) {
+        // Sized to the disc, not to the row's font: the application font is set in
+        // pixels (its point size is -1), and a font that ignored the disc ran past it.
+        const qreal inner = radius - ring;
         QFont font = option.font;
-        font.setPointSizeF(std::max(6.0, option.font.pointSizeF() - 2.5));
         font.setBold(true);
+        font.setPixelSize(std::max(6, qRound(inner * 1.05)));
+        const qreal room = inner * 1.7;
+        const qreal wide = QFontMetricsF(font).horizontalAdvance(initials);
+        if (wide > room) {
+            font.setPixelSize(std::max(6, static_cast<int>(font.pixelSize() * room / wide)));
+        }
         painter->setFont(font);
         painter->setPen(theme::textOn(authorFill));
         painter->drawText(QRectF(center.x() - radius, center.y() - radius, radius * 2, radius * 2),

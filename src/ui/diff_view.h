@@ -21,6 +21,7 @@ namespace gk {
 
 class Skeleton;
 class DiffMinimap;
+class ElidedLabel;
 
 /// One file's changes, and the file they happened to.
 ///
@@ -134,7 +135,14 @@ signals:
     /// The window resolves which two revisions the viewer is showing.
     void externalDiffRequested(QString path);
 
+protected:
+    void resizeEvent(QResizeEvent* event) override;
+
 private:
+    /// The mode buttons drop their words when the pane is narrower than the bar
+    /// with them, rather than holding the window wide.
+    void fitToolbar();
+
     void buildUi();
     void rebuild();
     QString decodeBytes(const std::string& bytes) const;
@@ -173,7 +181,9 @@ private:
     /// Blame by line number (1-based). The window fetches it; the viewer only draws it.
     QHash<int, BlameLine> m_blameByLine;
 
-    QLabel* m_pathLabel = nullptr;
+    ElidedLabel* m_pathLabel = nullptr;
+    QWidget* m_bar = nullptr;
+    int m_fullBarWidth = 0;
     QComboBox* m_encoding = nullptr;
     QToolButton* m_close = nullptr;
     QToolButton* m_diffMode = nullptr;

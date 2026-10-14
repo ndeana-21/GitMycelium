@@ -73,6 +73,8 @@ add_library(gmc_graph STATIC
     graph/graph_layout.h
     graph/graph_animation.cpp
     graph/graph_animation.h
+    graph/branch_path.cpp
+    graph/branch_path.h
 )
 target_link_libraries(gmc_graph PUBLIC gmc_core)
 
@@ -203,6 +205,10 @@ add_library(gmc_ui STATIC
     ui/hooks_dialog.h
     ui/skeleton.cpp
     ui/skeleton.h
+    ui/elided_label.cpp
+    ui/elided_label.h
+    ui/flow_layout.cpp
+    ui/flow_layout.h
     ui/update_dialog.cpp
     ui/update_dialog.h
 )

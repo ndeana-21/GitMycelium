@@ -190,7 +190,28 @@ CommitDetails readCommitDetails(RepoSession& session, const QString& commitId) {
     return details;
 }
 
+/// A stacked widget asks for the largest minimum of all its pages, shown or not, so
+/// a hidden page could hold the whole window wide. Only the page on screen counts.
+void sizeToCurrentPage(QStackedWidget* stack) {
+    const auto apply = [stack] {
+        for (int i = 0; i < stack->count(); ++i) {
+            QWidget* page = stack->widget(i);
+            const QVariant own = page->property("gkOwnSizePolicy");
+            if (!own.isValid()) {
+                page->setProperty("gkOwnSizePolicy", QVariant::fromValue(page->sizePolicy()));
+            }
+            page->setSizePolicy(i == stack->currentIndex()
+                                    ? page->property("gkOwnSizePolicy").value<QSizePolicy>()
+                                    : QSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored));
+        }
+        stack->updateGeometry();
+    };
+    QObject::connect(stack, &QStackedWidget::currentChanged, stack, apply);
+    apply();
+}
+
 constexpr int kMaxDiffLines = 8000;
+constexpr int kDefaultGraphLanes = 5;
 constexpr int kKindRole = Qt::UserRole + 1;
 constexpr int kHistoryPage = 0;
 constexpr int kConflictsPage = 1;
@@ -1288,6 +1309,7 @@ void MainWindow::buildUi() {
     m_centerStack = new QStackedWidget(this);
     m_centerStack->addWidget(m_commitView);
     m_centerStack->addWidget(m_diffView);
+    sizeToCurrentPage(m_centerStack);
 
     auto* history = new QSplitter(Qt::Horizontal, this);
     history->addWidget(m_refPanel);
@@ -1338,6 +1360,7 @@ void MainWindow::buildUi() {
             [this](const QString& path) { openRepository(path); });
     // The content itself is shared: a tab switch swaps the session and models
     // behind these widgets rather than keeping one whole window per repository.
+    sizeToCurrentPage(m_stack);
     setCentralWidget(m_stack);
 
     // Commit search lives in a dock so it does not fight the columns for width and
@@ -1983,7 +2006,10 @@ QStringList MainWindow::loadingStateForDiagnostics() const {
                                                                   : QStringLiteral("ready")),
             QStringLiteral("files: %1")
                 .arg(m_details && m_details->filesLoading() ? QStringLiteral("loading")
-                                                            : QStringLiteral("ready"))};
+                                                            : QStringLiteral("ready")),
+            QStringLiteral("diff: %1")
+                .arg(m_diffView && m_diffView->loading() ? QStringLiteral("loading")
+                                                         : QStringLiteral("ready"))};
 }
 
 void MainWindow::applyPanels() {
@@ -2642,15 +2668,14 @@ void MainWindow::showReflog() {
         return;
     }
     if (dialog.chosenAction() == QStringLiteral("checkout")) {
-        QString error;
-        if (!m_session->checkoutCommit(commit, &error)) {
-            reportFailure(QStringLiteral("Cannot check out that commit"), error);
-            return;
-        }
         m_selectedCommitId = commit;
-        m_commitModel->reset();
-        refreshPanels();
-        setStatus(QStringLiteral("Checked out %1 (detached).").arg(commit.left(10)));
+        runCheckout(QStringLiteral("Cannot check out that commit"), commit.left(10),
+                    [commit](RepoSession& s, QString* error) {
+                        return s.checkoutCommit(commit, error);
+                    },
+                    [this, commit] {
+                        setStatus(QStringLiteral("Checked out %1 (detached).").arg(commit.left(10)));
+                    });
     } else if (dialog.chosenAction() == QStringLiteral("branch")) {
         createBranchAtCommit(commit);
     }
@@ -3083,6 +3108,7 @@ void MainWindow::onCommitSelected() {
     if (m_commitModel->isTimelineRow(current.row())) {
         return;
     }
+    m_commitModel->setPathAnchorRow(current.row());
     // A working-tree row is not a commit. Selecting the current checkout's shows
     // the changes waiting to be committed; another worktree's names the checkout
     // they live in, because this window's panel is not that working tree.
@@ -3202,12 +3228,15 @@ void MainWindow::updateGraphColumnWidth() {
     // header themselves: from then on their width is the right width, and
     // fighting them on every layout change is worse than a clipped lane. Lanes
     // are ordered by importance, so what stays visible when narrow is the
-    // branch you are on and the one you clicked.
+    // branch you are on and the one you clicked. The fit stops at a few lanes: a
+    // repository with hundreds of live branches would open with the messages
+    // pushed off the screen.
     if (m_graphColumnUserSized) {
         return;
     }
-    m_commitView->setColumnWidth(CommitModel::Graph,
-                                 GraphDelegate::widthForLanes(m_commitModel->laneCount()));
+    m_commitView->setColumnWidth(
+        CommitModel::Graph,
+        GraphDelegate::widthForLanes(std::min(m_commitModel->laneCount(), kDefaultGraphLanes)));
 }
 
 void MainWindow::selectFirstCommit() {
@@ -3414,6 +3443,76 @@ void MainWindow::runWrite(const QString& what, const std::function<bool(QString*
         m_commitModel->reset();
     }
     refreshPanels();
+}
+
+void MainWindow::runCheckout(const QString& what, const QString& target,
+                             std::function<bool(RepoSession&, QString*)> action,
+                             std::function<void()> done) {
+    if (!m_asyncReads) {
+        QString error;
+        if (!action(*m_session, &error)) {
+            QMessageBox::warning(this, what, error);
+            return;
+        }
+        m_commitModel->reset();
+        refreshPanels();
+        if (done) {
+            done();
+        }
+        return;
+    }
+    if (m_checkoutRunning) {
+        setStatus(QStringLiteral("A checkout is still running."));
+        return;
+    }
+    m_checkoutRunning = true;
+    m_commitView->setBusy(true);
+    setStatus(QStringLiteral("Checking out %1…").arg(target));
+    struct Outcome {
+        bool ok = false;
+        QString error;
+    };
+    RepoSession* session = m_session;
+    session->readAsync<Outcome>(
+        this,
+        [action = std::move(action)](RepoSession& s) {
+            Outcome outcome;
+            outcome.ok = action(s, &outcome.error);
+            return outcome;
+        },
+        [this, session, what, done = std::move(done)](Outcome outcome) {
+            m_checkoutRunning = false;
+            m_commitView->setBusy(false);
+            RepoContext* context = contextOf(session);
+            if (!context) {
+                return;
+            }
+            if (context != active()) {
+                context->commitModel->reset();
+                return;
+            }
+            if (!outcome.ok) {
+                setStatus(QString());
+                QMessageBox::warning(this, what, outcome.error);
+                return;
+            }
+            m_commitModel->reset();
+            refreshPanels();
+            if (done) {
+                done();
+            }
+        });
+}
+
+void MainWindow::checkoutLocalBranch(const QString& name) {
+    runCheckout(
+        QStringLiteral("Cannot check out %1").arg(name), name,
+        [name](RepoSession& s, QString* error) { return s.checkoutBranch(name, error); },
+        [this, name] {
+            setStatus(QStringLiteral("On branch %1.").arg(name));
+            // The branch may record different submodule commits than the one left behind.
+            maybeAutoUpdateSubmodules();
+        });
 }
 
 void MainWindow::applyToFiles(const QStringList& paths, StageOp op) {
@@ -5379,16 +5478,17 @@ void MainWindow::dispatchCommitMenuAction(const QString& key, const QString& com
     } else if (key == QLatin1String("rebase")) {
         rebaseBranchOnto(current, labelBranch);
     } else if (key == QLatin1String("checkout-detached")) {
-        runWrite(QStringLiteral("Cannot check out commit"),
-                 [&](QString* error) { return m_session->checkoutCommit(commitId, error); }, true);
-        setStatus(QStringLiteral("Detached HEAD at %1.").arg(commitId.left(7)));
-        maybeAutoUpdateSubmodules();
+        runCheckout(QStringLiteral("Cannot check out commit"), commitId.left(7),
+                    [commitId](RepoSession& s, QString* error) {
+                        return s.checkoutCommit(commitId, error);
+                    },
+                    [this, commitId] {
+                        setStatus(QStringLiteral("Detached HEAD at %1.").arg(commitId.left(7)));
+                        maybeAutoUpdateSubmodules();
+                    });
     } else if (key.startsWith(QLatin1String("checkout:"))) {
         const QString target = key.mid(QStringLiteral("checkout:").size());
-        runWrite(QStringLiteral("Cannot check out %1").arg(target),
-                 [&](QString* error) { return m_session->checkoutBranch(target, error); }, true);
-        setStatus(QStringLiteral("On branch %1.").arg(target));
-        maybeAutoUpdateSubmodules();
+        checkoutLocalBranch(target);
     } else if (key == QLatin1String("create-branch")) {
         createBranchAtCommit(commitId);
     } else if (key == QLatin1String("cherry-pick") && m_commitView->selectedRows().size() > 1) {
@@ -6452,9 +6552,7 @@ void MainWindow::checkoutBranchFromGraph(const QString& shortName, RefKind kind)
     }
 
     if (kind == RefKind::LocalBranch) {
-        runWrite(QStringLiteral("Cannot check out branch"),
-                 [&](QString* error) { return m_session->checkoutBranch(shortName, error); });
-        setStatus(QStringLiteral("On branch %1.").arg(shortName));
+        checkoutLocalBranch(shortName);
         return;
     }
 
@@ -6466,9 +6564,7 @@ void MainWindow::checkoutBranchFromGraph(const QString& shortName, RefKind kind)
         return;
     }
     if (localBranchExists(localName)) {
-        runWrite(QStringLiteral("Cannot check out branch"),
-                 [&](QString* error) { return m_session->checkoutBranch(localName, error); });
-        setStatus(QStringLiteral("On branch %1.").arg(localName));
+        checkoutLocalBranch(localName);
         return;
     }
 
@@ -6479,10 +6575,14 @@ void MainWindow::checkoutBranchFromGraph(const QString& shortName, RefKind kind)
     if (answer != QMessageBox::Yes) {
         return;
     }
-    runWrite(QStringLiteral("Cannot check out branch"), [&](QString* error) {
-        return m_session->createTrackingBranch(localName, shortName, error);
-    });
-    setStatus(QStringLiteral("On branch %1, following %2.").arg(localName, shortName));
+    runCheckout(
+        QStringLiteral("Cannot check out branch"), localName,
+        [localName, shortName](RepoSession& s, QString* error) {
+            return s.createTrackingBranch(localName, shortName, error);
+        },
+        [this, localName, shortName] {
+            setStatus(QStringLiteral("On branch %1, following %2.").arg(localName, shortName));
+        });
 }
 
 void MainWindow::checkoutSelectedBranch() {
@@ -6493,13 +6593,7 @@ void MainWindow::checkoutSelectedBranch() {
     if (name.isEmpty()) {
         return;
     }
-    runWrite(QStringLiteral("Cannot check out branch"),
-             [&](QString* error) { return m_session->checkoutBranch(name, error); });
-    if (QString::fromStdString(m_session->info().headBranch) == name) {
-        setStatus(QStringLiteral("On branch %1.").arg(name));
-        // The branch may record different submodule commits than the one left behind.
-        maybeAutoUpdateSubmodules();
-    }
+    checkoutLocalBranch(name);
 }
 
 void MainWindow::createBranchFromSelection() {
@@ -7773,8 +7867,7 @@ void MainWindow::onRefDroppedOnRef(RefModel::DraggedRef source, QString target) 
     } else if (chosen == interactive) {
         interactiveRebaseRange(interactiveBase, source.shortName, target, source.shortName);
     } else if (chosen == checkout) {
-        runWrite(QStringLiteral("Cannot check out %1").arg(target),
-                 [&](QString* error) { return m_session->checkoutBranch(target, error); });
+        checkoutLocalBranch(target);
     }
 }
 
@@ -7843,10 +7936,11 @@ void MainWindow::onRefDroppedOnCommit(RefModel::DraggedRef source, QString commi
     }
 
     if (chosen == checkoutHere) {
-        runWrite(QStringLiteral("Cannot check out the commit"), [&](QString* error) {
-            return m_session->checkoutCommit(commitId, error);
-        });
-        maybeAutoUpdateSubmodules();
+        runCheckout(QStringLiteral("Cannot check out the commit"), commitId.left(7),
+                    [commitId](RepoSession& s, QString* error) {
+                        return s.checkoutCommit(commitId, error);
+                    },
+                    [this] { maybeAutoUpdateSubmodules(); });
     }
 }
 

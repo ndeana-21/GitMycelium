@@ -2,6 +2,7 @@
 
 #include "core/selection_plan.h"
 #include "core/types.h"
+#include "graph/branch_path.h"
 #include "graph/graph_layout.h"
 #include "model/date_format.h"
 #include "model/ref_model.h"
@@ -222,6 +223,14 @@ public:
     const GraphNode* graphNodeAt(int row) const;
     int laneCount() const { return m_graph.laneCount(); }
 
+    /// The commit whose branch the graph traces: its line up to the branch tip and
+    /// the first-parent chain below, through every branch it was cut from.
+    void setPathAnchor(const QString& commitId);
+    void setPathAnchorRow(int row);
+    QString pathAnchor() const { return m_pathAnchor; }
+    /// Traced on first use after the graph or the anchor changed.
+    const BranchPath& branchPath() const;
+
 private slots:
     void onPage(gk::CommitPage page);
     void onFailed(QString message);
@@ -287,6 +296,9 @@ private:
     QString m_highlightBranch;
     std::unordered_set<Oid> m_highlightSet;
     bool m_highlightActive = false;
+    QString m_pathAnchor;
+    mutable BranchPath m_path;
+    mutable bool m_pathDirty = true;
     static const std::vector<RefInfo> kNoRefs;
 };
 
