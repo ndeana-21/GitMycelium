@@ -1,22 +1,27 @@
 #include "git/cli.h"
 
 #include <array>
+#include <string_view>
+
+#ifdef _WIN32
+#include <thread>
+#include <windows.h>
+#else
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
 #include <poll.h>
 #include <spawn.h>
-#include <string_view>
 #include <sys/wait.h>
 #include <unistd.h>
 
 extern char** environ;
+#endif
 
 namespace gk {
 namespace {
 
-/// The child's environment: the reader's own, with the variables this layer depends
-/// on set explicitly.
+/// The variables this layer depends on, set in every child over the reader's own.
 ///
 /// `LANGUAGE=en` keeps git's messages in English without touching `LC_CTYPE`, so hooks,
 /// editors and tools git starts still see the reader's character set — `LC_ALL=C` would
@@ -24,9 +29,211 @@ namespace {
 /// from taking `index.lock` under a command the reader runs at the same time.
 /// `GIT_TERMINAL_PROMPT=0` makes a credential prompt fail instead of waiting on the
 /// terminal the GUI was started from, where nobody is looking.
+constexpr std::array<std::string_view, 3> kOverrides = {"LANGUAGE=en", "GIT_OPTIONAL_LOCKS=0",
+                                                        "GIT_TERMINAL_PROMPT=0"};
+
+} // namespace
+
+#ifdef _WIN32
+
+namespace {
+
+std::wstring widen(std::string_view text) {
+    if (text.empty()) {
+        return {};
+    }
+    const int size = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()),
+                                         nullptr, 0);
+    std::wstring out(static_cast<std::size_t>(size), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), out.data(), size);
+    return out;
+}
+
+std::string systemMessage(DWORD code) {
+    char* buffer = nullptr;
+    const DWORD length = FormatMessageA(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        nullptr, code, 0, reinterpret_cast<char*>(&buffer), 0, nullptr);
+    std::string message = length > 0 ? std::string(buffer, length) : std::to_string(code);
+    LocalFree(buffer);
+    while (!message.empty() && (message.back() == '\n' || message.back() == '\r')) {
+        message.pop_back();
+    }
+    return message;
+}
+
+/// One argument as the C runtime's parser reads it back (git is a MinGW program):
+/// quoted when it holds a space, a tab or a quote, backslashes doubled only before
+/// a quote.
+void appendQuoted(std::wstring* line, const std::wstring& arg) {
+    if (!arg.empty() && arg.find_first_of(L" \t\n\v\"") == std::wstring::npos) {
+        line->append(arg);
+        return;
+    }
+    line->push_back(L'"');
+    for (auto it = arg.begin();; ++it) {
+        std::size_t backslashes = 0;
+        while (it != arg.end() && *it == L'\\') {
+            ++it;
+            ++backslashes;
+        }
+        if (it == arg.end()) {
+            line->append(backslashes * 2, L'\\');
+            break;
+        }
+        if (*it == L'"') {
+            line->append(backslashes * 2 + 1, L'\\');
+        } else {
+            line->append(backslashes, L'\\');
+        }
+        line->push_back(*it);
+    }
+    line->push_back(L'"');
+}
+
+/// The reader's environment with the overrides, as CreateProcessW's block. Names are
+/// case-insensitive on Windows.
+std::wstring childEnvironment() {
+    std::wstring block;
+    if (wchar_t* strings = GetEnvironmentStringsW()) {
+        for (const wchar_t* entry = strings; *entry; entry += wcslen(entry) + 1) {
+            const std::wstring_view variable(entry);
+            bool overridden = false;
+            for (const std::string_view override : kOverrides) {
+                const std::wstring name = widen(override.substr(0, override.find('=') + 1));
+                if (variable.size() >= name.size() &&
+                    CompareStringOrdinal(variable.data(), static_cast<int>(name.size()),
+                                         name.data(), static_cast<int>(name.size()),
+                                         TRUE) == CSTR_EQUAL) {
+                    overridden = true;
+                    break;
+                }
+            }
+            if (!overridden) {
+                block.append(variable);
+                block.push_back(L'\0');
+            }
+        }
+        FreeEnvironmentStringsW(strings);
+    }
+    for (const std::string_view override : kOverrides) {
+        block.append(widen(override));
+        block.push_back(L'\0');
+    }
+    block.push_back(L'\0');
+    return block;
+}
+
+void readAll(HANDLE pipe, std::string* sink) {
+    std::array<char, 65536> buffer{};
+    DWORD n = 0;
+    while (ReadFile(pipe, buffer.data(), static_cast<DWORD>(buffer.size()), &n, nullptr) && n > 0) {
+        sink->append(buffer.data(), n);
+    }
+}
+
+} // namespace
+
+ProcessResult runGit(const std::vector<std::string>& args, const std::string& workDir) {
+    ProcessResult result;
+
+    std::wstring commandLine = L"git";
+    std::vector<std::string> argv;
+    if (!workDir.empty()) {
+        argv.push_back("-C");
+        argv.push_back(workDir);
+    }
+    argv.insert(argv.end(), args.begin(), args.end());
+    for (const std::string& arg : argv) {
+        commandLine.push_back(L' ');
+        appendQuoted(&commandLine, widen(arg));
+    }
+    std::wstring environment = childEnvironment();
+
+    SECURITY_ATTRIBUTES inheritable{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
+    HANDLE outRead = nullptr, outWrite = nullptr, errRead = nullptr, errWrite = nullptr;
+    HANDLE nul = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &inheritable,
+                             OPEN_EXISTING, 0, nullptr);
+    const auto closeAll = [&] {
+        for (HANDLE handle : {outRead, outWrite, errRead, errWrite, nul}) {
+            if (handle && handle != INVALID_HANDLE_VALUE) {
+                CloseHandle(handle);
+            }
+        }
+    };
+    if (nul == INVALID_HANDLE_VALUE || !CreatePipe(&outRead, &outWrite, &inheritable, 0) ||
+        !CreatePipe(&errRead, &errWrite, &inheritable, 0)) {
+        result.err = "failed to spawn git: " + systemMessage(GetLastError());
+        closeAll();
+        return result;
+    }
+    SetHandleInformation(outRead, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(errRead, HANDLE_FLAG_INHERIT, 0);
+
+    // The child inherits these three handles and nothing else. Inheritance is
+    // otherwise all-or-nothing per process, and a git spawned by another thread at
+    // the same moment would keep our pipe's write end open after our child exits,
+    // leaving the read below waiting on a pipe nobody writes to.
+    std::array<HANDLE, 3> inherited = {nul, outWrite, errWrite};
+    SIZE_T attributeSize = 0;
+    InitializeProcThreadAttributeList(nullptr, 1, 0, &attributeSize);
+    std::vector<char> attributeStorage(attributeSize);
+    auto* attributes = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attributeStorage.data());
+    InitializeProcThreadAttributeList(attributes, 1, 0, &attributeSize);
+    UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited.data(),
+                              sizeof(HANDLE) * inherited.size(), nullptr, nullptr);
+
+    STARTUPINFOEXW startup{};
+    startup.StartupInfo.cb = sizeof(startup);
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startup.StartupInfo.hStdInput = nul;
+    startup.StartupInfo.hStdOutput = outWrite;
+    startup.StartupInfo.hStdError = errWrite;
+    startup.lpAttributeList = attributes;
+
+    // No console: a credential or host-key question has nowhere to wait, so it fails
+    // at once (the counterpart of the POSIX child leading its own session).
+    PROCESS_INFORMATION process{};
+    const BOOL spawned = CreateProcessW(
+        nullptr, commandLine.data(), nullptr, nullptr, TRUE,
+        CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT,
+        environment.data(), nullptr, &startup.StartupInfo, &process);
+    const DWORD spawnError = GetLastError();
+    DeleteProcThreadAttributeList(attributes);
+    CloseHandle(outWrite);
+    CloseHandle(errWrite);
+    CloseHandle(nul);
+    outWrite = errWrite = nul = nullptr;
+    if (!spawned) {
+        result.err = "failed to spawn git: " + systemMessage(spawnError);
+        closeAll();
+        return result;
+    }
+    CloseHandle(process.hThread);
+
+    // Read together, not one after the other: a child that fills the stderr pipe
+    // while we block on stdout never exits.
+    std::thread errReader(readAll, errRead, &result.err);
+    readAll(outRead, &result.out);
+    errReader.join();
+
+    WaitForSingleObject(process.hProcess, INFINITE);
+    DWORD exitCode = 0;
+    if (GetExitCodeProcess(process.hProcess, &exitCode)) {
+        result.exitCode = static_cast<int>(exitCode);
+    } else {
+        result.err += "failed to collect git's exit status";
+    }
+    CloseHandle(process.hProcess);
+    closeAll();
+    return result;
+}
+
+#else
+
+namespace {
+
 std::vector<std::string> childEnvironment() {
-    static constexpr std::array<std::string_view, 3> kOverrides = {
-        "LANGUAGE=en", "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0"};
     std::vector<std::string> env;
     for (char** entry = environ; entry && *entry; ++entry) {
         const std::string_view variable(*entry);
@@ -200,6 +407,8 @@ ProcessResult runGit(const std::vector<std::string>& args, const std::string& wo
     }
     return result;
 }
+
+#endif
 
 std::string failureText(const ProcessResult& result) {
     const std::string& text = result.err.empty() ? result.out : result.err;

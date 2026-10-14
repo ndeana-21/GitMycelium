@@ -10,6 +10,7 @@
 #include <QEventLoop>
 #include <QIcon>
 #include <QFont>
+#include <QSettings>
 #include <QStyleFactory>
 #include <QElapsedTimer>
 #include <QTimer>
@@ -19,6 +20,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -450,7 +455,28 @@ void printUsage() {
 
 } // namespace
 
+#ifdef _WIN32
+/// A window application has no console, so the headless flags would print into
+/// nothing when run from cmd or PowerShell. Output already redirected (a pipe, a
+/// file) is left where it goes.
+static void attachParentConsole() {
+    const HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (out != nullptr && out != INVALID_HANDLE_VALUE) {
+        return;
+    }
+    if (!AttachConsole(ATTACH_PARENT_PROCESS)) {
+        return;
+    }
+    std::freopen("CONOUT$", "w", stdout);
+    std::freopen("CONOUT$", "w", stderr);
+    SetConsoleOutputCP(CP_UTF8);
+}
+#endif
+
 int main(int argc, char* argv[]) {
+#ifdef _WIN32
+    attachParentConsole();
+#endif
     gk::Repository::initLibrary();
 
     bool probeMode = false;
@@ -1063,6 +1089,11 @@ int main(int argc, char* argv[]) {
     // manager and the About box use.
     QCoreApplication::setOrganizationName(QStringLiteral("gitmycelium"));
     QCoreApplication::setApplicationName(QStringLiteral("gitmycelium"));
+#ifdef Q_OS_WIN
+    // A file under %APPDATA%, not the registry: keys carry repository paths, which the
+    // registry would compare without case and nest at every slash.
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+#endif
     app.setApplicationDisplayName(QStringLiteral("GitMycelium"));
     QCoreApplication::setApplicationVersion(QStringLiteral(GMC_VERSION));
     app.setWindowIcon(QIcon(QStringLiteral(":/icons/gitmycelium.svg")));

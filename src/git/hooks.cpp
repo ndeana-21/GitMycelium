@@ -7,7 +7,9 @@
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#ifndef _WIN32
 #include <sys/stat.h>
+#endif
 
 namespace gk {
 namespace {
@@ -38,14 +40,6 @@ std::string trimTrailing(const std::string& text) {
     return out;
 }
 
-bool isExecutable(const std::filesystem::path& path) {
-    struct stat info {};
-    if (::stat(path.c_str(), &info) != 0) {
-        return false;
-    }
-    return (info.st_mode & S_IXUSR) != 0;
-}
-
 std::string readFile(const std::filesystem::path& path) {
     std::ifstream in(path, std::ios::binary);
     if (!in) {
@@ -56,9 +50,79 @@ std::string readFile(const std::filesystem::path& path) {
     return out.str();
 }
 
+#ifdef _WIN32
+// git for Windows runs a hook that exists, whatever its mode: there is no executable
+// bit. A disabled hook is parked beside it as `<name>.disabled`.
+const char* const kDisabledSuffix = ".disabled";
+
+std::filesystem::path parked(const std::filesystem::path& hook) {
+    return std::filesystem::path(hook.native() + std::filesystem::path(kDisabledSuffix).native());
+}
+
+/// Where the hook's text lives: the active file, else the parked one. A hook written
+/// fresh is parked, as a fresh file on POSIX has no executable bit.
+std::filesystem::path stored(const std::filesystem::path& hook) {
+    std::error_code ec;
+    return std::filesystem::exists(hook, ec) ? hook : parked(hook);
+}
+
+bool present(const std::filesystem::path& hook) {
+    std::error_code ec;
+    return std::filesystem::exists(hook, ec) || std::filesystem::exists(parked(hook), ec);
+}
+
+bool isEnabled(const std::filesystem::path& hook) {
+    std::error_code ec;
+    return std::filesystem::exists(hook, ec);
+}
+
+void setEnabled(const std::filesystem::path& hook, bool on) {
+    const std::filesystem::path from = on ? parked(hook) : hook;
+    const std::filesystem::path to = on ? hook : parked(hook);
+    std::error_code ec;
+    if (!std::filesystem::exists(from, ec)) {
+        if (std::filesystem::exists(to, ec)) {
+            return;
+        }
+        throw std::runtime_error("the hook file is not there");
+    }
+    std::filesystem::rename(from, to, ec);
+    if (ec) {
+        throw std::runtime_error("cannot rename the hook: " + ec.message());
+    }
+}
+
+bool isParkedName(const std::string& name) {
+    const std::size_t n = std::char_traits<char>::length(kDisabledSuffix);
+    return name.size() > n && name.compare(name.size() - n, n, kDisabledSuffix) == 0;
+}
+
+std::string hookNameOf(const std::string& fileName) {
+    return isParkedName(fileName)
+               ? fileName.substr(0, fileName.size() - std::char_traits<char>::length(kDisabledSuffix))
+               : fileName;
+}
+#else
+std::filesystem::path stored(const std::filesystem::path& hook) {
+    return hook;
+}
+
+bool present(const std::filesystem::path& hook) {
+    std::error_code ec;
+    return std::filesystem::exists(hook, ec);
+}
+
+bool isEnabled(const std::filesystem::path& path) {
+    struct stat info {};
+    if (::stat(path.c_str(), &info) != 0) {
+        return false;
+    }
+    return (info.st_mode & S_IXUSR) != 0;
+}
+
 /// Adds or clears the executable bit, keeping the rest of the mode. git asks
 /// `access(X_OK)`, which an owner bit answers.
-void setExecutable(const std::filesystem::path& path, bool on) {
+void setEnabled(const std::filesystem::path& path, bool on) {
     struct stat info {};
     if (::stat(path.c_str(), &info) != 0) {
         throw std::runtime_error("the hook file is not there");
@@ -73,6 +137,11 @@ void setExecutable(const std::filesystem::path& path, bool on) {
         throw std::runtime_error("cannot change the hook's permissions");
     }
 }
+
+std::string hookNameOf(const std::string& fileName) {
+    return fileName;
+}
+#endif
 
 } // namespace
 
@@ -125,8 +194,8 @@ std::vector<HookEntry> HooksOps::list() const {
         }
         entry.path = (hooksDir / name).string();
         std::error_code ec;
-        if (std::filesystem::exists(entry.path, ec)) {
-            entry.state = isExecutable(entry.path) ? HookState::Enabled : HookState::Disabled;
+        if (present(entry.path)) {
+            entry.state = isEnabled(entry.path) ? HookState::Enabled : HookState::Disabled;
         } else if (std::filesystem::exists((hooksDir / (name + ".sample")).string(), ec)) {
             entry.state = HookState::Sample;
         }
@@ -153,8 +222,8 @@ std::vector<HookEntry> HooksOps::list() const {
         if (!dirEntry.is_regular_file(fileError)) {
             continue;
         }
-        const std::filesystem::path path = dirEntry.path();
-        const std::string name = path.filename().string();
+        const std::string name = hookNameOf(dirEntry.path().filename().string());
+        const std::filesystem::path path = hooksDir / name;
         if (name.empty() || name.front() == '.') {
             continue;
         }
@@ -170,7 +239,7 @@ std::vector<HookEntry> HooksOps::list() const {
         HookEntry entry;
         entry.name = name;
         entry.path = path.string();
-        entry.state = isExecutable(path) ? HookState::Enabled : HookState::Disabled;
+        entry.state = isEnabled(path) ? HookState::Enabled : HookState::Disabled;
         out.push_back(std::move(entry));
     }
     return out;
@@ -181,7 +250,7 @@ std::string HooksOps::read(const std::string& name) const {
     if (base.empty()) {
         return {};
     }
-    return readFile(std::filesystem::path(base) / name);
+    return readFile(stored(std::filesystem::path(base) / name));
 }
 
 void HooksOps::write(const std::string& name, const std::string& content) const {
@@ -191,7 +260,7 @@ void HooksOps::write(const std::string& name, const std::string& content) const 
     }
     std::error_code ec;
     std::filesystem::create_directories(base, ec);
-    const std::filesystem::path path = std::filesystem::path(base) / name;
+    const std::filesystem::path path = stored(std::filesystem::path(base) / name);
     if (std::filesystem::is_directory(path, ec)) {
         throw std::runtime_error(name + " is a directory, not a hook");
     }
@@ -209,7 +278,7 @@ void HooksOps::enable(const std::string& name) const {
     }
     const std::filesystem::path hook = std::filesystem::path(base) / name;
     std::error_code ec;
-    if (!std::filesystem::exists(hook, ec)) {
+    if (!present(hook)) {
         const std::filesystem::path sample = std::filesystem::path(base) / (name + ".sample");
         if (!std::filesystem::exists(sample, ec)) {
             throw std::runtime_error("there is no " + name + " hook or sample to enable");
@@ -220,7 +289,7 @@ void HooksOps::enable(const std::string& name) const {
             throw std::runtime_error("cannot copy the " + name + " sample: " + ec.message());
         }
     }
-    setExecutable(hook, true);
+    setEnabled(hook, true);
 }
 
 void HooksOps::disable(const std::string& name) const {
@@ -229,11 +298,10 @@ void HooksOps::disable(const std::string& name) const {
         throw std::runtime_error("cannot find the hooks directory");
     }
     const std::filesystem::path hook = std::filesystem::path(base) / name;
-    std::error_code ec;
-    if (!std::filesystem::exists(hook, ec)) {
+    if (!present(hook)) {
         return;
     }
-    setExecutable(hook, false);
+    setEnabled(hook, false);
 }
 
 } // namespace gk

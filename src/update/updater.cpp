@@ -72,6 +72,45 @@ fi
 exec "$target"
 )SH";
 
+/// The Windows counterpart: the folder cannot be renamed while the executable and its
+/// DLLs inside it are loaded, so the swap waits for our process, and retries while
+/// the handles close.
+const char* const kWindowsRelaunchScript = R"PS(
+param([int]$ProcessId, [string]$Target, [string]$Staged)
+Wait-Process -Id $ProcessId -ErrorAction SilentlyContinue
+$old = "$Target.replaced"
+if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Recurse -Force }
+for ($i = 0; $i -lt 50; $i++) {
+    try { Move-Item -LiteralPath $Target -Destination $old -ErrorAction Stop; break }
+    catch { Start-Sleep -Milliseconds 200 }
+}
+if (Test-Path -LiteralPath $old) {
+    try {
+        Move-Item -LiteralPath $Staged -Destination $Target -ErrorAction Stop
+        Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction SilentlyContinue
+    } catch {
+        Move-Item -LiteralPath $old -Destination $Target
+    }
+}
+Start-Process -FilePath (Join-Path $Target 'GitMycelium.exe')
+Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
+)PS";
+
+/// The folder of a release archive that holds the executable: the archive's root or
+/// the one folder inside it.
+QString packagedAppFolder(const QString& extracted) {
+    const QString exe = QStringLiteral("GitMycelium.exe");
+    if (QFileInfo::exists(QDir(extracted).filePath(exe))) {
+        return extracted;
+    }
+    const QStringList children = QDir(extracted).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    if (children.size() == 1 && QFileInfo::exists(QDir(extracted).filePath(children.front() +
+                                                                              QLatin1Char('/') + exe))) {
+        return QDir(extracted).filePath(children.front());
+    }
+    return {};
+}
+
 } // namespace
 
 InstallTarget detectInstallTarget() {
@@ -85,6 +124,13 @@ InstallTarget detectInstallTarget() {
     if (dir.cdUp() && dir.cdUp() && dir.dirName().endsWith(QLatin1String(".app"))) {
         return {InstallKind::MacBundle, dir.absolutePath()};
     }
+#elif defined(Q_OS_WIN)
+    // A release folder carries Qt beside the executable (windeployqt); a build tree
+    // loads it from the Qt installation and is not something to replace.
+    const QString dir = QCoreApplication::applicationDirPath();
+    if (QFileInfo::exists(QDir(dir).filePath(QStringLiteral("Qt6Core.dll")))) {
+        return {InstallKind::WindowsFolder, QDir(dir).absolutePath()};
+    }
 #endif
     return {};
 }
@@ -95,6 +141,8 @@ QString describeInstallKind(InstallKind kind) {
         return QStringLiteral("appimage");
     case InstallKind::MacBundle:
         return QStringLiteral("app-bundle");
+    case InstallKind::WindowsFolder:
+        return QStringLiteral("windows-folder");
     case InstallKind::None:
         break;
     }
@@ -119,8 +167,8 @@ QString Updater::installRefusal() const {
         return QStringLiteral("No newer build is published.");
     }
     if (m_target.kind == InstallKind::None) {
-        return QStringLiteral("This copy was not installed from a release package (AppImage or "
-                              "macOS app), so it cannot replace itself. Download the new "
+        return QStringLiteral("This copy was not installed from a release package (AppImage, "
+                              "macOS app or Windows archive), so it cannot replace itself. Download the new "
                               "version from the release page.");
     }
     if (!m_manifest->assets.contains(platformAssetKey())) {
@@ -255,7 +303,57 @@ void Updater::onAssetFinished() {
         finishInstall(true, QString());
         return;
     }
+    if (m_target.kind == InstallKind::WindowsFolder) {
+        stageWindowsFolder(path);
+        return;
+    }
     stageMacBundle(path);
+}
+
+void Updater::stageWindowsFolder(const QString& archive) {
+    const QString folder = m_target.path;
+    const QString staged = QFileInfo(folder).absoluteDir().filePath(
+        QStringLiteral(".%1.update").arg(QFileInfo(folder).fileName()));
+    auto alive = m_alive;
+    QThreadPool::globalInstance()->start([this, alive, archive, staged] {
+        QString error;
+        const QString unpacked = staged + QStringLiteral(".unpack");
+        QDir(unpacked).removeRecursively();
+        QDir(staged).removeRecursively();
+        if (!QDir().mkpath(unpacked)) {
+            error = QStringLiteral("Cannot create %1").arg(QDir::toNativeSeparators(unpacked));
+        } else {
+            // bsdtar, part of Windows since 10 1803, reads zip archives.
+            error = runTool(QStringLiteral("tar"), {QStringLiteral("-xf"), archive,
+                                                    QStringLiteral("-C"), unpacked});
+        }
+        if (error.isEmpty()) {
+            const QString app = packagedAppFolder(unpacked);
+            if (app.isEmpty()) {
+                error = QStringLiteral("The archive holds no GitMycelium.exe.");
+            } else if (!QDir().rename(app, staged)) {
+                error = QStringLiteral("Cannot stage the update at %1")
+                            .arg(QDir::toNativeSeparators(staged));
+            }
+        }
+        QDir(unpacked).removeRecursively();
+        if (!error.isEmpty()) {
+            QDir(staged).removeRecursively();
+        }
+        QFile::remove(archive);
+        if (!alive->load()) {
+            return;
+        }
+        QMetaObject::invokeMethod(
+            this,
+            [this, error, staged] {
+                if (error.isEmpty()) {
+                    m_stagedBundle = staged;
+                }
+                finishInstall(error.isEmpty(), error);
+            },
+            Qt::QueuedConnection);
+    });
 }
 
 void Updater::stageMacBundle(const QString& diskImage) {
@@ -323,6 +421,24 @@ void Updater::finishInstall(bool ok, const QString& error) {
 bool Updater::restart() {
     if (!m_installed) {
         return false;
+    }
+    if (m_target.kind == InstallKind::WindowsFolder) {
+        const QString script = QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
+                                   .filePath(QStringLiteral("gitmycelium-relaunch.ps1"));
+        QFile file(script);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) ||
+            file.write(kWindowsRelaunchScript) < 0) {
+            return false;
+        }
+        file.close();
+        return QProcess::startDetached(
+            QStringLiteral("powershell.exe"),
+            {QStringLiteral("-NoProfile"), QStringLiteral("-ExecutionPolicy"),
+             QStringLiteral("Bypass"), QStringLiteral("-WindowStyle"), QStringLiteral("Hidden"),
+             QStringLiteral("-File"), script, QStringLiteral("-ProcessId"),
+             QString::number(QCoreApplication::applicationPid()), QStringLiteral("-Target"),
+             QDir::toNativeSeparators(m_target.path), QStringLiteral("-Staged"),
+             QDir::toNativeSeparators(m_stagedBundle)});
     }
     const QStringList args{QStringLiteral("-c"), QString::fromLatin1(kRelaunchScript),
                            QStringLiteral("gitmycelium-relaunch"),

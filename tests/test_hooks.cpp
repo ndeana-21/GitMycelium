@@ -32,6 +32,16 @@ bool writeFile(const QString& dir, const QString& name, const QString& content) 
     return true;
 }
 
+/// Whether git would run the file as a hook: its executable bit on POSIX; git for
+/// Windows runs any hook file that exists.
+bool runsAsHook(const QString& path) {
+#ifdef Q_OS_WIN
+    return QFileInfo::exists(path);
+#else
+    return QFileInfo(path).isExecutable();
+#endif
+}
+
 const HookEntry* findHook(const std::vector<HookEntry>& hooks, const QString& name) {
     for (const HookEntry& hook : hooks) {
         if (QString::fromStdString(hook.name) == name) {
@@ -110,7 +120,7 @@ void HooksTest::enablingAdoptsTheSample() {
     const HookEntry* hook = findHook(hooks, QStringLiteral("pre-commit"));
     QVERIFY(hook != nullptr);
     QVERIFY(hook->state == HookState::Enabled);
-    QVERIFY(QFileInfo(QString::fromStdString(hook->path)).isExecutable());
+    QVERIFY(runsAsHook(QString::fromStdString(hook->path)));
     QVERIFY(!session.hookContent(QStringLiteral("pre-commit")).isEmpty());
     QVERIFY(QFileInfo::exists(
         QDir(m_path).filePath(QStringLiteral(".git/hooks/pre-commit.sample"))));
@@ -133,9 +143,8 @@ void HooksTest::writingDisablingAndEnabling() {
 
     QVERIFY2(session.enableHook(QStringLiteral("pre-commit"), &error), qPrintable(error));
     QVERIFY(findHook(session.hooks(), QStringLiteral("pre-commit"))->state == HookState::Enabled);
-    QVERIFY(QFileInfo(QString::fromStdString(
-                findHook(session.hooks(), QStringLiteral("pre-commit"))->path))
-                .isExecutable());
+    QVERIFY(runsAsHook(
+        QString::fromStdString(findHook(session.hooks(), QStringLiteral("pre-commit"))->path)));
 
     QVERIFY2(session.disableHook(QStringLiteral("pre-commit"), &error), qPrintable(error));
     QVERIFY(findHook(session.hooks(), QStringLiteral("pre-commit"))->state == HookState::Disabled);
@@ -158,7 +167,7 @@ void HooksTest::hooksPathFollowsTheConfig() {
                                &error),
              qPrintable(error));
     QVERIFY2(session.enableHook(QStringLiteral("pre-commit"), &error), qPrintable(error));
-    QVERIFY(QFileInfo(QDir(path).filePath(QStringLiteral("pre-commit"))).isExecutable());
+    QVERIFY(runsAsHook(QDir(path).filePath(QStringLiteral("pre-commit"))));
     QVERIFY(!QFileInfo::exists(QDir(m_path).filePath(QStringLiteral(".git/hooks/pre-commit"))));
 }
 

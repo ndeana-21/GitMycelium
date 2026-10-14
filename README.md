@@ -12,7 +12,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
   <img alt="Version" src="https://img.shields.io/badge/version-1.0.0-orange.svg">
-  <img alt="Platforms" src="https://img.shields.io/badge/platforms-Linux%20%7C%20macOS-lightgrey.svg">
+  <img alt="Platforms" src="https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg">
 </p>
 
 <p align="center">
@@ -41,8 +41,10 @@ Prebuilt binaries are on the [Releases](https://github.com/ndeana-21/GitMycelium
 - **Linux x86_64**: an AppImage that runs on distributions with glibc 2.35 or newer.
   Run `chmod +x GitMycelium-*.AppImage`, then start the file.
 - **macOS (Apple Silicon, macOS 12 or newer)**: a `.dmg` with the app.
+- **Windows x86_64 (Windows 10 version 1903 or newer)**: a `.zip` with a folder
+  that runs where you unpack it. Start `GitMycelium.exe` inside it.
 
-`git` 2.38 or newer must be installed. To build from source, see below.
+`git` 2.38 or newer must be installed; on Windows, [Git for Windows](https://gitforwindows.org). To build from source, see below.
 
 ### Opening the app on macOS
 
@@ -65,6 +67,12 @@ xattr -dr com.apple.quarantine /Applications/GitMycelium.app
 Repeat this after installing a new download by hand. An update installed from inside
 the app (see below) does not need it.
 
+### Opening the app on Windows
+
+The executable is not code-signed, so the first launch may show *"Windows protected
+your PC"* (SmartScreen). Click **More info → Run anyway**. Unpack the archive first:
+a program started from inside a `.zip` runs from a temporary copy.
+
 ### Updating
 
 **Help → Check for Updates** compares your copy with the newest release. If a newer
@@ -76,6 +84,8 @@ into it:
 - **AppImage**: the AppImage file is replaced where it lies.
 - **macOS**: the new `GitMycelium.app` is copied out of the `.dmg`, its signature
   is checked, and it replaces the old bundle once the app has quit.
+- **Windows**: the new folder is unpacked beside the old one and replaces it once
+  the app has quit.
 
 The folder holding the app must be writable. A copy built from source, or unpacked
 from a tarball, only says that an update exists and links to the release page.
@@ -93,6 +103,7 @@ repositories is sent. Turn it off in **Preferences → Appearance → Updates**.
 - [Requirements](#requirements)
 - [Building on Linux](#building-on-linux)
 - [Building on macOS](#building-on-macos)
+- [Building on Windows](#building-on-windows)
 - [Running](#running)
 - [Installing and packaging](#installing-and-packaging)
 - [Headless mode](#headless-mode)
@@ -190,15 +201,15 @@ repositories is sent. Turn it off in **Preferences → Appearance → Updates**.
 
 | | Minimum | Notes |
 |:--|:--|:--|
-| C++ compiler | C++20 | GCC 11+, Clang 14+, Apple Clang 15+ |
+| C++ compiler | C++20 | GCC 11+, Clang 14+, Apple Clang 15+, MSVC 2022 |
 | CMake | 3.21 | |
 | Qt | 6 | modules: Core, Gui, Widgets, Svg, Test; tested with 6.8 and 6.11 |
-| libgit2 | 1.7 | found through `pkg-config`; developed against 1.9 |
+| libgit2 | 1.7 | found through `pkg-config` (on Windows through `LIBGIT2_ROOT`); developed against 1.9 |
 | git | 2.38 | needed at run time; GitMycelium runs it for every network operation and for anything that runs hooks |
 | git-lfs | optional | only for repositories that use LFS |
 
-Supported platforms: **Linux x86_64** and **macOS on Apple Silicon (arm64)**. Other
-Unix-like systems should work but are not tested.
+Supported platforms: **Linux x86_64**, **macOS on Apple Silicon (arm64)** and
+**Windows x86_64**. Other Unix-like systems should work but are not tested.
 
 ## Building on Linux
 
@@ -268,6 +279,38 @@ codesign --force --deep --sign - build/src/GitMycelium.app
 An ad-hoc-signed app is not notarized, so the first launch of a downloaded copy is
 blocked; see [Opening the app on macOS](#opening-the-app-on-macos).
 
+## Building on Windows
+
+Install Visual Studio 2022 (the *Desktop development with C++* workload, which
+brings CMake and Ninja), [Git for Windows](https://gitforwindows.org) and Qt 6 for
+MSVC 2022 (the [Qt online installer](https://www.qt.io/download-qt-installer-oss) or
+[aqtinstall](https://github.com/miurahr/aqtinstall)). In a *x64 Native Tools Command
+Prompt*, build libgit2 once, then GitMycelium:
+
+```bat
+git clone --branch v1.9.1 https://github.com/libgit2/libgit2.git
+cmake -S libgit2 -B libgit2-build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
+      -DCMAKE_INSTALL_PREFIX=C:\libgit2 -DBUILD_TESTS=OFF -DBUILD_CLI=OFF ^
+      -DUSE_HTTPS=OFF -DUSE_SSH=OFF
+cmake --build libgit2-build && cmake --install libgit2-build
+
+git clone https://github.com/ndeana-21/GitMycelium.git
+cd GitMycelium
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
+      -DCMAKE_PREFIX_PATH=C:\Qt\6.8.3\msvc2022_64 -DLIBGIT2_ROOT=C:\libgit2
+cmake --build build
+ctest --test-dir build --output-on-failure   & rem optional
+```
+
+To make a folder that runs anywhere, install it and let `windeployqt` put Qt beside
+the executable:
+
+```bat
+cmake --install build --prefix dist\GitMycelium
+C:\Qt\6.8.3\msvc2022_64\bin\windeployqt --release --no-translations --compiler-runtime dist\GitMycelium\GitMycelium.exe
+copy C:\libgit2\bin\git2.dll dist\GitMycelium\
+```
+
 ## Running
 
 ```bash
@@ -281,7 +324,8 @@ and `Ctrl+Shift+O` clones one. `Alt+Up` and `Alt+Down` move to the parent and ch
 commit, and `Ctrl+Home` jumps to the tip of the branch. You can rebind shortcuts in
 **Preferences → Keymap**.
 
-Preferences are stored with `QSettings` in the standard location for your platform.
+Preferences are stored with `QSettings` in the standard location for your platform
+(on Windows an INI file under `%APPDATA%\gitmycelium`, not the registry).
 Settings that belong to a repository (rerere, signing, diff and merge tools) are
 stored in that repository's git config, so the `git` CLI sees the same values.
 

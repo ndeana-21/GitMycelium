@@ -41,6 +41,8 @@ private slots:
     void xtermTakesTheGenericForm();
     void anUnrecognisedTerminalTakesTheGenericForm();
     void noTerminalIsHonestlyInvalid();
+    void windowsTerminalGetsItsDirectoryFlag();
+    void aWindowsConsoleStartsWhereItIsRun();
 };
 
 void ExternalTerminalTest::thePreferredTerminalWins() {
@@ -52,6 +54,9 @@ void ExternalTerminalTest::thePreferredTerminalWins() {
 }
 
 void ExternalTerminalTest::konsoleGetsItsWorkdirFlag() {
+#ifdef Q_OS_WIN
+    QSKIP("the X11 and Wayland emulators are not candidates on Windows");
+#endif
     const TerminalLaunch launch = buildTerminalLaunch("/repo", "", resolverFor({"konsole"}));
     QVERIFY(launch.valid);
     QCOMPARE(QString::fromStdString(launch.program), QStringLiteral("/usr/bin/konsole"));
@@ -59,6 +64,9 @@ void ExternalTerminalTest::konsoleGetsItsWorkdirFlag() {
 }
 
 void ExternalTerminalTest::gnomeTerminalUsesTheEqualsForm() {
+#ifdef Q_OS_WIN
+    QSKIP("the X11 and Wayland emulators are not candidates on Windows");
+#endif
     const TerminalLaunch launch =
         buildTerminalLaunch("/repo", "", resolverFor({"gnome-terminal"}));
     QVERIFY(launch.valid);
@@ -66,6 +74,9 @@ void ExternalTerminalTest::gnomeTerminalUsesTheEqualsForm() {
 }
 
 void ExternalTerminalTest::xtermTakesTheGenericForm() {
+#ifdef Q_OS_WIN
+    QSKIP("the X11 and Wayland emulators are not candidates on Windows");
+#endif
     const TerminalLaunch launch = buildTerminalLaunch("/repo", "", resolverFor({"xterm"}));
     QVERIFY(launch.valid);
     QCOMPARE(QString::fromStdString(launch.program), QStringLiteral("/usr/bin/xterm"));
@@ -85,6 +96,24 @@ void ExternalTerminalTest::noTerminalIsHonestlyInvalid() {
     const TerminalLaunch launch = buildTerminalLaunch("/repo", "", resolverFor({}));
     QVERIFY(!launch.valid);
     QVERIFY(!buildTerminalLaunch("", "", resolverFor({"konsole"})).valid);
+}
+
+void ExternalTerminalTest::windowsTerminalGetsItsDirectoryFlag() {
+    const TerminalLaunch launch = buildTerminalLaunch("/repo", "wt", resolverFor({"wt"}));
+    QVERIFY(launch.valid);
+    QCOMPARE(launch.args, (std::vector<std::string>{"-d", "/repo"}));
+}
+
+void ExternalTerminalTest::aWindowsConsoleStartsWhereItIsRun() {
+    // The window starts it with the work tree as its directory; it takes no flag.
+    const TerminalLaunch launch = buildTerminalLaunch("/repo", "cmd", resolverFor({"cmd"}));
+    QVERIFY(launch.valid);
+    QVERIFY(launch.args.empty());
+#ifdef Q_OS_WIN
+    const TerminalLaunch fallback =
+        buildTerminalLaunch("/repo", "", resolverFor({"powershell", "cmd"}));
+    QCOMPARE(QString::fromStdString(fallback.program), QStringLiteral("/usr/bin/powershell"));
+#endif
 }
 
 QTEST_MAIN(ExternalTerminalTest)

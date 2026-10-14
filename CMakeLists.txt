@@ -23,11 +23,35 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Test Svg Network)
 # The release workflow's run number. It tells two builds of one version apart: the
 # updater compares it, and macOS keys its icon and launch caches on CFBundleVersion.
 set(GMC_BUILD_NUMBER 0 CACHE STRING "CI build number (0 for a local build)")
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBGIT2 REQUIRED IMPORTED_TARGET libgit2)
+# libgit2 comes from pkg-config where there is one; Windows has none, so there it is
+# found by its header and import library (LIBGIT2_ROOT, or CMAKE_PREFIX_PATH).
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND AND NOT WIN32)
+    pkg_check_modules(LIBGIT2 QUIET IMPORTED_TARGET libgit2)
+endif()
+add_library(gmc_libgit2 INTERFACE)
+if(TARGET PkgConfig::LIBGIT2)
+    target_link_libraries(gmc_libgit2 INTERFACE PkgConfig::LIBGIT2)
+else()
+    find_path(LIBGIT2_INCLUDE_DIR git2.h HINTS "${LIBGIT2_ROOT}/include" REQUIRED)
+    find_library(LIBGIT2_LIBRARY NAMES git2 libgit2 HINTS "${LIBGIT2_ROOT}/lib" REQUIRED)
+    target_include_directories(gmc_libgit2 INTERFACE "${LIBGIT2_INCLUDE_DIR}")
+    target_link_libraries(gmc_libgit2 INTERFACE "${LIBGIT2_LIBRARY}")
+    message(STATUS "libgit2: ${LIBGIT2_LIBRARY}")
+endif()
 
-if(NOT MSVC)
+if(MSVC)
+    # Sources are UTF-8; `__cplusplus` must say what the standard really is.
+    add_compile_options(/utf-8 /permissive- /Zc:__cplusplus /EHsc)
+else()
     add_compile_options(-Wall -Wextra)
+endif()
+if(WIN32)
+    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE _CRT_SECURE_NO_WARNINGS)
+    # Every executable runs with UTF-8 as its ANSI code page: paths travel through the
+    # git layer as UTF-8 `std::string`s, and `std::filesystem`, the C runtime and
+    # libgit2 then agree on what they mean (a repository under a Cyrillic folder).
+    set(GMC_WINDOWS_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/gitmycelium.manifest")
 endif()
 
 enable_testing()
@@ -42,6 +66,12 @@ if(APPLE)
     # The bundle is the application; CPack's DragNDrop generator wraps it and
     # `macdeployqt` has already put the Qt frameworks inside it.
     install(TARGETS gitmycelium BUNDLE DESTINATION .)
+    install(FILES LICENSE NOTICE THIRD_PARTY_NOTICES.md DESTINATION Licenses)
+    install(FILES third_party/lucide/LICENSE DESTINATION Licenses RENAME LICENSE-lucide)
+elseif(WIN32)
+    # A folder that runs where it lands: windeployqt (run in CI) puts Qt beside the
+    # executable, and git2.dll travels with it.
+    install(TARGETS gitmycelium RUNTIME DESTINATION .)
     install(FILES LICENSE NOTICE THIRD_PARTY_NOTICES.md DESTINATION Licenses)
     install(FILES third_party/lucide/LICENSE DESTINATION Licenses RENAME LICENSE-lucide)
 else()
@@ -77,6 +107,9 @@ if(APPLE)
     # The license travels in Licenses/. As a click-through agreement it also made
     # `hdiutil attach` stop and wait for "Y", which hung the in-app update.
     set(CPACK_DMG_SLA_USE_RESOURCE_FILE_LICENSE OFF)
+    set(CPACK_STRIP_FILES OFF)
+elseif(WIN32)
+    set(CPACK_GENERATOR "ZIP")
     set(CPACK_STRIP_FILES OFF)
 else()
     # TGZ always works; DEB/RPM are one `cpack -G DEB|RPM` away where the tools exist.

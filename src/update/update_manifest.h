@@ -36,7 +36,8 @@ int compareVersions(const QString& a, const QString& b);
 
 bool isNewer(const UpdateManifest& manifest, const QString& version, int build);
 
-/// The `assets` key this binary installs from: "linux-x86_64", "macos-arm64", or
+/// The `assets` key this binary installs from: "linux-x86_64", "macos-arm64",
+/// "windows-x86_64", or
 /// empty where no package is published.
 QString platformAssetKey();
 

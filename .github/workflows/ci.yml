@@ -104,3 +104,86 @@ jobs:
         with:
           name: gitmycelium-macos-arm64
           path: build/*.dmg
+
+  windows:
+    name: build (windows-2022)
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: bash
+    env:
+      LIBGIT2_VERSION: '1.9.1'
+
+    steps:
+      # The runner's git converts line endings on checkout; the sources are LF.
+      - name: Keep line endings as committed
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v5
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+
+      - name: Cache libgit2
+        id: libgit2-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/libgit2
+          key: libgit2-${{ env.LIBGIT2_VERSION }}-windows-msvc
+
+      - name: Build libgit2
+        if: steps.libgit2-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/libgit2/libgit2/archive/refs/tags/v${LIBGIT2_VERSION}.tar.gz" | tar xz
+          cmake -S "libgit2-${LIBGIT2_VERSION}" -B libgit2-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/libgit2" \
+            -DBUILD_TESTS=OFF -DBUILD_CLI=OFF -DUSE_HTTPS=OFF -DUSE_SSH=OFF
+          cmake --build libgit2-build
+          cmake --install libgit2-build
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLIBGIT2_ROOT="$RUNNER_TEMP/libgit2"
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Package the folder
+        run: |
+          set -euo pipefail
+          cmake --install build --prefix dist/GitMycelium
+          "$QT_ROOT_DIR/bin/windeployqt.exe" --release --no-translations --compiler-runtime \
+            dist/GitMycelium/GitMycelium.exe
+          cp "$RUNNER_TEMP/libgit2/bin/git2.dll" dist/GitMycelium/
+          mkdir -p dist/GitMycelium/platforms
+          cp "$QT_ROOT_DIR/plugins/platforms/qoffscreen.dll" dist/GitMycelium/platforms/
+          (cd dist && 7z a -tzip ../GitMycelium-windows-x86_64.zip GitMycelium >/dev/null)
+
+      - name: Render UI offscreen
+        run: |
+          set -euo pipefail
+          export QT_QPA_PLATFORM=offscreen
+          dist/GitMycelium/GitMycelium.exe --version
+          dist/GitMycelium/GitMycelium.exe --probe . | head -5
+          dist/GitMycelium/GitMycelium.exe --shot ui.png .
+          test -s ui.png
+
+      - name: Upload UI snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-snapshot-windows-2022
+          path: ui.png
+
+      - name: Upload the Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitmycelium-windows-x86_64
+          path: GitMycelium-windows-x86_64.zip

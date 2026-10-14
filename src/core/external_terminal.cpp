@@ -5,10 +5,15 @@ namespace {
 
 struct TerminalSpec {
     const char* name;
-    const char* flag; ///< ends with '=' for the `--flag=value` form; empty = generic
+    const char* flag; ///< ends with '=' for the `--flag=value` form; empty = generic;
+                      ///< "-" = no argument, it starts in the directory it is run from
 };
 
 const TerminalSpec kSpecs[] = {
+    {"wt", "-d"},
+    {"pwsh", "-"},
+    {"powershell", "-"},
+    {"cmd", "-"},
     {"konsole", "--workdir"},
     {"gnome-terminal", "--working-directory="},
     {"xfce4-terminal", "--working-directory="},
@@ -17,15 +22,26 @@ const TerminalSpec kSpecs[] = {
     {"kitty", "--directory"},
 };
 
+#ifdef _WIN32
+// Windows Terminal when installed, else a console of its own.
+const char* kCandidates[] = {"wt", "pwsh", "powershell", "cmd"};
+constexpr const char* kSeparators = "/\\";
+#else
 // A concrete emulator beats the alternatives symlink, which beats xterm.
 const char* kCandidates[] = {
     "konsole", "gnome-terminal", "xfce4-terminal", "tilix",
     "alacritty", "kitty", "x-terminal-emulator", "xterm",
 };
+constexpr const char* kSeparators = "/";
+#endif
 
 std::string baseName(const std::string& path) {
-    const std::size_t slash = path.find_last_of('/');
-    return slash == std::string::npos ? path : path.substr(slash + 1);
+    const std::size_t slash = path.find_last_of(kSeparators);
+    std::string name = slash == std::string::npos ? path : path.substr(slash + 1);
+    if (name.size() > 4 && name.compare(name.size() - 4, 4, ".exe") == 0) {
+        name.resize(name.size() - 4);
+    }
+    return name;
 }
 
 const TerminalSpec* specFor(const std::string& name) {
@@ -56,6 +72,10 @@ TerminalLaunch launchFor(const std::string& program, const std::string& name,
     TerminalLaunch launch;
     launch.program = program;
     const std::string flag = spec->flag;
+    if (flag == "-") {
+        launch.valid = true;
+        return launch;
+    }
     if (flag.back() == '=') {
         launch.args = {flag + workDir};
     } else {
@@ -70,7 +90,7 @@ std::string resolve(const std::function<std::string(const std::string&)>& progra
     if (name.empty()) {
         return {};
     }
-    if (name.find('/') != std::string::npos) {
+    if (name.find_first_of(kSeparators) != std::string::npos) {
         return name;
     }
     return programPath(name);

@@ -13,6 +13,7 @@
 #include <git2/sys/index.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
@@ -27,9 +28,30 @@ namespace {
 
 namespace fs = std::filesystem;
 
+bool environmentFlag(const char* name) {
+    const char* value = std::getenv(name);
+    if (!value) {
+        return false;
+    }
+    std::string text(value);
+    std::transform(text.begin(), text.end(), text.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return text == "1" || text == "true" || text == "yes" || text == "on";
+}
+
 void ensureInitialized() {
     static std::once_flag flag;
-    std::call_once(flag, [] { git_libgit2_init(); });
+    std::call_once(flag, [] {
+        git_libgit2_init();
+        // The binary honours GIT_CONFIG_NOSYSTEM and libgit2 does not, so the two read
+        // different settings. On Windows it shows: libgit2 finds Git for Windows'
+        // system config through PATH, whose `core.autocrlf=true` then rewrote line
+        // endings that the binary, told to ignore it, left alone.
+        if (environmentFlag("GIT_CONFIG_NOSYSTEM")) {
+            git_libgit2_opts(GIT_OPT_SET_SEARCH_PATH, GIT_CONFIG_LEVEL_SYSTEM, "");
+            git_libgit2_opts(GIT_OPT_SET_SEARCH_PATH, GIT_CONFIG_LEVEL_PROGRAMDATA, "");
+        }
+    });
 }
 
 [[noreturn]] void fail(const std::string& what) {
@@ -347,6 +369,21 @@ bool externalFilterConfigured(git_repository* repo, const std::string& name) {
     }
     git_config_free(config);
     return found;
+}
+
+/// `core.filemode`: false where the file system has no executable bit (git sets it so
+/// on Windows), and then no file is executable whatever the OS reports.
+bool trustsFileMode(git_repository* repo) {
+    git_config* config = nullptr;
+    if (git_repository_config_snapshot(&config, repo) != 0) {
+        return true;
+    }
+    int value = 1;
+    if (git_config_get_bool(&value, config, "core.filemode") != 0) {
+        value = 1;
+    }
+    git_config_free(config);
+    return value != 0;
 }
 
 bool pathUsesExternalFilter(git_repository* repo, const std::string& path) {
@@ -2062,7 +2099,9 @@ FileDiff Repository::untrackedFileDiff(const std::string& path) const {
         std::ifstream in(full, std::ios::binary);
         bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
         const auto perms = status.permissions();
-        result.newMode = (perms & std::filesystem::perms::owner_exec) != std::filesystem::perms::none
+        const bool executable =
+            (perms & std::filesystem::perms::owner_exec) != std::filesystem::perms::none;
+        result.newMode = executable && trustsFileMode(m_repo)
                              ? GIT_FILEMODE_BLOB_EXECUTABLE
                              : GIT_FILEMODE_BLOB;
     }

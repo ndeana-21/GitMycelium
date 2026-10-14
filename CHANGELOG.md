@@ -4,6 +4,26 @@ All notable changes to GitMycelium are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Windows.** A release archive for Windows x86_64 (10 version 1903 or newer):
+  a folder that runs where it is unpacked, updated from inside the app like the
+  AppImage and the macOS bundle. git runs without a console window, the repository
+  watcher follows the whole work tree (ReadDirectoryChangesW), Open Terminal opens
+  Windows Terminal, PowerShell or cmd, and hooks are switched off by parking them as
+  `<name>.disabled` (Windows has no executable bit). Paths outside ASCII work: every
+  executable runs with UTF-8 as its code page. Preferences are an INI file under
+  `%APPDATA%`.
+
+### Fixed
+
+- An untracked file in a repository with `core.filemode=false` was shown as
+  executable when the file system said so.
+- With `GIT_CONFIG_NOSYSTEM` set, libgit2 still read the system git config that the
+  git binary skipped, so the two could disagree (on Windows about line endings).
+
 ## [1.2.0] - 2026-10-14
 
 ### Added

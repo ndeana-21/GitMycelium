@@ -410,3 +410,21 @@ file(WRITE "${GMC_TEST_GITCONFIG}"
 get_property(GMC_ALL_TESTS DIRECTORY PROPERTY TESTS)
 set_tests_properties(${GMC_ALL_TESTS} PROPERTIES
                      ENVIRONMENT "GIT_CONFIG_GLOBAL=${GMC_TEST_GITCONFIG};GIT_CONFIG_NOSYSTEM=1;QT_QPA_PLATFORM=offscreen")
+
+if(WIN32)
+    # Tests run from the build tree: Qt and git2.dll are found on PATH, and each test
+    # runs with the same UTF-8 manifest as the application and a settings store of
+    # its own.
+    get_filename_component(GMC_QT_BIN "${Qt6_DIR}/../../../bin" ABSOLUTE)
+    get_filename_component(GMC_LIBGIT2_BIN "${LIBGIT2_INCLUDE_DIR}/../bin" ABSOLUTE)
+    set_tests_properties(${GMC_ALL_TESTS} PROPERTIES ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:${GMC_QT_BIN};PATH=path_list_prepend:${GMC_LIBGIT2_BIN}")
+    get_property(GMC_TEST_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(target IN LISTS GMC_TEST_TARGETS)
+        get_target_property(target_type ${target} TYPE)
+        if(target_type STREQUAL "EXECUTABLE")
+            target_sources(${target} PRIVATE ${GMC_WINDOWS_MANIFEST}
+                           ${CMAKE_CURRENT_SOURCE_DIR}/windows_settings_sandbox.cpp)
+        endif()
+    endforeach()
+endif()

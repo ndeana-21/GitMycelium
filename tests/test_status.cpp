@@ -133,7 +133,12 @@ void StatusTest::everyKindOfChangeAtOnce() {
         {"e-renamed", ChangeKind::Renamed, true},
         // An intent to add is not staged content: git calls it an unstaged addition.
         {"intent.txt", ChangeKind::Added, false},
+#ifdef Q_OS_WIN
+        // No symlinks (`core.symlinks=false`): QFile::link writes a shortcut file.
+        {"link", ChangeKind::Modified, false},
+#else
         {"link", ChangeKind::TypeChange, false},
+#endif
         {"new", ChangeKind::Added, true},
         {"sp ace.txt", ChangeKind::Modified, false},
         {"untracked/deep/u.txt", ChangeKind::Untracked, false},

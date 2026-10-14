@@ -21,6 +21,7 @@ enum class InstallKind {
     None,      ///< built from source or unpacked from a tarball: download it by hand
     AppImage,  ///< `$APPIMAGE` names the file; it is replaced in place
     MacBundle, ///< running from a `.app`; the bundle is swapped once the app has quit
+    WindowsFolder, ///< a release folder (Qt beside the .exe); swapped once the app has quit
 };
 
 struct InstallTarget {
@@ -69,6 +70,7 @@ private:
     void onAssetFinished();
     void finishInstall(bool ok, const QString& error);
     void stageMacBundle(const QString& diskImage);
+    void stageWindowsFolder(const QString& archive);
     QString downloadPathFor(const UpdateAsset& asset) const;
 
     QNetworkAccessManager m_network;

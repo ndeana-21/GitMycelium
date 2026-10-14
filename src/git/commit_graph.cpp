@@ -4,10 +4,15 @@
 #include <cstring>
 #include <fstream>
 
+#ifdef _WIN32
+#include <filesystem>
+#include <memory>
+#else
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#endif
 
 namespace gk {
 namespace {
@@ -60,31 +65,68 @@ std::unique_ptr<CommitGraph> CommitGraph::open(const std::string& objectsDir) {
     return graph;
 }
 
-CommitGraph::~CommitGraph() {
-    for (const Layer& layer : m_layers) {
-        munmap(const_cast<unsigned char*>(layer.data), layer.length);
+namespace {
+
+#ifdef _WIN32
+/// Read, not mapped: Windows refuses to replace a file while a view of it is mapped,
+/// and `git commit-graph write` (ours or the reader's) renames over this one.
+const unsigned char* mapFile(const std::string& path, std::size_t* length) {
+    std::error_code ec;
+    const std::uintmax_t size = std::filesystem::file_size(path, ec);
+    if (ec || size < kHeaderSize) {
+        return nullptr;
     }
+    std::ifstream in(path, std::ios::binary);
+    auto data = std::make_unique<unsigned char[]>(static_cast<std::size_t>(size));
+    if (!in.read(reinterpret_cast<char*>(data.get()), static_cast<std::streamsize>(size))) {
+        return nullptr;
+    }
+    *length = static_cast<std::size_t>(size);
+    return data.release();
 }
 
-bool CommitGraph::addLayer(const std::string& path, std::uint32_t expectedBases) {
+void unmapFile(const unsigned char* data, std::size_t) {
+    delete[] data;
+}
+#else
+const unsigned char* mapFile(const std::string& path, std::size_t* length) {
     const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
-        return false;
+        return nullptr;
     }
     struct stat st {};
     if (fstat(fd, &st) != 0 || st.st_size < static_cast<off_t>(kHeaderSize)) {
         ::close(fd);
-        return false;
+        return nullptr;
     }
-    const std::size_t length = static_cast<std::size_t>(st.st_size);
-    void* mapped = mmap(nullptr, length, PROT_READ, MAP_PRIVATE, fd, 0);
+    *length = static_cast<std::size_t>(st.st_size);
+    void* mapped = mmap(nullptr, *length, PROT_READ, MAP_PRIVATE, fd, 0);
     ::close(fd);
-    if (mapped == MAP_FAILED) {
+    return mapped == MAP_FAILED ? nullptr : static_cast<const unsigned char*>(mapped);
+}
+
+void unmapFile(const unsigned char* data, std::size_t length) {
+    munmap(const_cast<unsigned char*>(data), length);
+}
+#endif
+
+} // namespace
+
+CommitGraph::~CommitGraph() {
+    for (const Layer& layer : m_layers) {
+        unmapFile(layer.data, layer.length);
+    }
+}
+
+bool CommitGraph::addLayer(const std::string& path, std::uint32_t expectedBases) {
+    std::size_t length = 0;
+    const unsigned char* mapped = mapFile(path, &length);
+    if (!mapped) {
         return false;
     }
 
     Layer layer;
-    layer.data = static_cast<const unsigned char*>(mapped);
+    layer.data = mapped;
     layer.length = length;
     // Registered before validation so the destructor unmaps a rejected layer too.
     m_layers.push_back(layer);

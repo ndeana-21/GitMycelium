@@ -90,6 +90,10 @@ QString platformAssetKey() {
     return QSysInfo::currentCpuArchitecture() == QLatin1String("x86_64")
                ? QStringLiteral("linux-x86_64")
                : QString();
+#elif defined(Q_OS_WIN)
+    return QSysInfo::currentCpuArchitecture() == QLatin1String("x86_64")
+               ? QStringLiteral("windows-x86_64")
+               : QString();
 #else
     return {};
 #endif

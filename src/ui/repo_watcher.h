@@ -17,8 +17,9 @@ namespace gk {
 /// index, an operation's markers).
 ///
 /// The whole work tree is watched, file contents included: inotify on Linux (every
-/// directory, added on a worker), FSEvents on macOS (recursive by itself). What git
-/// ignores is left out, so a build directory does not keep the window refreshing.
+/// directory, added on a worker), FSEvents on macOS and ReadDirectoryChangesW on
+/// Windows (both recursive by themselves). What git ignores is left out, so a build
+/// directory does not keep the window refreshing.
 /// Elsewhere it falls back to QFileSystemWatcher, which sees entries come and go in a
 /// capped set of directories and the git dir's `index`/`HEAD`.
 class RepoWatcher : public QObject {

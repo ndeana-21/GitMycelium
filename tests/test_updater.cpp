@@ -9,6 +9,7 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QProcess>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>
@@ -28,6 +29,7 @@ private slots:
     void anAppImageIsReplacedByAVerifiedDownload();
     void aMismatchedDownloadReplacesNothing();
     void aCopyBuiltFromSourceDoesNotInstall();
+    void aWindowsFolderIsStagedFromTheArchive();
 
 private:
     QString writeFile(const QString& path, const QByteArray& bytes);
@@ -131,6 +133,9 @@ void UpdaterTest::anAppImageIsReplacedByAVerifiedDownload() {
     if (platformAssetKey().isEmpty()) {
         QSKIP("no release package is published for this platform");
     }
+#ifdef Q_OS_WIN
+    QSKIP("an AppImage is a Linux package");
+#endif
     const QByteArray payload("new build");
     serveManifest(payload,
                   QString::fromLatin1(QCryptographicHash::hash(payload, QCryptographicHash::Sha256).toHex()));
@@ -175,6 +180,44 @@ void UpdaterTest::aCopyBuiltFromSourceDoesNotInstall() {
     QVERIFY(updater.updateAvailable());
     QVERIFY(updater.installRefusal().contains(QStringLiteral("release package")));
     QVERIFY(!runInstall(updater).isEmpty());
+}
+
+
+void UpdaterTest::aWindowsFolderIsStagedFromTheArchive() {
+#ifndef Q_OS_WIN
+    QSKIP("a release folder is unpacked with Windows' own tar");
+#else
+    QTemporaryDir source;
+    QVERIFY(QDir(source.path()).mkpath(QStringLiteral("GitMycelium")));
+    writeFile(source.filePath(QStringLiteral("GitMycelium/GitMycelium.exe")), "new build");
+    const QString archive = m_release->filePath(QStringLiteral("built.zip"));
+    QCOMPARE(QProcess::execute(QStringLiteral("tar"),
+                               {QStringLiteral("-a"), QStringLiteral("-c"), QStringLiteral("-f"),
+                                archive, QStringLiteral("-C"), source.path(),
+                                QStringLiteral("GitMycelium")}),
+             0);
+    QFile zip(archive);
+    QVERIFY(zip.open(QIODevice::ReadOnly));
+    const QByteArray payload = zip.readAll();
+    serveManifest(payload, QString::fromLatin1(
+                               QCryptographicHash::hash(payload, QCryptographicHash::Sha256).toHex()));
+
+    const QString folder = m_install->filePath(QStringLiteral("GitMycelium"));
+    QVERIFY(QDir().mkpath(folder));
+    writeFile(QDir(folder).filePath(QStringLiteral("GitMycelium.exe")), "old build");
+
+    Updater updater;
+    updater.setInstallTarget({InstallKind::WindowsFolder, folder});
+    QVERIFY(runCheck(updater));
+    QCOMPARE(runInstall(updater), QString());
+    QCOMPARE(updater.stagedBundle(), m_install->filePath(QStringLiteral(".GitMycelium.update")));
+    QFile staged(QDir(updater.stagedBundle()).filePath(QStringLiteral("GitMycelium.exe")));
+    QVERIFY(staged.open(QIODevice::ReadOnly));
+    QCOMPARE(staged.readAll(), QByteArray("new build"));
+    QFile kept(QDir(folder).filePath(QStringLiteral("GitMycelium.exe")));
+    QVERIFY(kept.open(QIODevice::ReadOnly));
+    QCOMPARE(kept.readAll(), QByteArray("old build"));
+#endif
 }
 
 QTEST_GUILESS_MAIN(UpdaterTest)

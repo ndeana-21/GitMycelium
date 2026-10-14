@@ -258,9 +258,112 @@ jobs:
             ${{ env.DMG }}
             ${{ env.DMG }}.sha256
 
+  windows-zip:
+    name: Windows archive
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Keep line endings as committed
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+
+      - name: Build libgit2
+        # Network access goes through the git binary, so libgit2 needs neither
+        # HTTPS nor SSH.
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/libgit2/libgit2/archive/refs/tags/v${LIBGIT2_VERSION}.tar.gz" | tar xz
+          cmake -S "libgit2-${LIBGIT2_VERSION}" -B libgit2-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/libgit2" \
+            -DBUILD_TESTS=OFF -DBUILD_CLI=OFF -DUSE_HTTPS=OFF -DUSE_SSH=OFF
+          cmake --build libgit2-build
+          cmake --install libgit2-build
+
+      - name: Build GitMycelium
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DLIBGIT2_ROOT="$RUNNER_TEMP/libgit2" -DGMC_BUILD_NUMBER=${{ github.run_number }}
+          cmake --build build --target gitmycelium
+
+      - name: Package the folder
+        # A folder that runs where it is unpacked: Qt, the MSVC runtime, git2.dll and
+        # the license texts beside the executable. Git for Windows is the reader's.
+        run: |
+          set -euo pipefail
+          app=dist/GitMycelium
+          cmake --install build --prefix "$app"
+          "$QT_ROOT_DIR/bin/windeployqt.exe" --release --no-translations --compiler-runtime \
+            "$app/GitMycelium.exe"
+          cp "$RUNNER_TEMP/libgit2/bin/git2.dll" "$app/"
+          mkdir -p "$app/platforms"
+          cp "$QT_ROOT_DIR/plugins/platforms/qoffscreen.dll" "$app/platforms/"
+          doc="$app/Licenses/third_party"
+          mkdir -p "$doc"
+          cp third_party/qt/LGPL-3.0.txt "$doc/Qt-LGPL-3.0.txt"
+          cp third_party/qt/GPL-3.0.txt "$doc/Qt-GPL-3.0.txt"
+          cp "libgit2-${LIBGIT2_VERSION}/COPYING" "$doc/libgit2-COPYING.txt"
+          printf 'Qt %s source: https://download.qt.io/archive/qt/\nlibgit2 %s source: https://github.com/libgit2/libgit2/releases/tag/v%s\n' \
+            "$QT_VERSION" "$LIBGIT2_VERSION" "$LIBGIT2_VERSION" > "$doc/SOURCES.txt"
+          zip="GitMycelium-${TAG#v}-windows-x86_64.zip"
+          (cd dist && 7z a -tzip "../$zip" GitMycelium >/dev/null)
+          echo "ZIP=$zip" >> "$GITHUB_ENV"
+
+      - name: Smoke-test the folder
+        run: |
+          set -euo pipefail
+          export QT_QPA_PLATFORM=offscreen
+          bin=dist/GitMycelium/GitMycelium.exe
+          "$bin" --version
+          "$bin" --update-check | tee update-check.txt || true
+          grep -qE '^(published:|error: The newest release publishes no update manifest)' update-check.txt
+          "$bin" --probe . | head -5
+          "$bin" --shot ui.png .
+          test -s ui.png
+          sha256sum "$ZIP" > "$ZIP.sha256"
+
+      - name: Update a copy from the archive, as the app does
+        # The whole in-app path: manifest, download, checksum, unpacking beside the
+        # folder. The swap itself waits for the app to exit, so it is not run here.
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          work="$(cygpath -m "$RUNNER_TEMP")/update-check"
+          mkdir -p "$work"
+          cp -r dist/GitMycelium "$work/GitMycelium"
+          sha=$(cut -d' ' -f1 "$ZIP.sha256")
+          size=$(stat -c%s "$ZIP")
+          zipUrl="file:///$(cygpath -m "$PWD/$ZIP")"
+          printf '{"version":"99.0.0","build":1,"assets":{"windows-x86_64":{"url":"%s","sha256":"%s","size":%s}}}' \
+            "$zipUrl" "$sha" "$size" > "$work/update.json"
+          GMC_UPDATE_MANIFEST="file:///$work/update.json" QT_QPA_PLATFORM=offscreen \
+            "$work/GitMycelium/GitMycelium.exe" --update-install
+          "$work/.GitMycelium.update/GitMycelium.exe" --version
+
+      - name: Upload the build
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitmycelium-windows-x86_64
+          path: |
+            ${{ env.ZIP }}
+            ${{ env.ZIP }}.sha256
+
   publish:
     name: Publish the release
-    needs: [linux-appimage, macos-dmg]
+    needs: [linux-appimage, macos-dmg, windows-zip]
     # A tag with a suffix (v1.1.0-rc1) builds but publishes nothing.
     if: ${{ !contains(github.event.inputs.tag || github.ref_name, '-') }}
     runs-on: ubuntu-latest
@@ -288,7 +391,8 @@ jobs:
           import hashlib, json, os, pathlib
           tag = os.environ["TAG"]
           base = f"https://github.com/{os.environ['REPO']}/releases/download/{tag}"
-          keys = {"-x86_64.AppImage": "linux-x86_64", "-arm64.dmg": "macos-arm64"}
+          keys = {"-x86_64.AppImage": "linux-x86_64", "-arm64.dmg": "macos-arm64",
+                  "-windows-x86_64.zip": "windows-x86_64"}
           assets = {}
           for path in sorted(pathlib.Path("dist").iterdir()):
               key = next((k for suffix, k in keys.items() if path.name.endswith(suffix)), None)

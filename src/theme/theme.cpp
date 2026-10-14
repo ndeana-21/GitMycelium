@@ -357,7 +357,8 @@ QString uiFontFamily() {
         const QStringList installed = QFontDatabase::families();
         for (const char* candidate :
              {"JetBrains Mono", "JetBrainsMono Nerd Font", "Iosevka", "Cascadia Code",
-              "Fira Code", "Hack", "MesloLGS Nerd Font", "DejaVu Sans Mono"}) {
+              "Cascadia Mono", "Fira Code", "Hack", "MesloLGS Nerd Font", "DejaVu Sans Mono",
+              "Consolas"}) {
             const QString name = QString::fromLatin1(candidate);
             if (installed.contains(name, Qt::CaseInsensitive)) {
                 return name;

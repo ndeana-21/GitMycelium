@@ -5,7 +5,9 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#ifdef Q_OS_LINUX
 #include <unistd.h>
+#endif
 
 using namespace gk;
 
@@ -21,6 +23,7 @@ private slots:
     void messagesAreEnglishWhateverTheLocale();
     void theEnvironmentReachesGitItself();
     void aWorkDirWithShellCharactersNeedsNoQuoting();
+    void argumentsArriveExactlyAsGiven();
     void stdinIsNotTheTerminal();
     void gitHasNoControllingTerminal();
 
@@ -95,13 +98,35 @@ void CliTest::theEnvironmentReachesGitItself() {
 }
 
 void CliTest::aWorkDirWithShellCharactersNeedsNoQuoting() {
+#ifdef Q_OS_WIN
+    // A quote cannot be part of a Windows file name.
+    const QString odd = m_dir->path() + QStringLiteral("/a dir $HOME 'q %PATH% `x` & ^");
+#else
     const QString odd = m_dir->path() + QStringLiteral("/a dir $HOME 'q\" `x`");
+#endif
     QVERIFY(QDir().mkpath(odd));
     const std::string path = odd.toStdString();
     QCOMPARE(runGit({"init", "-q"}, path).exitCode, 0);
     const ProcessResult top = runGit({"rev-parse", "--show-toplevel"}, path);
     QCOMPARE(top.exitCode, 0);
     QCOMPARE(QString::fromStdString(top.out).trimmed(), QDir(odd).canonicalPath());
+}
+
+void CliTest::argumentsArriveExactlyAsGiven() {
+    // Windows hands a child one command line, which the child splits again: spaces,
+    // quotes and backslashes before a quote must come back as they were sent.
+    const std::vector<std::string> sent = {"plain",   "two words", "", "quote\"inside",
+                                           "trail\\", "slash\\\"quote", "tab\there",
+                                           "\u0434\u0438\u0440"};
+    std::vector<std::string> args = {"-c", "alias.args=!printf '[%s]\\n'", "args"};
+    args.insert(args.end(), sent.begin(), sent.end());
+    const ProcessResult run = runGit(args, m_path);
+    QCOMPARE(run.exitCode, 0);
+    std::string expected;
+    for (const std::string& arg : sent) {
+        expected += "[" + arg + "]\n";
+    }
+    QCOMPARE(QString::fromStdString(run.out), QString::fromStdString(expected));
 }
 
 void CliTest::stdinIsNotTheTerminal() {

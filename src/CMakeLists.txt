@@ -58,7 +58,7 @@ add_library(gmc_git STATIC
     git/hooks.cpp
     git/hooks.h
 )
-target_link_libraries(gmc_git PUBLIC gmc_core PkgConfig::LIBGIT2)
+target_link_libraries(gmc_git PUBLIC gmc_core gmc_libgit2)
 
 add_library(gmc_repo STATIC
     repo/repo_session.cpp
@@ -221,9 +221,21 @@ if(APPLE)
     # FSEvents, for the repository watcher.
     target_link_libraries(gmc_ui PUBLIC "-framework CoreServices")
 endif()
+if(WIN32)
+    target_link_libraries(gmc_ui PUBLIC user32)
+endif()
 
 add_executable(gitmycelium app/main.cpp theme/icons.qrc
     ${CMAKE_SOURCE_DIR}/packaging/app_icon.qrc)
+if(WIN32)
+    # A window application: no console opens beside it. The headless flags attach to
+    # the console they were started from (main.cpp).
+    configure_file(${CMAKE_SOURCE_DIR}/packaging/windows/gitmycelium.rc.in
+                   ${CMAKE_CURRENT_BINARY_DIR}/gitmycelium.rc @ONLY)
+    target_sources(gitmycelium PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/gitmycelium.rc
+                   ${GMC_WINDOWS_MANIFEST})
+    set_target_properties(gitmycelium PROPERTIES WIN32_EXECUTABLE TRUE OUTPUT_NAME "GitMycelium")
+endif()
 target_link_libraries(gitmycelium PRIVATE gmc_ui gmc_repo gmc_git gmc_core Qt6::Widgets Qt6::Svg)
 # The version travels into the binary so --version and the About box report the
 # same string CPack stamps into the package name.

@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -27,6 +28,9 @@
 #elif defined(__APPLE__)
 #include <CoreServices/CoreServices.h>
 #include <dispatch/dispatch.h>
+#elif defined(_WIN32)
+#include <thread>
+#include <windows.h>
 #endif
 
 namespace gk {
@@ -91,6 +95,54 @@ struct IgnoredSet {
             if (asDir.startsWith(dir)) {
                 return true;
             }
+        }
+        return false;
+    }
+};
+
+/// The roots a recursive watch (FSEvents, ReadDirectoryChangesW) covers, and which of
+/// them a reported path belongs to.
+struct WatchRoots {
+    QString work; ///< each ending in '/', or empty
+    QString git;
+    QString common; ///< empty when it is the git dir
+
+    WatchRoots() = default;
+    WatchRoots(const QString& workDir, const QString& gitDir, const QString& commonDir)
+        : work(workDir.isEmpty() ? QString() : withSlash(workDir)),
+          git(gitDir.isEmpty() ? QString() : withSlash(gitDir)),
+          common(commonDir.isEmpty() || commonDir == gitDir ? QString() : withSlash(commonDir)) {}
+
+    /// The directories to watch: the work tree, and the git dirs that are not inside it.
+    QStringList streamRoots() const {
+        QStringList roots;
+        if (!work.isEmpty()) {
+            roots << work.chopped(1);
+        }
+        for (const QString& dir : {git, common}) {
+            if (!dir.isEmpty() && (work.isEmpty() || !dir.startsWith(work))) {
+                roots << dir.chopped(1);
+            }
+        }
+        return roots;
+    }
+
+    /// Nothing when the window does not show the change; otherwise whether it is
+    /// git's state rather than a file in the work tree.
+    std::optional<bool> classify(const QString& path, const IgnoredSet& ignored) const {
+        for (const QString& root : {git, common}) {
+            if (!root.isEmpty() && (path.startsWith(root) || withSlash(path) == root)) {
+                return gitChangeMatters(path.mid(root.size())) ? std::optional<bool>(true)
+                                                               : std::nullopt;
+            }
+        }
+        if (work.isEmpty() || !path.startsWith(work)) {
+            return std::nullopt;
+        }
+        const QString relative = path.mid(work.size());
+        if (relative == QStringLiteral(".git") || relative.startsWith(QStringLiteral(".git/")) ||
+            relative.contains(QStringLiteral("/.git/")) || ignored.contains(path)) {
+            return std::nullopt;
         }
         return false;
     }
@@ -337,9 +389,7 @@ struct RepoWatcher::Native {
         QPointer<RepoWatcher> owner;
         std::mutex mutex;
         IgnoredSet ignored;
-        QString workDir;
-        QString gitDir;
-        QString commonDir;
+        WatchRoots roots;
         std::atomic<bool> ready{false};
     };
 
@@ -355,10 +405,6 @@ struct RepoWatcher::Native {
         bool git = false;
         {
             std::lock_guard<std::mutex> lock(shared->mutex);
-            const QString gitRoot = withSlash(shared->gitDir);
-            const QString commonRoot =
-                shared->commonDir.isEmpty() ? QString() : withSlash(shared->commonDir);
-            const QString workRoot = shared->workDir.isEmpty() ? QString() : withSlash(shared->workDir);
             for (size_t i = 0; i < count; ++i) {
                 if (flags[i] & (kFSEventStreamEventFlagMustScanSubDirs |
                                 kFSEventStreamEventFlagUserDropped |
@@ -367,32 +413,12 @@ struct RepoWatcher::Native {
                     git = true;
                     continue;
                 }
-                const QString path = QString::fromUtf8(names[i]);
-                if (path.startsWith(gitRoot) || withSlash(path) == gitRoot) {
-                    if (gitChangeMatters(path.mid(gitRoot.size()))) {
-                        any = true;
-                        git = true;
-                    }
-                    continue;
+                const std::optional<bool> kind =
+                    shared->roots.classify(QString::fromUtf8(names[i]), shared->ignored);
+                if (kind) {
+                    any = true;
+                    git = git || *kind;
                 }
-                if (!commonRoot.isEmpty() &&
-                    (path.startsWith(commonRoot) || withSlash(path) == commonRoot)) {
-                    if (gitChangeMatters(path.mid(commonRoot.size()))) {
-                        any = true;
-                        git = true;
-                    }
-                    continue;
-                }
-                if (workRoot.isEmpty() || !path.startsWith(workRoot)) {
-                    continue;
-                }
-                const QString relative = path.mid(workRoot.size());
-                if (relative == QStringLiteral(".git") ||
-                    relative.startsWith(QStringLiteral(".git/")) ||
-                    relative.contains(QStringLiteral("/.git/")) || shared->ignored.contains(path)) {
-                    continue;
-                }
-                any = true;
             }
         }
         if (!any) {
@@ -416,19 +442,9 @@ struct RepoWatcher::Native {
 bool RepoWatcher::startNative() {
     auto shared = std::make_shared<Native::Shared>();
     shared->owner = this;
-    shared->workDir = m_workDir;
-    shared->gitDir = m_gitDir;
-    shared->commonDir = m_commonDir == m_gitDir ? QString() : m_commonDir;
+    shared->roots = WatchRoots(m_workDir, m_gitDir, m_commonDir);
 
-    QStringList roots;
-    if (!m_workDir.isEmpty()) {
-        roots << m_workDir;
-    }
-    for (const QString& dir : {m_gitDir, shared->commonDir}) {
-        if (!dir.isEmpty() && (m_workDir.isEmpty() || !dir.startsWith(withSlash(m_workDir)))) {
-            roots << dir;
-        }
-    }
+    const QStringList roots = shared->roots.streamRoots();
     CFMutableArrayRef array = CFArrayCreateMutable(nullptr, roots.size(), &kCFTypeArrayCallBacks);
     for (const QString& root : roots) {
         CFStringRef path = root.toCFString();
@@ -484,6 +500,159 @@ void RepoWatcher::stopNative() {
 
 int RepoWatcher::nativeDirectoryCount() const {
     return m_native ? 1 : 0;
+}
+
+bool RepoWatcher::nativeReady() const {
+    return m_native && m_native->shared->ready.load();
+}
+
+#elif defined(_WIN32)
+
+struct RepoWatcher::Native {
+    struct Shared {
+        QPointer<RepoWatcher> owner;
+        std::mutex mutex;
+        IgnoredSet ignored;
+        WatchRoots roots;
+        std::atomic<bool> ready{false};
+        HANDLE stop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+
+        ~Shared() {
+            if (stop) {
+                CloseHandle(stop);
+            }
+        }
+    };
+
+    std::shared_ptr<Shared> shared;
+    std::vector<std::thread> threads;
+
+    static void post(const std::shared_ptr<Shared>& shared, bool git) {
+        QPointer<RepoWatcher> owner = shared->owner;
+        if (!owner) {
+            return;
+        }
+        QMetaObject::invokeMethod(
+            owner.data(),
+            [owner, git] {
+                if (owner) {
+                    owner->noteChange(git);
+                }
+            },
+            Qt::QueuedConnection);
+    }
+
+    /// One recursive ReadDirectoryChangesW on `root` until `stop` is signalled. A
+    /// result of zero bytes is an overflow: something changed, nobody knows what.
+    static void watch(std::shared_ptr<Shared> shared, QString root) {
+        const std::wstring native = QDir::toNativeSeparators(root).toStdWString();
+        HANDLE dir = CreateFileW(native.c_str(), FILE_LIST_DIRECTORY,
+                                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                                 OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
+                                 nullptr);
+        if (dir == INVALID_HANDLE_VALUE) {
+            return;
+        }
+        OVERLAPPED overlapped{};
+        overlapped.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        std::vector<DWORD> buffer(16 * 1024);
+        const DWORD bytes = static_cast<DWORD>(buffer.size() * sizeof(DWORD));
+        constexpr DWORD kFilter = FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
+                                  FILE_NOTIFY_CHANGE_SIZE | FILE_NOTIFY_CHANGE_LAST_WRITE |
+                                  FILE_NOTIFY_CHANGE_CREATION;
+        const QString prefix = withSlash(root);
+        for (;;) {
+            ResetEvent(overlapped.hEvent);
+            if (!ReadDirectoryChangesW(dir, buffer.data(), bytes, TRUE, kFilter, nullptr,
+                                       &overlapped, nullptr)) {
+                break;
+            }
+            HANDLE waits[2] = {overlapped.hEvent, shared->stop};
+            if (WaitForMultipleObjects(2, waits, FALSE, INFINITE) != WAIT_OBJECT_0) {
+                CancelIoEx(dir, &overlapped);
+                DWORD ignored = 0;
+                GetOverlappedResult(dir, &overlapped, &ignored, TRUE);
+                break;
+            }
+            DWORD length = 0;
+            if (!GetOverlappedResult(dir, &overlapped, &length, FALSE)) {
+                break;
+            }
+            if (length == 0) {
+                post(shared, true);
+                continue;
+            }
+            bool any = false;
+            bool git = false;
+            {
+                std::lock_guard<std::mutex> lock(shared->mutex);
+                const auto* base = reinterpret_cast<const char*>(buffer.data());
+                for (DWORD offset = 0;;) {
+                    const auto* info =
+                        reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(base + offset);
+                    QString name = QString::fromWCharArray(
+                        info->FileName, static_cast<int>(info->FileNameLength / sizeof(WCHAR)));
+                    name.replace(QLatin1Char('\\'), QLatin1Char('/'));
+                    const std::optional<bool> kind =
+                        shared->roots.classify(prefix + name, shared->ignored);
+                    if (kind) {
+                        any = true;
+                        git = git || *kind;
+                    }
+                    if (info->NextEntryOffset == 0) {
+                        break;
+                    }
+                    offset += info->NextEntryOffset;
+                }
+            }
+            if (any) {
+                post(shared, git);
+            }
+        }
+        CloseHandle(overlapped.hEvent);
+        CloseHandle(dir);
+    }
+};
+
+bool RepoWatcher::startNative() {
+    auto shared = std::make_shared<Native::Shared>();
+    if (!shared->stop) {
+        return false;
+    }
+    shared->owner = this;
+    shared->roots = WatchRoots(m_workDir, m_gitDir, m_commonDir);
+    m_native = std::make_unique<Native>();
+    m_native->shared = shared;
+    for (const QString& root : shared->roots.streamRoots()) {
+        m_native->threads.emplace_back(&Native::watch, shared, root);
+    }
+
+    const QString workDir = m_workDir;
+    const IgnoredLister lister = m_ignoredLister;
+    QThreadPool::globalInstance()->start([shared, workDir, lister] {
+        if (!workDir.isEmpty() && lister) {
+            IgnoredSet ignored = IgnoredSet::from(workDir, lister(workDir));
+            std::lock_guard<std::mutex> lock(shared->mutex);
+            shared->ignored = std::move(ignored);
+        }
+        shared->ready = true;
+    });
+    return true;
+}
+
+void RepoWatcher::stopNative() {
+    if (!m_native) {
+        return;
+    }
+    SetEvent(m_native->shared->stop);
+    for (std::thread& thread : m_native->threads) {
+        thread.join();
+    }
+    m_native.reset();
+}
+
+int RepoWatcher::nativeDirectoryCount() const {
+    return m_native ? static_cast<int>(m_native->threads.size()) : 0;
 }
 
 bool RepoWatcher::nativeReady() const {
