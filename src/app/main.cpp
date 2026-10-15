@@ -320,10 +320,10 @@ void printUsage() {
                  "  --ui-keymap <list|set <id> <seq>|reset <id>|reset-all>\n"
                  "                      list, rebind or clear a command shortcut through\n"
                  "                      the window's own binding path\n"
-                 "  --ui-search <query> [grep|author|sha] [reveal-hash]\n"
-                 "                      search every ref (literal, case-insensitive) and\n"
-                 "                      report the matches; optionally page the graph to\n"
-                 "                      the named commit and report its row\n"
+                 "  --ui-search <query> [text|author|dates:<from>..<to>] [reveal-hash]\n"
+                 "                      fill the search window (Ctrl+F) and report its\n"
+                 "                      blocks once git is done; optionally page the graph\n"
+                 "                      to the named commit and report its row\n"
                  "  --ui-conflict <regions|take|line|takelines|clear-choices|delete|deleted|unresolve|save-draft|auto|next|prev|select|text|save|resolve|keep|smart|stage-worktree|mark-all|close|refresh> [a] [b]\n"
                  "                      drive the conflict editor through the window's\n"
                  "                      own path: list regions, take a side for one\n"
@@ -340,7 +340,8 @@ void printUsage() {
                  "                      and report the state it left behind\n"
                  "  --ui-visibility <hide|unhide|solo|unsolo|pin|unpin|show|smart|smart-off|\n"
                  "                   preset:<mine|recent|prefix|no-upstream|ahead|behind>|\n"
-                 "                   preset-prefix:<text>|preset-off> [branch]\n"
+                 "                   preset-prefix:<text>|preset-off|merged-commits|\n"
+                 "                   merged-commits-off|report> [branch]\n"
                  "                      filter the graph and report what it walks and labels\n"
                  "  --ui-worktree <list|add|remove|lock|unlock|prune|open> [args…]\n"
                  "                      drive worktrees through the window's own path and\n"
@@ -1739,7 +1740,7 @@ int main(int argc, char* argv[]) {
         QTimer::singleShot(1200, &window, [&window, uiSearchQuery, uiSearchArgs] {
             const QStringList report = window.searchForDiagnostics(
                 QString::fromStdString(uiSearchQuery),
-                uiSearchArgs.value(0, QStringLiteral("grep")), uiSearchArgs.value(1));
+                uiSearchArgs.value(0, QStringLiteral("text")), uiSearchArgs.value(1));
             for (const QString& line : report) {
                 std::printf("%s\n", line.toUtf8().constData());
             }

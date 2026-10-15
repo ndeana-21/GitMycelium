@@ -6,6 +6,7 @@
 #include "repo/repo_session.h"
 #include "theme/theme.h"
 #include "ui/main_window.h"
+#include "ui/ref_tree_view.h"
 
 #include <QDir>
 #include <QFile>
@@ -147,6 +148,8 @@ private slots:
     void theStoreAdoptsTheOldCheckoutPathKey();
     void theTreeMarksHiddenBranches();
     void theWindowPathReportsTheFilteredGraph();
+    void theEyeHidesASectionAndShowsItAgain();
+    void aGoneMergedBranchCanFoldIntoItsMerge();
 
 private:
     std::unique_ptr<QTemporaryDir> m_dir;
@@ -421,6 +424,81 @@ void GraphVisibilityTest::theWindowPathReportsTheFilteredGraph() {
     text = report.join(QLatin1Char('\n'));
     QVERIFY(text.contains(QStringLiteral("rows: 4")));
     QVERIFY(text.contains(QStringLiteral("hidden: 0")));
+}
+
+void GraphVisibilityTest::theEyeHidesASectionAndShowsItAgain() {
+    MainWindow window;
+    window.setHeadless(true);
+    window.resize(1200, 800);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    QVERIFY(window.openRepository(m_path));
+    auto* tree = window.findChild<RefTreeView*>();
+    QVERIFY(tree);
+    tree->expandAll();
+
+    const auto find = [tree](const QString& text) {
+        const QModelIndexList found = tree->model()->match(
+            tree->model()->index(0, 0), Qt::DisplayRole, text, 1,
+            Qt::MatchExactly | Qt::MatchRecursive);
+        return found.isEmpty() ? QModelIndex() : found.front();
+    };
+    const auto hover = [tree](const QPoint& at) {
+        QMouseEvent move(QEvent::MouseMove, at, tree->viewport()->mapToGlobal(at), Qt::NoButton,
+                         Qt::NoButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(tree->viewport(), &move);
+    };
+    const auto click = [tree, &hover](const QModelIndex& index) {
+        const QPoint at = tree->eyeRect(index).center();
+        hover(at);
+        QTest::mouseClick(tree->viewport(), Qt::LeftButton, {}, at);
+    };
+
+    const QModelIndex local = find(QStringLiteral("Local"));
+    QVERIFY(local.isValid());
+    QCOMPARE(local.data(RefModel::EyeRole).toInt(), int(RefModel::EyeShown));
+    QVERIFY(!tree->eyeVisible(local));
+    hover(tree->visualRect(local).center());
+    QVERIFY(tree->eyeVisible(local));
+
+    // The current branch stays: the eye hides the two others under the section.
+    click(local);
+    QString text = window.visibilityForDiagnostics(QStringLiteral("report"), {}).join('\n');
+    QVERIFY2(text.contains(QStringLiteral("hidden: 2")), qPrintable(text));
+    QVERIFY(text.contains(QStringLiteral("rows: 1")));
+    const QModelIndex featureA = find(QStringLiteral("feature-a"));
+    QCOMPARE(featureA.data(RefModel::EyeRole).toInt(), int(RefModel::EyeHidden));
+    QVERIFY(tree->eyeVisible(featureA));
+    QCOMPARE(find(QStringLiteral("Local")).data(RefModel::EyeRole).toInt(),
+             int(RefModel::EyeHidden));
+
+    click(featureA);
+    text = window.visibilityForDiagnostics(QStringLiteral("report"), {}).join('\n');
+    QVERIFY(text.contains(QStringLiteral("hidden: 1")));
+    QVERIFY(text.contains(QStringLiteral("label: feature-a")));
+
+    click(find(QStringLiteral("Local")));
+    text = window.visibilityForDiagnostics(QStringLiteral("report"), {}).join('\n');
+    QVERIFY(text.contains(QStringLiteral("hidden: 2")));
+
+    click(find(QStringLiteral("Local")));
+    text = window.visibilityForDiagnostics(QStringLiteral("show"), {}).join('\n');
+    QVERIFY(text.contains(QStringLiteral("rows: 4")));
+}
+
+void GraphVisibilityTest::aGoneMergedBranchCanFoldIntoItsMerge() {
+    QVERIFY(git(m_path, identity() + QStringList{"merge", "-q", "--no-ff", "-m", "merge a",
+                                                 "feature-a"}));
+    QVERIFY(git(m_path, {"branch", "-D", "feature-a"}));
+    MainWindow window;
+    QVERIFY(window.openRepository(m_path));
+    QString text =
+        window.visibilityForDiagnostics(QStringLiteral("merged-commits"), {}).join('\n');
+    QVERIFY2(text.contains(QStringLiteral("rows: 5")), qPrintable(text));
+    text = window.visibilityForDiagnostics(QStringLiteral("merged-commits-off"), {}).join('\n');
+    QVERIFY2(text.contains(QStringLiteral("rows: 3")), qPrintable(text));
+    QVERIFY(text.contains(QStringLiteral("merged commits: merge only")));
+    window.visibilityForDiagnostics(QStringLiteral("merged-commits"), {});
 }
 
 QTEST_MAIN(GraphVisibilityTest)

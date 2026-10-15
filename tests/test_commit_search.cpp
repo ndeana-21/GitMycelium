@@ -1,5 +1,6 @@
 #include "core/types.h"
 #include "git/cli.h"
+#include "git/repository.h"
 #include "repo/repo_session.h"
 #include "ui/main_window.h"
 
@@ -41,6 +42,36 @@ QStringList linesOf(const QString& text) {
     return out;
 }
 
+std::vector<CommitHit> search(const QString& workDir, const CommitQuery& query,
+                              std::size_t limit = 50) {
+    std::vector<CommitHit> found;
+    const std::string error = Repository::streamCommitSearch(
+        workDir.toStdString(), query, limit, [&found](std::vector<CommitHit>&& batch) {
+            for (CommitHit& hit : batch) {
+                found.push_back(std::move(hit));
+            }
+            return true;
+        });
+    if (!error.empty()) {
+        qWarning() << "search failed:" << QString::fromStdString(error);
+    }
+    return found;
+}
+
+CommitQuery byText(const QString& text) {
+    CommitQuery query;
+    query.text = text.toStdString();
+    return query;
+}
+
+QSet<QString> idsOf(const std::vector<CommitHit>& hits) {
+    QSet<QString> ids;
+    for (const CommitHit& hit : hits) {
+        ids.insert(QString::fromStdString(hit.commit.id));
+    }
+    return ids;
+}
+
 } // namespace
 
 class CommitSearchTest : public QObject {
@@ -56,8 +87,12 @@ private slots:
 
     void messageSearchMatchesTheBinary();
     void authorSearchMatchesSubstrings();
-    void aShaResolvesToOneCommit();
-    void pagingSkipsAndLimits();
+    void aShaComesFirst();
+    void wildcardsMatchInsideTheText();
+    void aDateRangeKeepsItsCommits();
+    void theSourceNamesTheRefAndTheBodyIsKept();
+    void aSearchStopsWhenAsked();
+    void theLimitCapsTheResults();
     void theWindowSearchesAndReveals();
 };
 
@@ -97,95 +132,151 @@ void CommitSearchTest::cleanup() {
 }
 
 void CommitSearchTest::messageSearchMatchesTheBinary() {
-    RepoSession session;
-    QString error;
-    QVERIFY2(session.open(m_path, &error), qPrintable(error));
-
-    const std::vector<CommitInfo> results =
-        session.searchCommitsBlocking(QStringLiteral("FIX"), CommitSearchField::Message, 50);
+    const std::vector<CommitHit> results = search(m_path, byText(QStringLiteral("FIX")));
     QCOMPARE(results.size(), std::size_t(2));
-    for (const CommitInfo& commit : results) {
-        QVERIFY(QString::fromStdString(commit.summary).contains(QStringLiteral("fix")));
+    for (const CommitHit& hit : results) {
+        QVERIFY(QString::fromStdString(hit.commit.summary).contains(QStringLiteral("fix")));
     }
 
     // Oracle: the same query through the binary.
     const QStringList expected =
         linesOf(gitOut(m_path, {"log", "--all", "-i", "-F", "--grep=fix", "--format=%H"}));
-    QCOMPARE(results.size(), static_cast<std::size_t>(expected.size()));
-    QSet<QString> got;
-    for (const CommitInfo& commit : results) {
-        got.insert(QString::fromStdString(commit.id));
-    }
-    QCOMPARE(got, QSet<QString>(expected.begin(), expected.end()));
+    QCOMPARE(idsOf(results), QSet<QString>(expected.begin(), expected.end()));
 }
 
 void CommitSearchTest::authorSearchMatchesSubstrings() {
-    RepoSession session;
-    QString error;
-    QVERIFY2(session.open(m_path, &error), qPrintable(error));
-
-    const std::vector<CommitInfo> results =
-        session.searchCommitsBlocking(QStringLiteral("carol"), CommitSearchField::Author, 50);
+    CommitQuery query;
+    query.author = "carol";
+    std::vector<CommitHit> results = search(m_path, query);
     QCOMPARE(results.size(), std::size_t(1));
-    QCOMPARE(QString::fromStdString(results.front().author.name), QStringLiteral("Carol"));
+    QCOMPARE(QString::fromStdString(results.front().commit.author.name), QStringLiteral("Carol"));
+
+    query.author = "EXAMPLE.COM";
+    QCOMPARE(search(m_path, query).size(), std::size_t(4));
 }
 
-void CommitSearchTest::aShaResolvesToOneCommit() {
-    RepoSession session;
-    QString error;
-    QVERIFY2(session.open(m_path, &error), qPrintable(error));
-
+void CommitSearchTest::aShaComesFirst() {
     const QString head = gitOut(m_path, {"rev-parse", "HEAD"});
-    const std::vector<CommitInfo> resolved =
-        session.searchCommitsBlocking(head, CommitSearchField::Sha, 50);
+    std::vector<CommitHit> resolved = search(m_path, byText(head));
     QCOMPARE(resolved.size(), std::size_t(1));
-    QCOMPARE(QString::fromStdString(resolved.front().id), head);
+    QCOMPARE(QString::fromStdString(resolved.front().commit.id), head);
 
-    const std::vector<CommitInfo> abbreviated =
-        session.searchCommitsBlocking(head.left(8), CommitSearchField::Sha, 50);
-    QCOMPARE(abbreviated.size(), std::size_t(1));
+    resolved = search(m_path, byText(head.left(8)));
+    QVERIFY(!resolved.empty());
+    QCOMPARE(QString::fromStdString(resolved.front().commit.id), head);
 
-    QVERIFY(session.searchCommitsBlocking(QStringLiteral("deadbeefdeadbeef"),
-                                          CommitSearchField::Sha, 50)
-                .empty());
+    QVERIFY(search(m_path, byText(QStringLiteral("deadbeefdeadbeef"))).empty());
 }
 
-void CommitSearchTest::pagingSkipsAndLimits() {
-    RepoSession session;
-    QString error;
-    QVERIFY2(session.open(m_path, &error), qPrintable(error));
+void CommitSearchTest::wildcardsMatchInsideTheText() {
+    // "*text*" is the plain search; a star inside the query spans anything.
+    std::vector<CommitHit> results = search(m_path, byText(QStringLiteral("f*bug")));
+    QCOMPARE(results.size(), std::size_t(1));
+    QCOMPARE(QString::fromStdString(results.front().commit.summary),
+             QStringLiteral("fix: branch bug"));
 
-    const std::vector<CommitInfo> all =
-        session.searchCommitsBlocking(QStringLiteral("fix"), CommitSearchField::Message, 50);
-    QCOMPARE(all.size(), std::size_t(2));
+    QCOMPARE(search(m_path, byText(QStringLiteral("log?n"))).size(), std::size_t(1));
+    // Regex characters in a wildcard query are literal.
+    QVERIFY(search(m_path, byText(QStringLiteral("fix.*bug"))).empty());
+    QVERIFY(search(m_path, byText(QStringLiteral("(fix*"))).empty());
+}
 
-    const std::vector<CommitInfo> first =
-        session.searchCommitsBlocking(QStringLiteral("fix"), CommitSearchField::Message, 1, 0);
-    const std::vector<CommitInfo> second =
-        session.searchCommitsBlocking(QStringLiteral("fix"), CommitSearchField::Message, 1, 1);
-    QCOMPARE(first.size(), std::size_t(1));
-    QCOMPARE(second.size(), std::size_t(1));
-    QVERIFY(first.front().id != second.front().id);
-    QCOMPARE(QString::fromStdString(first.front().id), QString::fromStdString(all.at(0).id));
-    QCOMPARE(QString::fromStdString(second.front().id), QString::fromStdString(all.at(1).id));
+void CommitSearchTest::aDateRangeKeepsItsCommits() {
+    const qint64 now = QDateTime::currentSecsSinceEpoch();
+    CommitQuery query;
+    query.since = now - 3600;
+    query.until = now + 3600;
+    QCOMPARE(search(m_path, query).size(), std::size_t(4));
+
+    query.text = "fix";
+    QCOMPARE(search(m_path, query).size(), std::size_t(2));
+
+    query.text.clear();
+    query.since = 1;
+    query.until = 1000;
+    QVERIFY(search(m_path, query).empty());
+}
+
+void CommitSearchTest::theSourceNamesTheRefAndTheBodyIsKept() {
+    const std::vector<CommitHit> results = search(m_path, byText(QStringLiteral("branch bug")));
+    QCOMPARE(results.size(), std::size_t(1));
+    QCOMPARE(QString::fromStdString(results.front().source), QStringLiteral("refs/heads/feature"));
+    QCOMPARE(QString::fromStdString(results.front().commit.author.email),
+             QStringLiteral("carol@example.com"));
+
+    QVERIFY(git(m_path, {"-c", "user.name=Dan", "-c", "user.email=dan@example.com", "commit",
+                         "-q", "--allow-empty", "-m", "subject line", "-m", "body text\nsecond"}));
+    const std::vector<CommitHit> withBody = search(m_path, byText(QStringLiteral("subject line")));
+    QCOMPARE(withBody.size(), std::size_t(1));
+    QCOMPARE(QString::fromStdString(withBody.front().commit.summary), QStringLiteral("subject line"));
+    QCOMPARE(QString::fromStdString(withBody.front().commit.body),
+             QStringLiteral("body text\nsecond"));
+}
+
+void CommitSearchTest::aSearchStopsWhenAsked() {
+    for (int i = 0; i < 300; ++i) {
+        QVERIFY(git(m_path, {"-c", "user.name=Eve", "-c", "user.email=eve@example.com", "commit",
+                             "-q", "--allow-empty", "-m", QStringLiteral("bulk %1").arg(i)}));
+    }
+    int batches = 0;
+    std::size_t delivered = 0;
+    const std::string error = Repository::streamCommitSearch(
+        m_path.toStdString(), byText(QStringLiteral("bulk")), 1000,
+        [&](std::vector<CommitHit>&& batch) {
+            ++batches;
+            delivered += batch.size();
+            return false;
+        });
+    QVERIFY(error.empty());
+    QCOMPARE(batches, 1);
+    QVERIFY(delivered < 300);
+}
+
+void CommitSearchTest::theLimitCapsTheResults() {
+    QCOMPARE(search(m_path, byText(QStringLiteral(":")), 3).size(), std::size_t(3));
 }
 
 void CommitSearchTest::theWindowSearchesAndReveals() {
     MainWindow window;
     QVERIFY(window.openRepository(m_path));
 
-    const QStringList report =
-        window.searchForDiagnostics(QStringLiteral("fix"), QStringLiteral("grep"));
-    QVERIFY2(report.value(0) == QStringLiteral("results: 2"), qPrintable(report.join('\n')));
+    QStringList report = window.searchForDiagnostics(QStringLiteral("fix"), QStringLiteral("text"));
+    QString text = report.join(QLatin1Char('\n'));
+    QVERIFY2(text.contains(QStringLiteral("== Commits · 2")), qPrintable(text));
+    QCOMPARE(report.filter(QStringLiteral("commit ")).size(), 2);
+    // Ctrl+F lands on history, not on a command that happens to match.
+    QVERIFY2(report.filter(QStringLiteral("> commit ")).size() == 1, qPrintable(text));
+
+    // Branches before commits, each block under its own heading.
+    report = window.searchForDiagnostics(QStringLiteral("fea"), QStringLiteral("text"));
+    text = report.join(QLatin1Char('\n'));
+    const int branches = report.indexOf(QStringLiteral("== Branches · 1"));
+    const int commits = report.indexOf(QRegularExpression(QStringLiteral("== Commits.*")));
+    QVERIFY2(branches >= 0 && commits > branches, qPrintable(text));
+    QVERIFY(report.contains(QStringLiteral("> ref feature")));
+    QVERIFY(text.contains(QStringLiteral("[feature] fix: branch bug")) ||
+            text.contains(QStringLiteral("feat: add login")));
+
+    report = window.searchForDiagnostics(QStringLiteral("alice"), QStringLiteral("author"));
+    QCOMPARE(report.filter(QStringLiteral("commit ")).size(), 2);
+    QVERIFY(report.filter(QStringLiteral("== Branches")).isEmpty());
+
+    const QString today = QDate::currentDate().toString(Qt::ISODate);
+    report = window.searchForDiagnostics(QStringLiteral("fix"),
+                                         QStringLiteral("dates:%1..%1").arg(today));
+    QCOMPARE(report.filter(QStringLiteral("commit ")).size(), 2);
+    report = window.searchForDiagnostics(QString(), QStringLiteral("dates:2001-01-01..2001-12-31"));
+    QVERIFY2(report.contains(QStringLiteral("== Commits · nothing found")),
+             qPrintable(report.join(QLatin1Char('\n'))));
 
     const QString head = gitOut(m_path, {"rev-parse", "HEAD"});
     const QStringList revealed =
-        window.searchForDiagnostics(QStringLiteral("fix"), QStringLiteral("grep"), head);
+        window.searchForDiagnostics(QStringLiteral("fix"), QStringLiteral("text"), head);
     QVERIFY2(revealed.join(QLatin1Char('\n')).contains(QStringLiteral("revealed row ")),
              qPrintable(revealed.join(QLatin1Char('\n'))));
 
     const QStringList missing = window.searchForDiagnostics(
-        QStringLiteral("fix"), QStringLiteral("grep"), QStringLiteral("deadbeefdeadbeef"));
+        QStringLiteral("fix"), QStringLiteral("text"), QStringLiteral("deadbeefdeadbeef"));
     QVERIFY2(missing.join(QLatin1Char('\n')).contains(QStringLiteral("not found")),
              qPrintable(missing.join(QLatin1Char('\n'))));
 }

@@ -40,12 +40,13 @@ struct CommitPage {
     QString error;
 };
 
-/// The answer to a commit search, carried back from the worker with the query it
-/// belongs to so a stale page can be ignored.
-struct CommitSearchResults {
-    QString query;
-    int field = 0; ///< CommitSearchField, as an int to keep the metatype simple.
-    QVector<CommitInfo> commits;
+/// Commits a running search has found so far, tagged with the search they belong to
+/// so a batch from one the reader has typed past is dropped.
+struct CommitSearchBatch {
+    quint64 search = 0;
+    QVector<CommitHit> hits;
+    bool done = false;
+    QString error;
 };
 
 /// Branch tip metadata for every branch, read in one `for-each-ref`; on a
@@ -715,15 +716,12 @@ public:
     std::vector<CommitInfo> commitsBlocking(quint64 skip, quint32 limit, bool* hasMore,
                                             const HistoryFilter& filter = HistoryFilter{}) const;
 
-    /// Asynchronously searches every ref for `query`. Emits commitSearchFinished()
-    /// on the receiver's thread. Long enough on a large repository that it must not
-    /// sit on the GUI thread.
-    void requestCommitSearch(const QString& query, CommitSearchField field, quint32 limit);
+    /// Starts a search on a worker and returns its id; results arrive as
+    /// `commitSearchProgress` while git finds them, the last batch marked `done`.
+    /// Starting another, or `stopCommitSearch`, stops the one running.
+    quint64 startCommitSearch(const CommitQuery& query, quint32 limit);
+    void stopCommitSearch();
 
-    /// Synchronous helper for the headless path and tests. `skip` pages through a
-    /// query that matches more commits than one call returns.
-    std::vector<CommitInfo> searchCommitsBlocking(const QString& query, CommitSearchField field,
-                                                  quint32 limit, std::size_t skip = 0) const;
 
     std::unordered_map<std::string, std::vector<RefInfo>> refsByCommit(
         const HistoryFilter& filter = HistoryFilter{}) const;
@@ -736,7 +734,7 @@ public:
 signals:
     void snapshotReady();
     void commitsLoaded(gk::CommitPage page);
-    void commitSearchFinished(gk::CommitSearchResults results);
+    void commitSearchProgress(gk::CommitSearchBatch batch);
     void refMetaLoaded(gk::RefMetaSnapshot snapshot);
     void requestFailed(QString message);
     /// A read the window asked for synchronously failed; the caller got an empty
@@ -827,6 +825,7 @@ private:
     std::atomic<bool> m_autoCommitGraph{false};
     std::atomic<bool> m_commitGraphWriteStarted{false};
     std::atomic<bool> m_alive{true};
+    std::atomic<quint64> m_commitSearch{0};
     /// Every background worker counts itself here (`startWorker`). `~RepoSession`
     /// waits for the count to drain — a worker that outlives the session reads freed
     /// memory — and a retired session deletes itself when it does, which is how a
@@ -841,5 +840,5 @@ private:
 } // namespace gk
 
 Q_DECLARE_METATYPE(gk::CommitPage)
-Q_DECLARE_METATYPE(gk::CommitSearchResults)
+Q_DECLARE_METATYPE(gk::CommitSearchBatch)
 Q_DECLARE_METATYPE(gk::RefMetaSnapshot)

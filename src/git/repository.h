@@ -3,6 +3,7 @@
 #include "core/types.h"
 
 #include <array>
+#include <functional>
 #include <map>
 #include <memory>
 #include <stdexcept>
@@ -104,18 +105,12 @@ public:
 
     std::vector<ReflogEntry> reflog(std::size_t limit) const;
 
-    /// Commits from every ref matching `query`, newest first, paged. Message and
-    /// author are literal, case-insensitive substrings (`git log -F -i`); a hash is
-    /// resolved with `git rev-parse`, so a full or unambiguous abbreviation returns
-    /// the one commit and an ambiguous one returns nothing.
-    std::vector<CommitInfo> searchCommits(const std::string& query, CommitSearchField field,
-                                          std::size_t skip, std::size_t limit) const;
-    /// The same search in the work tree at `workDir`, with no repository handle and
-    /// so no lock held for the duration of a large `git log --all`.
-    static std::vector<CommitInfo> searchCommitsIn(const std::string& workDir,
-                                                   const std::string& query,
-                                                   CommitSearchField field, std::size_t skip,
-                                                   std::size_t limit);
+    /// The search window's query, handed over in batches as `git log` finds them.
+    /// `deliver` returning false stops the search. A hash comes first when the text
+    /// names one. Returns git's failure, empty on success or when stopped.
+    static std::string streamCommitSearch(
+        const std::string& workDir, const CommitQuery& query, std::size_t limit,
+        const std::function<bool(std::vector<CommitHit>&&)>& deliver);
 
     /// Restores `path` from `revision` into `base`: into the working tree when
     /// `staged` is false, into the index when it is. This is `git restore`.

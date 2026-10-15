@@ -975,7 +975,8 @@ std::vector<CommitInfo> Repository::commits(std::size_t skip, std::size_t limit,
 
     std::vector<CommitInfo> out;
     const bool sameFilter = m_walkFilter.scope == filter.scope &&
-                            m_walkFilter.visibleRefs == filter.visibleRefs;
+                            m_walkFilter.visibleRefs == filter.visibleRefs &&
+                            m_walkFilter.firstParentHistory == filter.firstParentHistory;
     // The walk is reused only while the caller keeps asking from where the last
     // page ended. A jump or a new filter rebuilds it, and the fast-forward below
     // is paid once, never twice for the same row.
@@ -1023,7 +1024,13 @@ std::vector<CommitInfo> Repository::commits(std::size_t skip, std::size_t limit,
         }
         ci.parents.reserve(parents);
         for (unsigned i = 0; i < parents; ++i) {
-            ci.parents.push_back(oidToString(git_commit_parent_id(commit, i)));
+            const git_oid* parent = git_commit_parent_id(commit, i);
+            TopoWalk::RawOid raw;
+            std::memcpy(raw.data(), parent->id, raw.size());
+            if (i > 0 && m_walk->omitted(raw)) {
+                continue;
+            }
+            ci.parents.push_back(oidToString(parent));
         }
         out.push_back(std::move(ci));
         git_commit_free(commit);
@@ -1173,6 +1180,7 @@ bool Repository::buildCommitWalk(const HistoryFilter& filter) const {
             git_odb_object_free(object);
             return parsed;
         });
+    m_walk->setFirstParentHistory(filter.firstParentHistory);
     m_walk->start(tips, m_walkStashes);
     return true;
 }
@@ -3220,74 +3228,181 @@ std::vector<ReflogEntry> Repository::reflog(std::size_t limit) const {
     return out;
 }
 
-std::vector<CommitInfo> Repository::searchCommits(const std::string& query,
-                                                  CommitSearchField field, std::size_t skip,
-                                                  std::size_t limit) const {
-    return searchCommitsIn(workDirOf(m_repo).string(), query, field, skip, limit);
+namespace {
+
+bool isWildcard(const std::string& pattern) {
+    return pattern.find_first_of("*?") != std::string::npos;
 }
 
-std::vector<CommitInfo> Repository::searchCommitsIn(const std::string& workDir,
-                                                    const std::string& query,
-                                                    CommitSearchField field, std::size_t skip,
-                                                    std::size_t limit) {
-    if (workDir.empty()) {
-        fail("cannot search commits in a bare repository");
+/// `feat*login` as an extended regex: the wildcards become `.*` and `.`, everything
+/// else is literal.
+std::string wildcardRegex(const std::string& pattern) {
+    std::string out;
+    for (const char c : pattern) {
+        if (c == '*') {
+            out += ".*";
+        } else if (c == '?') {
+            out += '.';
+        } else {
+            if (std::strchr("\\^$.|+()[]{}", c)) {
+                out += '\\';
+            }
+            out += c;
+        }
     }
-    if (query.empty() || limit == 0) {
+    return out;
+}
+
+/// `2026-10-16 12:00:00 +0000`: git's own approxidate reads a bare number as a date
+/// only past eight digits, and "@<seconds>" not at all.
+std::string gitDateUtc(std::int64_t seconds) {
+    const std::time_t time = static_cast<std::time_t>(seconds);
+    std::tm parts{};
+#ifdef _WIN32
+    gmtime_s(&parts, &time);
+#else
+    gmtime_r(&time, &parts);
+#endif
+    char text[40];
+    std::strftime(text, sizeof(text), "%Y-%m-%d %H:%M:%S +0000", &parts);
+    return text;
+}
+
+bool looksLikeHash(const std::string& text) {
+    return text.size() >= 4 && text.size() <= 64 &&
+           std::all_of(text.begin(), text.end(),
+                       [](unsigned char c) { return std::isxdigit(c) != 0; });
+}
+
+/// One `-z` record: hash, author time, name, email, source ref, raw message.
+bool parseHit(std::string_view record, CommitHit& hit) {
+    std::array<std::string_view, 6> fields;
+    for (std::size_t i = 0; i + 1 < fields.size(); ++i) {
+        const std::size_t cut = record.find('\x1f');
+        if (cut == std::string_view::npos) {
+            return false;
+        }
+        fields[i] = record.substr(0, cut);
+        record.remove_prefix(cut + 1);
+    }
+    fields.back() = record;
+    if (fields[0].empty()) {
+        return false;
+    }
+    CommitInfo& commit = hit.commit;
+    commit.id = std::string(fields[0]);
+    commit.author.whenUnix = std::strtoll(std::string(fields[1]).c_str(), nullptr, 10);
+    commit.author.name = std::string(fields[2]);
+    commit.author.email = std::string(fields[3]);
+    hit.source = std::string(fields[4]);
+    const std::string_view message = fields[5];
+    const std::size_t eol = message.find('\n');
+    commit.summary = std::string(message.substr(0, eol));
+    if (eol != std::string_view::npos) {
+        std::string_view body = message.substr(eol + 1);
+        while (!body.empty() && body.front() == '\n') {
+            body.remove_prefix(1);
+        }
+        while (!body.empty() && (body.back() == '\n' || body.back() == ' ')) {
+            body.remove_suffix(1);
+        }
+        commit.body = std::string(body);
+    }
+    return true;
+}
+
+} // namespace
+
+std::string Repository::streamCommitSearch(
+    const std::string& workDir, const CommitQuery& query, std::size_t limit,
+    const std::function<bool(std::vector<CommitHit>&&)>& deliver) {
+    if (workDir.empty() || limit == 0) {
         return {};
     }
+    const bool anything = !query.text.empty() || !query.author.empty() || query.since != 0 ||
+                          query.until != 0;
+    if (!anything) {
+        return {};
+    }
+    const std::string format = "--format=%H%x1f%at%x1f%an%x1f%ae%x1f%S%x1f%B";
 
-    // A unit separator between fields; a subject is one line, so the line itself is
-    // the record.
-    const std::string format = "--format=%H%x1f%at%x1f%an%x1f%s";
-    std::vector<std::string> args;
-    if (field == CommitSearchField::Sha) {
+    std::string pinned;
+    if (looksLikeHash(query.text) && query.author.empty() && query.since == 0 &&
+        query.until == 0) {
         const ProcessResult resolved =
-            runGit({"rev-parse", "--verify", "--quiet", query + "^{commit}"}, workDir);
-        if (resolved.exitCode != 0) {
-            return {}; // not a commit, or an ambiguous abbreviation
-        }
+            runGit({"rev-parse", "--verify", "--quiet", query.text + "^{commit}"}, workDir);
         std::string oid = resolved.out;
         while (!oid.empty() && (oid.back() == '\n' || oid.back() == '\r')) {
             oid.pop_back();
         }
-        args = {"log", "-1", format, oid};
-    } else {
-        // `-F` treats the query as a literal, not a regex; `-i` ignores case. Both
-        // apply to --grep and --author, so "search" means what a reader expects.
-        args = {"log", "--all", format, "--skip=" + std::to_string(skip),
-                "-n", std::to_string(limit), "-i", "-F",
-                (field == CommitSearchField::Author ? "--author=" : "--grep=") + query};
+        if (resolved.exitCode == 0) {
+            const ProcessResult shown = runGit({"log", "-1", "-z", format, oid}, workDir);
+            CommitHit hit;
+            if (shown.exitCode == 0 &&
+                parseHit(std::string_view(shown.out).substr(0, shown.out.find('\0')), hit)) {
+                pinned = hit.commit.id;
+                if (!deliver({std::move(hit)})) {
+                    return {};
+                }
+            }
+        }
     }
 
-    const ProcessResult run = runGit(args, workDir);
-    if (run.exitCode != 0) {
-        fail("cannot search commits: " + failureText(run));
+    std::vector<std::string> args = {"log", "--all", "-z", format, "-n", std::to_string(limit),
+                                     "-i"};
+    if (query.firstParent) {
+        args.push_back("--first-parent");
+    }
+    const bool regex = isWildcard(query.text) || isWildcard(query.author);
+    args.push_back(regex ? "-E" : "-F");
+    const auto pattern = [regex](const std::string& text) {
+        return regex ? wildcardRegex(text) : text;
+    };
+    if (!query.text.empty()) {
+        args.push_back("--grep=" + pattern(query.text));
+    }
+    if (!query.author.empty()) {
+        args.push_back("--author=" + pattern(query.author));
+    }
+    if (query.since != 0) {
+        args.push_back("--since=" + gitDateUtc(query.since));
+    }
+    if (query.until != 0) {
+        args.push_back("--until=" + gitDateUtc(query.until));
     }
 
-    std::vector<CommitInfo> out;
-    std::istringstream stream(run.out);
-    std::string line;
-    while (std::getline(stream, line)) {
-        if (line.empty()) {
-            continue;
+    std::string pending;
+    bool stopped = false;
+    const ProcessResult run = runGit(args, workDir, [&](std::string_view chunk) {
+        pending.append(chunk);
+        std::vector<CommitHit> batch;
+        std::size_t start = 0;
+        for (std::size_t end = pending.find('\0'); end != std::string::npos;
+             end = pending.find('\0', start)) {
+            CommitHit hit;
+            if (parseHit(std::string_view(pending).substr(start, end - start), hit) &&
+                hit.commit.id != pinned) {
+                batch.push_back(std::move(hit));
+            }
+            start = end + 1;
         }
-        const std::size_t f1 = line.find('\x1f');
-        const std::size_t f2 =
-            f1 == std::string::npos ? std::string::npos : line.find('\x1f', f1 + 1);
-        const std::size_t f3 =
-            f2 == std::string::npos ? std::string::npos : line.find('\x1f', f2 + 1);
-        if (f1 == std::string::npos || f2 == std::string::npos || f3 == std::string::npos) {
-            continue;
+        pending.erase(0, start);
+        if (!batch.empty() && !deliver(std::move(batch))) {
+            stopped = true;
+            return false;
         }
-        CommitInfo commit;
-        commit.id = line.substr(0, f1);
-        commit.author.whenUnix = std::stoll(line.substr(f1 + 1, f2 - f1 - 1));
-        commit.author.name = line.substr(f2 + 1, f3 - f2 - 1);
-        commit.summary = line.substr(f3 + 1);
-        out.push_back(std::move(commit));
+        return true;
+    });
+    if (stopped) {
+        return {};
     }
-    return out;
+    if (!pending.empty()) {
+        CommitHit hit;
+        if (parseHit(pending, hit) && hit.commit.id != pinned) {
+            deliver({std::move(hit)});
+        }
+    }
+    return run.exitCode == 0 ? std::string() : failureText(run);
 }
 
 std::string Repository::diffCliText(const Oid& base, const Oid& target,

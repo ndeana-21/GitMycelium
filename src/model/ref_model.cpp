@@ -223,6 +223,42 @@ void RefModel::refresh() {
     appendStashes();
     appendWorktrees();
     appendSubmodules();
+    markEyes(invisibleRootItem());
+}
+
+RefModel::EyeCount RefModel::markEyes(QStandardItem* item) {
+    EyeCount count;
+    const int eye = item->data(EyeRole).toInt();
+    if (item->data(ItemTypeRole).toInt() == RefItem && eye != EyeNone) {
+        count.branches = 1;
+        count.hidden = eye == EyeHidden ? 1 : 0;
+    }
+    for (int row = 0; row < item->rowCount(); ++row) {
+        const EyeCount child = markEyes(item->child(row));
+        count.branches += child.branches;
+        count.hidden += child.hidden;
+    }
+    const int type = item->data(ItemTypeRole).toInt();
+    if (item->index().isValid() && (type == SectionItem || type == FolderItem) &&
+        count.branches > 0) {
+        item->setData(count.hidden == count.branches ? EyeHidden : EyeShown, EyeRole);
+    }
+    return count;
+}
+
+QStringList RefModel::eyeBranchNames(const QModelIndex& index) {
+    QStringList names;
+    if (!index.isValid()) {
+        return names;
+    }
+    if (index.data(ItemTypeRole).toInt() == RefItem && index.data(EyeRole).toInt() != EyeNone) {
+        names << index.data(ShortNameRole).toString();
+    }
+    const QAbstractItemModel* model = index.model();
+    for (int row = 0; row < model->rowCount(index); ++row) {
+        names << eyeBranchNames(model->index(row, 0, index));
+    }
+    return names;
 }
 
 QStandardItem* RefModel::makeSectionItem(const QString& title, Glyph glyph,
@@ -272,6 +308,10 @@ QStandardItem* RefModel::makeRefItem(const RefInfo& ref, const QString& label) c
                               QString::fromStdString(ref.target),
                               name == m_headBranch ? QStringLiteral("current branch")
                                                    : QStringLiteral("double-click to check out")));
+    const bool branch = ref.kind == RefKind::LocalBranch || ref.kind == RefKind::RemoteBranch;
+    if (branch && name != m_headBranch) {
+        item->setData(isGraphHidden(ref) ? EyeHidden : EyeShown, EyeRole);
+    }
     if (!m_headBranch.isEmpty() && name == m_headBranch) {
         QFont font = item->font();
         font.setBold(true);

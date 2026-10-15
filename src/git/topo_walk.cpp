@@ -10,6 +10,10 @@ namespace {
 constexpr std::uint32_t kMissing = 0xffffffffU;
 constexpr std::uint8_t kSeen = 1;
 constexpr std::uint8_t kInIndegreeQueue = 2;
+constexpr std::uint8_t kStart = 4;
+constexpr std::uint8_t kClaimed = 8;
+constexpr std::uint8_t kDecided = 16;
+constexpr std::uint8_t kShown = 32;
 
 /// git's `compare_commits_by_gen_then_commit_date`, and the insertion order for a
 /// tie, as its priority queue breaks one.
@@ -211,7 +215,7 @@ void TopoWalk::start(const std::vector<RawOid>& tips,
         if (node == kMissing || (m_flags[node] & kSeen)) {
             continue;
         }
-        m_flags[node] |= kSeen;
+        m_flags[node] |= kSeen | kStart;
         starts.push_back(node);
     }
     std::stable_sort(starts.begin(), starts.end(), [this](std::uint32_t a, std::uint32_t b) {
@@ -250,20 +254,82 @@ void TopoWalk::expand(std::uint32_t node) {
     }
 }
 
-bool TopoWalk::next(RawOid& id) {
+bool TopoWalk::step(std::uint32_t& node) {
     if (m_topo.empty()) {
         return false;
     }
-    const std::uint32_t node = m_topo.back();
+    node = m_topo.back();
     m_topo.pop_back();
     m_indegree[node] = 0;
     expand(node);
+    return true;
+}
+
+void TopoWalk::decide(std::uint32_t node) {
+    m_flags[node] |= kDecided;
+    if (!(m_flags[node] & (kStart | kClaimed))) {
+        return;
+    }
+    m_flags[node] |= kShown;
+    const std::vector<std::uint32_t>& parents = allParentsOf(node);
+    if (!parents.empty()) {
+        m_flags[parents.front()] |= kClaimed;
+    }
+    m_held.push_back(node);
+}
+
+bool TopoWalk::settled(std::uint32_t node) {
+    const std::vector<std::uint32_t>& parents = parentsOf(node);
+    return std::all_of(parents.begin() + std::min<std::size_t>(1, parents.size()), parents.end(),
+                       [this](std::uint32_t parent) { return m_flags[parent] & kDecided; });
+}
+
+bool TopoWalk::next(RawOid& id) {
+    std::uint32_t node = kMissing;
+    if (!m_firstParentHistory) {
+        if (!step(node)) {
+            return false;
+        }
+    } else {
+        // A shown commit waits until every side parent is decided, so the caller can
+        // drop the edges to the ones that will never be emitted.
+        while (m_held.empty() || !settled(m_held.front())) {
+            std::uint32_t walked = kMissing;
+            if (!step(walked)) {
+                break;
+            }
+            decide(walked);
+        }
+        if (m_held.empty()) {
+            return false;
+        }
+        node = m_held.front();
+        m_held.pop_front();
+    }
     if (node < m_graphSize) {
         std::memcpy(id.data(), m_graph->oidAt(node), id.size());
     } else {
         id = m_extras[node - m_graphSize].id;
     }
     return true;
+}
+
+bool TopoWalk::omitted(const RawOid& id) const {
+    if (!m_firstParentHistory) {
+        return false;
+    }
+    std::uint32_t node = kMissing;
+    if (m_graph) {
+        node = m_graph->find(id.data());
+    }
+    if (node == CommitGraph::npos || node == kMissing) {
+        const auto it = m_extraIndex.find(id);
+        if (it == m_extraIndex.end()) {
+            return false;
+        }
+        node = it->second;
+    }
+    return (m_flags[node] & kDecided) && !(m_flags[node] & kShown);
 }
 
 } // namespace gk

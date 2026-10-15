@@ -70,6 +70,9 @@ public:
     const QStringList& soloNames() const { return m_solo; }
 
     void clear();
+    /// Turns any solo or filter mode into the plain hidden list `names`, so the eye
+    /// starts from what the graph shows now.
+    void replaceHidden(const QStringList& names);
 
     static QString defaultStorePath();
 

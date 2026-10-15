@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <unordered_map>
 #include <vector>
@@ -43,6 +44,15 @@ public:
     void start(const std::vector<RawOid>& tips, const std::vector<RawOid>& firstParentOnly = {});
     bool next(RawOid& id);
 
+    /// Emits only the commits on some tip's first-parent line (`git rev-list
+    /// --first-parent --all`), in the order of the full walk, so a merge still comes
+    /// before every parent it keeps. The side of a merge whose branch is gone is
+    /// walked but not emitted. Set before `start`.
+    void setFirstParentHistory(bool on) { m_firstParentHistory = on; }
+    /// True for a commit that the first-parent history walked past without emitting.
+    /// Known for every parent of a commit `next` has returned.
+    bool omitted(const RawOid& id) const;
+
     std::size_t readOutsideGraph() const { return m_extras.size(); }
 
 private:
@@ -76,6 +86,9 @@ private:
     void pushIndegree(std::uint32_t node);
     void computeIndegreesToDepth(std::uint64_t cutoff);
     void expand(std::uint32_t node);
+    bool step(std::uint32_t& node);
+    void decide(std::uint32_t node);
+    bool settled(std::uint32_t node);
 
     const CommitGraph* m_graph;
     Lookup m_lookup;
@@ -94,6 +107,8 @@ private:
     std::uint64_t m_minGeneration = kInfinity;
     std::vector<std::uint32_t> m_parentScratch;
     std::vector<std::uint32_t> m_firstParentOnly;
+    bool m_firstParentHistory = false;
+    std::deque<std::uint32_t> m_held;
 };
 
 } // namespace gk

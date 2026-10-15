@@ -25,7 +25,6 @@
 #include "ui/clone_dialog.h"
 #include "ui/coauthor_dialog.h"
 #include "ui/preferences_dialog.h"
-#include "ui/search_panel.h"
 #include "ui/settings_store.h"
 #include "ui/theme_apply.h"
 #include "ui/themed_icons.h"
@@ -473,9 +472,6 @@ void MainWindow::bindViews() {
     updateGraphSkeleton();
     if (m_conflictView) {
         m_conflictView->setSession(m_session);
-    }
-    if (m_searchPanel) {
-        m_searchPanel->setSession(m_session);
     }
     // The selection model is replaced when the *model* changes, but it survives a
     // rebind to the same model — and bindViews runs on every activation. The
@@ -1142,6 +1138,20 @@ void MainWindow::buildUi() {
             m_commitModel->setShowMergedRemotes(show);
         }
     });
+    m_mergedCommitsAction = viewMenu->addAction(QStringLiteral("Show Commits of Merged Branches"));
+    m_mergedCommitsAction->setCheckable(true);
+    m_mergedCommitsAction->setChecked(
+        QSettings().value(QStringLiteral("ui/showMergedCommits"), true).toBool());
+    m_mergedCommitsAction->setToolTip(QStringLiteral(
+        "Off: a merged branch that no longer exists shows as its merge commit alone"));
+    connect(m_mergedCommitsAction, &QAction::toggled, this, [this](bool show) {
+        if (!m_headless) {
+            QSettings().setValue(QStringLiteral("ui/showMergedCommits"), show);
+        }
+        if (m_commitModel) {
+            applyVisibility();
+        }
+    });
     m_detailsAction = viewMenu->addAction(QStringLiteral("&Details panel"));
     m_detailsAction->setCheckable(true);
     m_detailsAction->setChecked(true);
@@ -1156,10 +1166,10 @@ void MainWindow::buildUi() {
     m_animateAction->setChecked(true);
     connect(m_animateAction, &QAction::toggled, this, &MainWindow::setGraphAnimationsEnabled);
     viewMenu->addSeparator();
-    auto* searchAction = addThemedAction(viewMenu, Icon::Search, QStringLiteral("Search Commits"));
-    searchAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+F")));
-    connect(searchAction, &QAction::triggered, this, &MainWindow::showSearchPanel);
-    m_commandActions.insert(QStringLiteral("view.search"), searchAction);
+    m_searchAction = addThemedAction(viewMenu, Icon::Search, QStringLiteral("Find in History…"));
+    m_searchAction->setShortcut(QKeySequence::Find);
+    connect(m_searchAction, &QAction::triggered, this, [this] { showCommandPalette(true); });
+    m_commandActions.insert(QStringLiteral("view.search"), m_searchAction);
     auto* reflogAction = addThemedAction(viewMenu, Icon::Command, QStringLiteral("&Reflog"));
     connect(reflogAction, &QAction::triggered, this, &MainWindow::showReflog);
     m_commandActions.insert(QStringLiteral("history.reflog"), reflogAction);
@@ -1312,7 +1322,7 @@ void MainWindow::buildUi() {
     });
 
     auto* paletteShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+P")), this);
-    connect(paletteShortcut, &QShortcut::activated, this, &MainWindow::showCommandPalette);
+    connect(paletteShortcut, &QShortcut::activated, this, [this] { showCommandPalette(false); });
 
     // The tab strip is a toolbar, not part of the central widget: a QMainWindow
     // always lays its toolbars above the central widget, and the tabs have to sit
@@ -1382,6 +1392,10 @@ void MainWindow::buildUi() {
     m_stack->addWidget(m_conflictView);
     m_startPage = new StartPage(this);
     m_stack->addWidget(m_startPage);
+    // The merge editor has its own Ctrl+F; two live bindings for one key fire neither.
+    connect(m_stack, &QStackedWidget::currentChanged, this, [this] {
+        m_searchAction->setEnabled(m_stack->currentWidget() != m_conflictView);
+    });
     connect(m_startPage, &StartPage::openRequested, this, &MainWindow::onOpenRepositoryDialog);
     connect(m_startPage, &StartPage::cloneRequested, this, &MainWindow::cloneFromDialog);
     connect(m_startPage, &StartPage::createRequested, this,
@@ -1391,14 +1405,6 @@ void MainWindow::buildUi() {
     sizeToCurrentPage(m_stack);
     setCentralWidget(m_stack);
 
-    m_searchPanel = new SearchPanel(m_session, this);
-    m_searchDock = new QDockWidget(QStringLiteral("Search Commits"), this);
-    m_searchDock->setObjectName(QStringLiteral("searchDock"));
-    m_searchDock->setWidget(m_searchPanel);
-    m_searchDock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea);
-    addDockWidget(Qt::BottomDockWidgetArea, m_searchDock);
-    m_searchDock->hide();
-    connect(m_searchPanel, &SearchPanel::commitActivated, this, &MainWindow::revealCommit);
 
     m_branchLabel = new QLabel(QStringLiteral("no repository"), this);
     m_branchLabel->setObjectName(QStringLiteral("statusBranch"));
@@ -1586,7 +1592,7 @@ void MainWindow::buildToolBar() {
 
     auto* palette = addIcon(Icon::Search, QStringLiteral("Command Palette"),
                             QStringLiteral("Command palette (Ctrl+P)"), IconTint::Text);
-    connect(palette, &QAction::triggered, this, &MainWindow::showCommandPalette);
+    connect(palette, &QAction::triggered, this, [this] { showCommandPalette(false); });
     caption(palette, QStringLiteral("Search"));
     m_notificationsAction = addIcon(Icon::Alert, QStringLiteral("Notifications"),
                                     QStringLiteral("Recent notifications"), IconTint::Text);
@@ -1659,6 +1665,7 @@ QWidget* MainWindow::buildReferencePanel() {
     refView->setColorResolver(
         [this](const QString& name) { return m_commitModel->refColorIndex(name); });
     connect(refView, &QTreeView::customContextMenuRequested, this, &MainWindow::onRefContextMenu);
+    connect(refView, &RefTreeView::eyeClicked, this, &MainWindow::toggleEye);
     connect(refView, &QTreeView::doubleClicked, this, [this](const QModelIndex& index) {
         if (RefModel::isStash(index)) {
             restoreStash(index.data(RefModel::StashOidRole).toString(), false,
@@ -3231,6 +3238,20 @@ void MainWindow::selectFirstCommit() {
     m_commitView->setCurrentIndex(m_commitModel->index(0, CommitModel::Message));
 }
 
+void MainWindow::centerCommitRow(int row) {
+    const QPersistentModelIndex index(m_commitModel->index(row, CommitModel::Message));
+    if (!index.isValid()) {
+        return;
+    }
+    m_commitView->scrollTo(index, QAbstractItemView::PositionAtCenter);
+    // Rows that just landed are laid out on the next turn; centre again once they are.
+    QTimer::singleShot(0, this, [this, index] {
+        if (index.isValid() && m_commitView) {
+            m_commitView->scrollTo(index, QAbstractItemView::PositionAtCenter);
+        }
+    });
+}
+
 void MainWindow::selectCommitRow(int row) {
     if (row < 0) {
         selectFirstCommit();
@@ -4022,8 +4043,8 @@ void MainWindow::buildCommands() {
         {}, {}, [this] { showGraphPage(); });
     add(QStringLiteral("view.conflicts"), QStringLiteral("Show Conflicts"), QStringLiteral("View"), {},
         {}, [this] { showConflictsPage(); });
-    add(QStringLiteral("view.search"), QStringLiteral("Search Commits"), QStringLiteral("View"),
-        QKeySequence(QStringLiteral("Ctrl+Shift+F")), {}, [this] { showSearchPanel(); });
+    add(QStringLiteral("view.search"), QStringLiteral("Find in History…"), QStringLiteral("View"),
+        QKeySequence::Find, {}, [this] { showCommandPalette(true); });
     add(QStringLiteral("view.column.author"), QStringLiteral("Toggle Author Column"),
         QStringLiteral("View"), {}, {}, toggleColumn(CommitModel::Column::Author));
     add(QStringLiteral("view.column.date"), QStringLiteral("Toggle Date Column"), QStringLiteral("View"),
@@ -4363,15 +4384,65 @@ void MainWindow::buildCommands() {
     }
 }
 
-void MainWindow::showCommandPalette() {
+std::vector<PaletteRef> MainWindow::paletteRefs() const {
+    std::vector<PaletteRef> refs;
+    if (!m_session || !m_session->isOpen()) {
+        return refs;
+    }
+    for (const RefInfo& ref : m_session->refs()) {
+        if (ref.kind != RefKind::LocalBranch && ref.kind != RefKind::RemoteBranch &&
+            ref.kind != RefKind::Tag) {
+            continue;
+        }
+        PaletteRef entry;
+        entry.name = QString::fromStdString(ref.shortName);
+        entry.kind = ref.kind;
+        entry.target = QString::fromStdString(ref.target);
+        entry.colorIndex = m_commitModel ? m_commitModel->refColorIndex(entry.name) : 0;
+        refs.push_back(std::move(entry));
+    }
+    return refs;
+}
+
+void MainWindow::preparePalette(CommandPalette& palette, bool preferHistory) {
+    palette.setRefs(paletteRefs());
+    if (m_session && m_session->isOpen()) {
+        palette.setSession(m_session, historyFilter().firstParentHistory);
+    }
+    palette.setPreferHistory(preferHistory);
+}
+
+void MainWindow::showCommandPalette(bool preferHistory) {
     // Refresh first: the branch commands are per-branch, and a fetch may have
     // added one since the last rebuild.
     refreshCommands();
     CommandPalette palette(m_commands, this);
+    preparePalette(palette, preferHistory);
     if (palette.exec() == QDialog::Accepted) {
-        // Run after the palette has closed: a command that opens its own dialog
+        // Act after the palette has closed: a command that opens its own dialog
         // must not open it underneath a modal palette.
+        actOnPaletteChoice(palette);
+    }
+}
+
+void MainWindow::actOnPaletteChoice(const CommandPalette& palette) {
+    switch (palette.choice()) {
+    case CommandPalette::Choice::Command:
         runCommand(palette.chosenId());
+        break;
+    case CommandPalette::Choice::Ref: {
+        QString target = palette.chosenTarget();
+        if (target.isEmpty() && m_session) {
+            target = m_session->resolveRevision(palette.chosenId());
+        }
+        revealCommit(target);
+        break;
+    }
+    case CommandPalette::Choice::Commit:
+        revealCommit(palette.chosenId());
+        break;
+    case CommandPalette::Choice::None:
+        break;
     }
 }
 
@@ -4407,10 +4478,11 @@ QStringList MainWindow::commandPaletteForDiagnostics(const QString& query, bool 
     report << QStringLiteral("— %1 match(es)").arg(report.size());
     if (runFirst) {
         CommandPalette palette(m_commands);
+        preparePalette(palette, false);
         const QString chosen = palette.chooseFirst(query);
         report << QStringLiteral("chosen: %1")
                       .arg(chosen.isEmpty() ? QStringLiteral("(none)") : chosen);
-        runCommand(chosen);
+        actOnPaletteChoice(palette);
     }
     return report;
 }
@@ -4780,6 +4852,7 @@ QStringList MainWindow::graphHiddenBranchNames() const {
 HistoryFilter MainWindow::historyFilter() const {
     HistoryFilter filter;
     filter.scope = HistoryScope::AllRefs;
+    filter.firstParentHistory = m_mergedCommitsAction && !m_mergedCommitsAction->isChecked();
     if (!m_session || !m_session->isOpen()) {
         return filter; // an empty visibleRefs is "every ref"
     }
@@ -4897,6 +4970,54 @@ void MainWindow::clearVisibility() {
     // the walk on its own — resetting here would only reset it twice.
     refreshPanels();
     setStatus(QStringLiteral("Showing all branches."));
+}
+
+QSet<QString> MainWindow::effectiveHiddenBranches() const {
+    QSet<QString> hidden;
+    const bool filterMode =
+        m_visibility.smart() || m_visibility.preset() != VisibilityPreset::None;
+    if (filterMode) {
+        const QStringList names = graphHiddenBranchNames();
+        return QSet<QString>(names.begin(), names.end());
+    }
+    if (!m_visibility.soloActive()) {
+        const QStringList& names = m_visibility.hiddenNames();
+        return QSet<QString>(names.begin(), names.end());
+    }
+    for (const RefInfo& ref : m_session->refs()) {
+        if (ref.kind != RefKind::LocalBranch && ref.kind != RefKind::RemoteBranch) {
+            continue;
+        }
+        const QString name = QString::fromStdString(ref.shortName);
+        if (!m_visibility.isSolo(name)) {
+            hidden.insert(name);
+        }
+    }
+    return hidden;
+}
+
+void MainWindow::toggleEye(const QModelIndex& index) {
+    const QStringList names = RefModel::eyeBranchNames(index);
+    if (names.isEmpty() || !m_session || !m_session->isOpen()) {
+        return;
+    }
+    QSet<QString> hidden = effectiveHiddenBranches();
+    const bool show = std::all_of(names.begin(), names.end(),
+                                  [&hidden](const QString& name) { return hidden.contains(name); });
+    for (const QString& name : names) {
+        if (show) {
+            hidden.remove(name);
+        } else {
+            hidden.insert(name);
+        }
+    }
+    QStringList stored(hidden.begin(), hidden.end());
+    stored.sort();
+    m_visibility.replaceHidden(stored);
+    refreshPanels();
+    const QString what = names.size() == 1 ? names.front()
+                                           : QStringLiteral("%1 branches").arg(names.size());
+    setStatus(show ? QStringLiteral("Showing %1").arg(what) : QStringLiteral("Hid %1").arg(what));
 }
 
 void MainWindow::toggleHidden(const QModelIndex& index) {
@@ -9061,15 +9182,6 @@ QStringList MainWindow::keymapForDiagnostics(const QString& operation, const QSt
     return report;
 }
 
-void MainWindow::showSearchPanel() {
-    if (!m_searchDock || !m_searchPanel) {
-        return;
-    }
-    m_searchDock->show();
-    m_searchDock->raise();
-    m_searchPanel->focusQuery();
-}
-
 void MainWindow::revealCommit(const QString& oid) {
     if (oid.isEmpty() || !m_commitModel) {
         return;
@@ -9087,6 +9199,7 @@ void MainWindow::tryRevealCommit() {
     if (row >= 0) {
         showGraphPage();
         selectCommitRow(row);
+        centerCommitRow(row);
         setStatus(QStringLiteral("Found %1.").arg(m_revealTarget.left(8)));
         m_revealTarget.clear();
         return;
@@ -9391,21 +9504,21 @@ QStringList MainWindow::searchForDiagnostics(const QString& query, const QString
         report << QStringLiteral("no repository is open");
         return report;
     }
-    CommitSearchField searchField = CommitSearchField::Message;
+    refreshCommands();
+    CommandPalette palette(m_commands);
+    preparePalette(palette, true);
     if (field == QStringLiteral("author")) {
-        searchField = CommitSearchField::Author;
-    } else if (field == QStringLiteral("sha")) {
-        searchField = CommitSearchField::Sha;
+        palette.setMode(CommandPalette::Mode::Author);
+    } else if (field.startsWith(QLatin1String("dates:"))) {
+        // dates:<from>..<to>, both yyyy-MM-dd
+        const QStringList range = field.mid(6).split(QStringLiteral(".."));
+        palette.setMode(CommandPalette::Mode::Dates);
+        palette.setDateRange(QDate::fromString(range.value(0), Qt::ISODate),
+                             QDate::fromString(range.value(1), Qt::ISODate));
     }
-    const std::vector<CommitInfo> results =
-        m_session->searchCommitsBlocking(query, searchField, 50);
-    report << QStringLiteral("results: %1").arg(results.size());
-    for (const CommitInfo& commit : results) {
-        report << QStringLiteral("%1 %2 %3")
-                      .arg(QString::fromStdString(commit.id).left(8),
-                           QString::fromStdString(commit.author.name),
-                           QString::fromStdString(commit.summary));
-    }
+    palette.setQuery(query);
+    report << palette.rowsForDiagnostics();
+    report << QStringLiteral("current: %1").arg(palette.currentRowText());
 
     if (!revealOid.isEmpty()) {
         int row = m_commitModel->rowForCommit(revealOid);
@@ -10674,7 +10787,10 @@ QStringList MainWindow::visibilityForDiagnostics(const QString& operation, const
         m_visibility.setPreset(VisibilityPreset::Prefix);
     } else if (operation == QStringLiteral("preset-off")) {
         m_visibility.setPreset(VisibilityPreset::None);
-    } else {
+    } else if (operation == QStringLiteral("merged-commits") ||
+               operation == QStringLiteral("merged-commits-off")) {
+        m_mergedCommitsAction->setChecked(operation == QStringLiteral("merged-commits"));
+    } else if (operation != QStringLiteral("report")) {
         report << QStringLiteral("unknown visibility operation: %1").arg(operation);
         return report;
     }
@@ -10696,6 +10812,9 @@ QStringList MainWindow::visibilityForDiagnostics(const QString& operation, const
     names.erase(std::unique(names.begin(), names.end()), names.end());
 
     report << QStringLiteral("rows: %1").arg(rows.size());
+    report << QStringLiteral("merged commits: %1")
+                  .arg(filter.firstParentHistory ? QStringLiteral("merge only")
+                                                 : QStringLiteral("shown"));
     report << QStringLiteral("labels: %1").arg(names.size());
     for (const std::string& name : names) {
         report << QStringLiteral("label: %1").arg(QString::fromStdString(name));

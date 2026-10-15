@@ -154,6 +154,19 @@ void RefVisibility::setSolo(const QString& name, bool solo) {
     save();
 }
 
+void RefVisibility::replaceHidden(const QStringList& names) {
+    QStringList hidden = names;
+    hidden.removeDuplicates();
+    if (m_hidden == hidden && m_solo.isEmpty() && !m_smart && m_preset == VisibilityPreset::None) {
+        return;
+    }
+    m_hidden = hidden;
+    m_solo.clear();
+    m_smart = false;
+    m_preset = VisibilityPreset::None;
+    save();
+}
+
 void RefVisibility::clear() {
     if (m_hidden.isEmpty() && m_solo.isEmpty() && !m_smart &&
         m_preset == VisibilityPreset::None) {

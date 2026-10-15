@@ -832,8 +832,10 @@ void CommitModel::setTimelinePeriod(TimelinePeriod period) {
     reset();
 }
 
-void CommitModel::setHistoryFilter(const HistoryFilter& filter) {    if (m_historyFilter.scope == filter.scope &&
-        m_historyFilter.visibleRefs == filter.visibleRefs) {
+void CommitModel::setHistoryFilter(const HistoryFilter& filter) {
+    if (m_historyFilter.scope == filter.scope &&
+        m_historyFilter.visibleRefs == filter.visibleRefs &&
+        m_historyFilter.firstParentHistory == filter.firstParentHistory) {
         return;
     }
     m_historyFilter = filter;

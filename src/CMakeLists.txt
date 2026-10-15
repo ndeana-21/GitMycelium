@@ -195,8 +195,6 @@ add_library(gmc_ui STATIC
     ui/themed_icons.h
     ui/keymap.cpp
     ui/keymap.h
-    ui/search_panel.cpp
-    ui/search_panel.h
     ui/preferences_dialog.cpp
     ui/preferences_dialog.h
     ui/recent_repositories.cpp

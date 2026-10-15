@@ -62,7 +62,6 @@ class RefModel;
 class RefTreeView;
 class RepoSession;
 class RepoWatcher;
-class SearchPanel;
 class StartPage;
 
 /// Offered as a menu so the operation is always explicit — dragging must never
@@ -419,7 +418,6 @@ private:
     /// The id another command would share `sequence` with, or "(reserved)" when the
     /// window itself uses it. Empty when the combination is free.
     QString keymapConflict(const QString& id, const QKeySequence& sequence) const;
-    void showSearchPanel();
     /// Pages history until the commit is loaded, retrying as each page arrives so a
     /// deep commit does not spin the GUI.
     void revealCommit(const QString& oid);
@@ -555,7 +553,11 @@ private:
     void updateUndoRedoActions();
 
     void buildCommands();
-    void showCommandPalette();
+    void showCommandPalette(bool preferHistory);
+    std::vector<PaletteRef> paletteRefs() const;
+    void preparePalette(CommandPalette& palette, bool preferHistory);
+    void actOnPaletteChoice(const CommandPalette& palette);
+    void centerCommitRow(int row);
     void runCommand(const QString& id);
     /// A local branch is checked out; a remote-tracking one becomes a local branch that
     /// follows it, after asking.
@@ -661,6 +663,8 @@ private:
     HistoryFilter historyFilter() const;
     void applyVisibility();
     void clearVisibility();
+    void toggleEye(const QModelIndex& index);
+    QSet<QString> effectiveHiddenBranches() const;
     void toggleHidden(const QModelIndex& index);
     void toggleSolo(const QModelIndex& index);
     void toggleSmart();
@@ -821,6 +825,7 @@ private:
     QAction* m_refsAction = nullptr;
     QAction* m_detailsAction = nullptr;
     QAction* m_mergedRemotesAction = nullptr;
+    QAction* m_mergedCommitsAction = nullptr;
     PanelSplitter* m_history = nullptr;
     /// Set while the window folds or unfolds a panel itself (the diff page hides the
     /// branch rail), so that is not mistaken for the reader's choice.
@@ -839,8 +844,7 @@ private:
     /// The active tab's copy of `RepoContext::conflictPageDismissed`; it lives here too
     /// because the refresh that decides the page reads it on every pass.
     bool m_conflictPageDismissed = false;
-    SearchPanel* m_searchPanel = nullptr;
-    QDockWidget* m_searchDock = nullptr;
+    QAction* m_searchAction = nullptr;
     QString m_revealTarget;
     /// What `reloadHistory` is waiting to select again: a commit id, or the
     /// working-tree row when `m_restoreWip` is set.

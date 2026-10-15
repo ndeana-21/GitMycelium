@@ -48,7 +48,11 @@ public:
         SubmodulePathRole,
         SubmoduleUrlRole,
         SubmoduleStateRole,
+        /// The eye in the rail: `EyeNone`, `EyeShown` or `EyeHidden`. A folder or a
+        /// section is hidden when every branch under it is.
+        EyeRole,
     };
+    enum Eye { EyeNone = 0, EyeShown, EyeHidden };
 
     explicit RefModel(QObject* parent = nullptr);
 
@@ -93,6 +97,8 @@ public:
     static QString pinKey(const QModelIndex& index);
 
     static bool isRef(const QModelIndex& index);
+    /// Every branch at or under `index` the eye can hide (not the current branch).
+    static QStringList eyeBranchNames(const QModelIndex& index);
 
     static bool isStash(const QModelIndex& index);
 
@@ -144,6 +150,11 @@ private:
     /// when there is only the main worktree — the section would say "you are here".
     void appendWorktrees();
     void appendSubmodules();
+    struct EyeCount {
+        int branches = 0;
+        int hidden = 0;
+    };
+    static EyeCount markEyes(QStandardItem* item);
     void appendPinned();
     void appendFolderContents(QStandardItem* parentItem, const PathFolder& folder,
                               const std::vector<const RefInfo*>& items) const;

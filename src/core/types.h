@@ -27,6 +27,9 @@ enum class HistoryScope {
 struct HistoryFilter {
     HistoryScope scope = HistoryScope::HeadOnly;
     std::vector<std::string> visibleRefs;
+    /// Only the commits on some ref's first-parent line: a merged branch that is
+    /// gone shows as its merge commit alone.
+    bool firstParentHistory = false;
 };
 
 struct RefInfo {
@@ -262,7 +265,22 @@ enum class ConflictSide { Ours, Base, Theirs };
 
 /// What a commit search looks at. `Message` and `Author` are literal, case-insensitive
 /// substrings; `Sha` resolves a hash (full or an unambiguous abbreviation).
-enum class CommitSearchField { Message, Author, Sha };
+/// What the search window asks of the history. Every set part must match; text and
+/// author are case-insensitive substrings, or wildcards when they hold `*` or `?`.
+struct CommitQuery {
+    std::string text;   ///< the message, or a hash prefix
+    std::string author; ///< name or email
+    std::int64_t since = 0; ///< unix time, 0 for open
+    std::int64_t until = 0;
+    /// Only the commits the folded graph draws (`--first-parent`).
+    bool firstParent = false;
+};
+
+/// A found commit and the ref git reached it through (`%S`), e.g. `refs/heads/main`.
+struct CommitHit {
+    CommitInfo commit;
+    std::string source;
+};
 
 /// One path in the index that carries conflict stages. An empty oid means the stage is
 /// absent (`ours` is empty when we deleted the file).

@@ -11,6 +11,7 @@
 #include "git/sparse.h"
 #include "git/stash.h"
 
+#include <QElapsedTimer>
 #include <QThreadPool>
 
 #include <algorithm>
@@ -54,7 +55,7 @@ bool configBool(Repository& repo, const std::string& key) {
 
 RepoSession::RepoSession(QObject* parent) : QObject(parent) {
     qRegisterMetaType<gk::CommitPage>("gk::CommitPage");
-    qRegisterMetaType<gk::CommitSearchResults>("gk::CommitSearchResults");
+    qRegisterMetaType<gk::CommitSearchBatch>("gk::CommitSearchBatch");
     qRegisterMetaType<gk::RefMetaSnapshot>("gk::RefMetaSnapshot");
 }
 
@@ -3150,49 +3151,61 @@ void RepoSession::indexHistoryIfWorthIt(std::size_t readOutsideGraph, const std:
     startWorker([dir] { runGit({"commit-graph", "write", "--reachable", "--split"}, dir); });
 }
 
-std::vector<CommitInfo> RepoSession::searchCommitsBlocking(const QString& query,
-                                                           CommitSearchField field, quint32 limit,
-                                                           std::size_t skip) const {
-    const RepoInfo repositoryInfo = info();
-    if (repositoryInfo.workDir.empty()) {
-        return {};
-    }
-    return Repository::searchCommitsIn(repositoryInfo.workDir, query.toStdString(), field, skip,
-                                       limit);
-}
-
-void RepoSession::requestCommitSearch(const QString& query, CommitSearchField field, quint32 limit) {
-    startWorker([this, query, field, limit] {
-        std::vector<CommitInfo> rows;
-        QString error;
+quint64 RepoSession::startCommitSearch(const CommitQuery& query, quint32 limit) {
+    const quint64 search = ++m_commitSearch;
+    startWorker([this, query, limit, search] {
         // Not under the session mutex: the search is a git subprocess that can run for
         // seconds, and every read the window makes would queue behind it.
         const RepoInfo repositoryInfo = info();
-        if (repositoryInfo.workDir.empty() || !m_alive.load()) {
+        if (repositoryInfo.workDir.empty()) {
             return;
         }
+        const auto current = [this, search] {
+            return m_alive.load() && m_commitSearch.load() == search;
+        };
+        QElapsedTimer sinceSent;
+        sinceSent.start();
+        CommitSearchBatch pending;
+        pending.search = search;
+        bool sentAny = false;
+        const auto send = [this, &pending, &sinceSent] {
+            emit commitSearchProgress(pending);
+            pending.hits.clear();
+            sinceSent.restart();
+        };
+        std::string error;
         try {
-            rows = Repository::searchCommitsIn(repositoryInfo.workDir, query.toStdString(),
-                                               field, 0, limit);
+            error = Repository::streamCommitSearch(
+                repositoryInfo.workDir, query, limit, [&](std::vector<CommitHit>&& hits) {
+                    if (!current()) {
+                        return false;
+                    }
+                    for (CommitHit& hit : hits) {
+                        pending.hits.push_back(std::move(hit));
+                    }
+                    // The first rows at once, then a batch every few frames: one signal
+                    // per commit would flood the GUI thread on a broad query.
+                    if (!sentAny || sinceSent.elapsed() >= 60) {
+                        sentAny = true;
+                        send();
+                    }
+                    return true;
+                });
         } catch (const std::exception& e) {
-            error = QString::fromUtf8(e.what());
+            error = e.what();
         }
-        if (!m_alive.load()) {
+        if (!current()) {
             return;
         }
-        if (!error.isEmpty()) {
-            emit requestFailed(error);
-            return;
-        }
-        CommitSearchResults result;
-        result.query = query;
-        result.field = static_cast<int>(field);
-        result.commits.reserve(static_cast<int>(rows.size()));
-        for (const CommitInfo& row : rows) {
-            result.commits.push_back(row);
-        }
-        emit commitSearchFinished(result);
+        pending.done = true;
+        pending.error = QString::fromStdString(error);
+        send();
     });
+    return search;
+}
+
+void RepoSession::stopCommitSearch() {
+    ++m_commitSearch;
 }
 
 QStringList RepoSession::ignoredPaths(const QString& workDir) {

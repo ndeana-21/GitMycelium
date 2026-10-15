@@ -191,7 +191,11 @@ repositories is sent. Turn it off in **Preferences → Appearance → Updates**.
 
 ### Interface
 
-- Command palette (`Ctrl+P`) with every action, and a rebindable keymap.
+- One search window (`Ctrl+P`, `Ctrl+F`): commands, branches and commits, by text,
+  author or date range, with results streaming in as git finds them.
+- Hide any branch, folder or section from the graph with the eye in the branch panel;
+  fold merged branches that no longer exist into their merge commits.
+- Command palette with every action, and a rebindable keymap.
 - Dark theme by default, a light theme, and UI zoom.
 - Updates install from inside the app, verified against the release's checksums.
 - Per-repository preferences: column layout, branch pins, branch visibility,
@@ -319,8 +323,8 @@ gitmycelium /path/to/repository   # open a repository directly
 gitmycelium --help                # every command-line option
 ```
 
-Useful shortcuts: `Ctrl+P` opens the command palette, `Ctrl+O` opens a repository
-and `Ctrl+Shift+O` clones one. `Alt+Up` and `Alt+Down` move to the parent and child
+Useful shortcuts: `Ctrl+P` opens the command palette, `Ctrl+F` finds a branch or
+commit, `Ctrl+O` opens a repository and `Ctrl+Shift+O` clones one. `Alt+Up` and `Alt+Down` move to the parent and child
 commit, and `Ctrl+Home` jumps to the tip of the branch. You can rebind shortcuts in
 **Preferences → Keymap**.
 

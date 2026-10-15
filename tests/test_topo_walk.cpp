@@ -72,6 +72,7 @@ private slots:
     void headOnlyIsGitsHead();
     void visibleRefsAreWalkedInGitsOrder();
     void aBrokenGraphIsIgnored();
+    void aGoneMergedBranchShowsAsItsMergeAlone();
     void theRawHeaderGivesParentsAndDate();
     void aLongHistoryIsIndexedOnceInTheBackground();
     void indexingNeedsToBeAskedFor();
@@ -251,6 +252,46 @@ void TopoWalkTest::visibleRefsAreWalkedInGitsOrder() {
         gitOut(m_path, {"rev-list", "--topo-order", "refs/heads/feature", "refs/heads/side", "HEAD"})
             .split(QLatin1Char('\n'));
     QCOMPARE(walked(session, filter, 4), expected);
+}
+
+void TopoWalkTest::aGoneMergedBranchShowsAsItsMergeAlone() {
+    // feature and two of the octopus branches are merged and deleted; o3 and side
+    // still exist. The oracle is git's full order, kept to its first-parent lines.
+    QVERIFY(git(m_path, {"branch", "-D", "feature", "o1", "o2"}));
+    QVERIFY(git(m_path, {"tag", "-d", "v-annotated"}));
+    const QStringList kept = gitOut(m_path, {"rev-list", "--first-parent", "--all"})
+                                 .split(QLatin1Char('\n'));
+    QStringList expected =
+        gitOut(m_path, {"rev-list", "--topo-order", "--all"}).split(QLatin1Char('\n'));
+    expected.removeIf([&kept](const QString& id) { return !kept.contains(id); });
+    QVERIFY(!expected.contains(gitOut(m_path, {"rev-parse", ":/f1"})));
+    QVERIFY(expected.contains(gitOut(m_path, {"rev-parse", ":/s1"})));
+
+    const QString mergeFeature = gitOut(m_path, {"rev-parse", ":/merge feature"});
+    const QString octopus = gitOut(m_path, {"rev-parse", ":/octopus"});
+    const QString o3 = gitOut(m_path, {"rev-parse", "o3"});
+    HistoryFilter filter{HistoryScope::AllRefs, {}};
+    filter.firstParentHistory = true;
+    for (const bool graph : {false, true}) {
+        if (graph) {
+            QVERIFY(git(m_path, {"commit-graph", "write", "--reachable"}));
+        }
+        for (const quint32 pageSize : {quint32{1}, quint32{3}, quint32{1000}}) {
+            RepoSession session;
+            QVERIFY(session.open(m_path));
+            QCOMPARE(walked(session, filter, pageSize), expected);
+            bool more = false;
+            for (const CommitInfo& commit : session.commitsBlocking(0, 1000, &more, filter)) {
+                const QString id = QString::fromStdString(commit.id);
+                if (id == mergeFeature) {
+                    QCOMPARE(commit.parents.size(), std::size_t{1});
+                } else if (id == octopus) {
+                    QCOMPARE(commit.parents.size(), std::size_t{2});
+                    QCOMPARE(QString::fromStdString(commit.parents.back()), o3);
+                }
+            }
+        }
+    }
 }
 
 void TopoWalkTest::aBrokenGraphIsIgnored() {

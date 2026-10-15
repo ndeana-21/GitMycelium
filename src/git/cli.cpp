@@ -2,12 +2,14 @@
 
 #include <array>
 #include <string_view>
+#include <vector>
 
 #ifdef _WIN32
 #include <thread>
 #include <windows.h>
 #else
 #include <cerrno>
+#include <csignal>
 #include <cstring>
 #include <fcntl.h>
 #include <poll.h>
@@ -31,6 +33,16 @@ namespace {
 /// terminal the GUI was started from, where nobody is looking.
 constexpr std::array<std::string_view, 3> kOverrides = {"LANGUAGE=en", "GIT_OPTIONAL_LOCKS=0",
                                                         "GIT_TERMINAL_PROMPT=0"};
+
+/// A streamed `git log` writes each record as it finds it, not when its buffer fills:
+/// a rare match would otherwise wait for the end of the history.
+std::vector<std::string_view> overridesFor(bool streaming) {
+    std::vector<std::string_view> overrides(kOverrides.begin(), kOverrides.end());
+    if (streaming) {
+        overrides.push_back("GIT_FLUSH=1");
+    }
+    return overrides;
+}
 
 } // namespace
 
@@ -93,13 +105,14 @@ void appendQuoted(std::wstring* line, const std::wstring& arg) {
 
 /// The reader's environment with the overrides, as CreateProcessW's block. Names are
 /// case-insensitive on Windows.
-std::wstring childEnvironment() {
+std::wstring childEnvironment(bool streaming) {
+    const std::vector<std::string_view> overrides = overridesFor(streaming);
     std::wstring block;
     if (wchar_t* strings = GetEnvironmentStringsW()) {
         for (const wchar_t* entry = strings; *entry; entry += wcslen(entry) + 1) {
             const std::wstring_view variable(entry);
             bool overridden = false;
-            for (const std::string_view override : kOverrides) {
+            for (const std::string_view override : overrides) {
                 const std::wstring name = widen(override.substr(0, override.find('=') + 1));
                 if (variable.size() >= name.size() &&
                     CompareStringOrdinal(variable.data(), static_cast<int>(name.size()),
@@ -116,7 +129,7 @@ std::wstring childEnvironment() {
         }
         FreeEnvironmentStringsW(strings);
     }
-    for (const std::string_view override : kOverrides) {
+    for (const std::string_view override : overrides) {
         block.append(widen(override));
         block.push_back(L'\0');
     }
@@ -132,9 +145,26 @@ void readAll(HANDLE pipe, std::string* sink) {
     }
 }
 
+void readInto(HANDLE pipe, HANDLE process, const OutputSink& sink) {
+    std::array<char, 65536> buffer{};
+    DWORD n = 0;
+    bool wanted = true;
+    while (ReadFile(pipe, buffer.data(), static_cast<DWORD>(buffer.size()), &n, nullptr) && n > 0) {
+        if (wanted && !sink(std::string_view(buffer.data(), n))) {
+            wanted = false;
+            TerminateProcess(process, 1);
+        }
+    }
+}
+
 } // namespace
 
 ProcessResult runGit(const std::vector<std::string>& args, const std::string& workDir) {
+    return runGit(args, workDir, OutputSink());
+}
+
+ProcessResult runGit(const std::vector<std::string>& args, const std::string& workDir,
+                     const OutputSink& sink) {
     ProcessResult result;
 
     std::wstring commandLine = L"git";
@@ -148,7 +178,7 @@ ProcessResult runGit(const std::vector<std::string>& args, const std::string& wo
         commandLine.push_back(L' ');
         appendQuoted(&commandLine, widen(arg));
     }
-    std::wstring environment = childEnvironment();
+    std::wstring environment = childEnvironment(static_cast<bool>(sink));
 
     SECURITY_ATTRIBUTES inheritable{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
     HANDLE outRead = nullptr, outWrite = nullptr, errRead = nullptr, errWrite = nullptr;
@@ -214,7 +244,11 @@ ProcessResult runGit(const std::vector<std::string>& args, const std::string& wo
     // Read together, not one after the other: a child that fills the stderr pipe
     // while we block on stdout never exits.
     std::thread errReader(readAll, errRead, &result.err);
-    readAll(outRead, &result.out);
+    if (sink) {
+        readInto(outRead, process.hProcess, sink);
+    } else {
+        readAll(outRead, &result.out);
+    }
     errReader.join();
 
     WaitForSingleObject(process.hProcess, INFINITE);
@@ -233,12 +267,13 @@ ProcessResult runGit(const std::vector<std::string>& args, const std::string& wo
 
 namespace {
 
-std::vector<std::string> childEnvironment() {
+std::vector<std::string> childEnvironment(bool streaming) {
+    const std::vector<std::string_view> overrides = overridesFor(streaming);
     std::vector<std::string> env;
     for (char** entry = environ; entry && *entry; ++entry) {
         const std::string_view variable(*entry);
         bool overridden = false;
-        for (const std::string_view override : kOverrides) {
+        for (const std::string_view override : overrides) {
             const std::string_view name = override.substr(0, override.find('=') + 1);
             if (variable.substr(0, name.size()) == name) {
                 overridden = true;
@@ -249,7 +284,7 @@ std::vector<std::string> childEnvironment() {
             env.emplace_back(variable);
         }
     }
-    for (const std::string_view override : kOverrides) {
+    for (const std::string_view override : overrides) {
         env.emplace_back(override);
     }
     return env;
@@ -267,8 +302,10 @@ std::vector<char*> pointersTo(std::vector<std::string>& strings) {
 
 /// Drains both pipes until the child closes them. Read together, not one after the
 /// other: a child that fills the stderr pipe while we block on stdout never exits.
-void drain(int outFd, int errFd, std::string* out, std::string* err) {
+void drain(int outFd, int errFd, std::string* out, std::string* err, const OutputSink& sink,
+           pid_t pid) {
     std::array<pollfd, 2> fds = {pollfd{outFd, POLLIN, 0}, pollfd{errFd, POLLIN, 0}};
+    bool wanted = true;
     std::array<std::string*, 2> sinks = {out, err};
     std::array<char, 65536> buffer{};
     int open = 2;
@@ -284,7 +321,12 @@ void drain(int outFd, int errFd, std::string* out, std::string* err) {
                 continue;
             }
             const ssize_t n = read(fds[i].fd, buffer.data(), buffer.size());
-            if (n > 0) {
+            if (n > 0 && i == 0 && sink) {
+                if (wanted && !sink(std::string_view(buffer.data(), static_cast<std::size_t>(n)))) {
+                    wanted = false;
+                    kill(pid, SIGKILL);
+                }
+            } else if (n > 0) {
                 sinks[i]->append(buffer.data(), static_cast<std::size_t>(n));
             } else if (n == 0 || errno != EINTR) {
                 close(fds[i].fd);
@@ -330,6 +372,11 @@ void closeInChild(posix_spawn_file_actions_t* actions, int fd) {
 } // namespace
 
 ProcessResult runGit(const std::vector<std::string>& args, const std::string& workDir) {
+    return runGit(args, workDir, OutputSink());
+}
+
+ProcessResult runGit(const std::vector<std::string>& args, const std::string& workDir,
+                     const OutputSink& sink) {
     ProcessResult result;
 
     std::vector<std::string> argv = {"git"};
@@ -338,7 +385,7 @@ ProcessResult runGit(const std::vector<std::string>& args, const std::string& wo
         argv.push_back(workDir);
     }
     argv.insert(argv.end(), args.begin(), args.end());
-    std::vector<std::string> env = childEnvironment();
+    std::vector<std::string> env = childEnvironment(static_cast<bool>(sink));
     std::vector<char*> argvPointers = pointersTo(argv);
     std::vector<char*> envPointers = pointersTo(env);
 
@@ -389,7 +436,7 @@ ProcessResult runGit(const std::vector<std::string>& args, const std::string& wo
         return result;
     }
 
-    drain(outPipe[0], errPipe[0], &result.out, &result.err);
+    drain(outPipe[0], errPipe[0], &result.out, &result.err, sink, pid);
 
     int status = 0;
     pid_t waited = -1;
