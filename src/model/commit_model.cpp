@@ -835,7 +835,8 @@ void CommitModel::setTimelinePeriod(TimelinePeriod period) {
 void CommitModel::setHistoryFilter(const HistoryFilter& filter) {
     if (m_historyFilter.scope == filter.scope &&
         m_historyFilter.visibleRefs == filter.visibleRefs &&
-        m_historyFilter.firstParentHistory == filter.firstParentHistory) {
+        m_historyFilter.firstParentHistory == filter.firstParentHistory &&
+        m_historyFilter.foldInto == filter.foldInto) {
         return;
     }
     m_historyFilter = filter;

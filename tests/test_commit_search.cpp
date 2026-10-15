@@ -145,14 +145,19 @@ void CommitSearchTest::messageSearchMatchesTheBinary() {
 }
 
 void CommitSearchTest::authorSearchMatchesSubstrings() {
-    CommitQuery query;
-    query.author = "carol";
-    std::vector<CommitHit> results = search(m_path, query);
+    // One text, both fields: Carol is an author, "login" is a message.
+    std::vector<CommitHit> results = search(m_path, byText(QStringLiteral("carol")));
     QCOMPARE(results.size(), std::size_t(1));
     QCOMPARE(QString::fromStdString(results.front().commit.author.name), QStringLiteral("Carol"));
+    QCOMPARE(search(m_path, byText(QStringLiteral("EXAMPLE.COM"))).size(), std::size_t(4));
 
-    query.author = "EXAMPLE.COM";
-    QCOMPARE(search(m_path, query).size(), std::size_t(4));
+    // A commit matching both is listed once.
+    QVERIFY(git(m_path, {"-c", "user.name=Login Larry", "-c", "user.email=l@example.org",
+                         "commit", "-q", "--allow-empty", "-m", "login again"}));
+    results = search(m_path, byText(QStringLiteral("login")));
+    QCOMPARE(results.size(), std::size_t(2));
+    QCOMPARE(idsOf(results).size(), 2);
+    QCOMPARE(search(m_path, byText(QStringLiteral("l*larry"))).size(), std::size_t(1));
 }
 
 void CommitSearchTest::aShaComesFirst() {
@@ -257,9 +262,12 @@ void CommitSearchTest::theWindowSearchesAndReveals() {
     QVERIFY(text.contains(QStringLiteral("[feature] fix: branch bug")) ||
             text.contains(QStringLiteral("feat: add login")));
 
-    report = window.searchForDiagnostics(QStringLiteral("alice"), QStringLiteral("author"));
+    report = window.searchForDiagnostics(QStringLiteral("alice"), QStringLiteral("text"));
     QCOMPARE(report.filter(QStringLiteral("commit ")).size(), 2);
     QVERIFY(report.filter(QStringLiteral("== Branches")).isEmpty());
+    // Newest first, whichever search found the row.
+    const QStringList rows = report.filter(QStringLiteral("commit "));
+    QVERIFY2(rows.at(0).contains(QStringLiteral("docs: readme")), qPrintable(rows.join('\n')));
 
     const QString today = QDate::currentDate().toString(Qt::ISODate);
     report = window.searchForDiagnostics(QStringLiteral("fix"),

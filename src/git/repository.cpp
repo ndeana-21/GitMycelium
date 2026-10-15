@@ -20,6 +20,7 @@
 #include <filesystem>
 #include <fstream>
 #include <mutex>
+#include <thread>
 #include <sstream>
 #include <unordered_set>
 
@@ -976,7 +977,8 @@ std::vector<CommitInfo> Repository::commits(std::size_t skip, std::size_t limit,
     std::vector<CommitInfo> out;
     const bool sameFilter = m_walkFilter.scope == filter.scope &&
                             m_walkFilter.visibleRefs == filter.visibleRefs &&
-                            m_walkFilter.firstParentHistory == filter.firstParentHistory;
+                            m_walkFilter.firstParentHistory == filter.firstParentHistory &&
+                            m_walkFilter.foldInto == filter.foldInto;
     // The walk is reused only while the caller keeps asking from where the last
     // page ended. A jump or a new filter rebuilds it, and the fast-forward below
     // is paid once, never twice for the same row.
@@ -1116,6 +1118,9 @@ std::vector<TopoWalk::RawOid> Repository::walkStarts(const HistoryFilter& filter
         }
         std::sort(named.begin(), named.end(),
                   [](const auto& a, const auto& b) { return a.first < b.first; });
+        if (filter.firstParentHistory && !filter.foldInto.empty()) {
+            dropMergedRemotes(named, filter.foldInto);
+        }
     }
 
     std::vector<TopoWalk::RawOid> tips;
@@ -1142,6 +1147,43 @@ std::vector<TopoWalk::RawOid> Repository::walkStarts(const HistoryFilter& filter
         git_reference_free(head);
     }
     return tips;
+}
+
+void Repository::dropMergedRemotes(std::vector<std::pair<std::string, TopoWalk::RawOid>>& named,
+                                   const std::string& trunk) const {
+    const auto isTrunk = [&trunk](const std::string& name) {
+        if (name == "refs/heads/" + trunk) {
+            return true;
+        }
+        const std::string remotes = "refs/remotes/";
+        return name.rfind(remotes, 0) == 0 && name.size() > trunk.size() + 1 &&
+               name.compare(name.size() - trunk.size() - 1, std::string::npos, "/" + trunk) == 0 &&
+               name.find('/', remotes.size()) == name.size() - trunk.size() - 1;
+    };
+    std::vector<std::string> args = {"for-each-ref", "--format=%(refname)"};
+    for (const auto& entry : named) {
+        if (isTrunk(entry.first)) {
+            args.push_back("--merged=" + entry.first);
+        }
+    }
+    if (args.size() == 2) {
+        return;
+    }
+    args.push_back("refs/remotes/");
+    const ProcessResult run = runGit(args, workDirOf(m_repo).string());
+    if (run.exitCode != 0) {
+        return;
+    }
+    std::unordered_set<std::string> merged;
+    std::istringstream lines(run.out);
+    for (std::string line; std::getline(lines, line);) {
+        if (!line.empty() && !isTrunk(line)) {
+            merged.insert(line);
+        }
+    }
+    named.erase(std::remove_if(named.begin(), named.end(),
+                               [&merged](const auto& entry) { return merged.count(entry.first); }),
+                named.end());
 }
 
 bool Repository::buildCommitWalk(const HistoryFilter& filter) const {
@@ -3313,22 +3355,81 @@ bool parseHit(std::string_view record, CommitHit& hit) {
 
 } // namespace
 
+namespace {
+
+/// One streamed `git log -z`, its records parsed and handed to `offer` as they come.
+std::string streamLog(const std::vector<std::string>& args, const std::string& workDir,
+                      const std::function<bool(std::vector<CommitHit>&&)>& offer) {
+    std::string pending;
+    bool stopped = false;
+    const ProcessResult run = runGit(args, workDir, [&](std::string_view chunk) {
+        pending.append(chunk);
+        std::vector<CommitHit> batch;
+        std::size_t start = 0;
+        for (std::size_t end = pending.find('\0'); end != std::string::npos;
+             end = pending.find('\0', start)) {
+            CommitHit hit;
+            if (parseHit(std::string_view(pending).substr(start, end - start), hit)) {
+                batch.push_back(std::move(hit));
+            }
+            start = end + 1;
+        }
+        pending.erase(0, start);
+        if (!batch.empty() && !offer(std::move(batch))) {
+            stopped = true;
+            return false;
+        }
+        return true;
+    });
+    if (stopped) {
+        return {};
+    }
+    CommitHit last;
+    if (!pending.empty() && parseHit(pending, last)) {
+        offer({std::move(last)});
+    }
+    return run.exitCode == 0 ? std::string() : failureText(run);
+}
+
+} // namespace
+
 std::string Repository::streamCommitSearch(
     const std::string& workDir, const CommitQuery& query, std::size_t limit,
     const std::function<bool(std::vector<CommitHit>&&)>& deliver) {
-    if (workDir.empty() || limit == 0) {
-        return {};
-    }
-    const bool anything = !query.text.empty() || !query.author.empty() || query.since != 0 ||
-                          query.until != 0;
-    if (!anything) {
+    if (workDir.empty() || limit == 0 ||
+        (query.text.empty() && query.since == 0 && query.until == 0)) {
         return {};
     }
     const std::string format = "--format=%H%x1f%at%x1f%an%x1f%ae%x1f%S%x1f%B";
 
-    std::string pinned;
-    if (looksLikeHash(query.text) && query.author.empty() && query.since == 0 &&
-        query.until == 0) {
+    // Two git runs feed one list: git ANDs --author with --grep, and the reader's
+    // text may be either. The lock also keeps `deliver` on one thread at a time.
+    std::mutex lock;
+    std::unordered_set<std::string> seen;
+    std::size_t delivered = 0;
+    bool stopped = false;
+    const auto offer = [&](std::vector<CommitHit>&& batch) {
+        const std::lock_guard<std::mutex> guard(lock);
+        if (stopped) {
+            return false;
+        }
+        std::vector<CommitHit> fresh;
+        for (CommitHit& hit : batch) {
+            if (delivered + fresh.size() < limit && seen.insert(hit.commit.id).second) {
+                fresh.push_back(std::move(hit));
+            }
+        }
+        delivered += fresh.size();
+        if (!fresh.empty() && !deliver(std::move(fresh))) {
+            stopped = true;
+        }
+        if (delivered >= limit) {
+            stopped = true;
+        }
+        return !stopped;
+    };
+
+    if (looksLikeHash(query.text) && query.since == 0 && query.until == 0) {
         const ProcessResult resolved =
             runGit({"rev-parse", "--verify", "--quiet", query.text + "^{commit}"}, workDir);
         std::string oid = resolved.out;
@@ -3340,69 +3441,44 @@ std::string Repository::streamCommitSearch(
             CommitHit hit;
             if (shown.exitCode == 0 &&
                 parseHit(std::string_view(shown.out).substr(0, shown.out.find('\0')), hit)) {
-                pinned = hit.commit.id;
-                if (!deliver({std::move(hit)})) {
+                hit.hashMatch = true;
+                if (!offer({std::move(hit)})) {
                     return {};
                 }
             }
         }
     }
 
-    std::vector<std::string> args = {"log", "--all", "-z", format, "-n", std::to_string(limit),
+    std::vector<std::string> base = {"log", "--all", "-z", format, "-n", std::to_string(limit),
                                      "-i"};
     if (query.firstParent) {
-        args.push_back("--first-parent");
-    }
-    const bool regex = isWildcard(query.text) || isWildcard(query.author);
-    args.push_back(regex ? "-E" : "-F");
-    const auto pattern = [regex](const std::string& text) {
-        return regex ? wildcardRegex(text) : text;
-    };
-    if (!query.text.empty()) {
-        args.push_back("--grep=" + pattern(query.text));
-    }
-    if (!query.author.empty()) {
-        args.push_back("--author=" + pattern(query.author));
+        base.push_back("--first-parent");
     }
     if (query.since != 0) {
-        args.push_back("--since=" + gitDateUtc(query.since));
+        base.push_back("--since=" + gitDateUtc(query.since));
     }
     if (query.until != 0) {
-        args.push_back("--until=" + gitDateUtc(query.until));
+        base.push_back("--until=" + gitDateUtc(query.until));
     }
+    if (query.text.empty()) {
+        return streamLog(base, workDir, offer);
+    }
+    const bool wildcard = isWildcard(query.text);
+    base.push_back(wildcard ? "-E" : "-F");
+    const std::string pattern = wildcard ? wildcardRegex(query.text) : query.text;
+    std::vector<std::string> byMessage = base;
+    byMessage.push_back("--grep=" + pattern);
+    std::vector<std::string> byAuthor = base;
+    byAuthor.push_back("--author=" + pattern);
 
-    std::string pending;
-    bool stopped = false;
-    const ProcessResult run = runGit(args, workDir, [&](std::string_view chunk) {
-        pending.append(chunk);
-        std::vector<CommitHit> batch;
-        std::size_t start = 0;
-        for (std::size_t end = pending.find('\0'); end != std::string::npos;
-             end = pending.find('\0', start)) {
-            CommitHit hit;
-            if (parseHit(std::string_view(pending).substr(start, end - start), hit) &&
-                hit.commit.id != pinned) {
-                batch.push_back(std::move(hit));
-            }
-            start = end + 1;
-        }
-        pending.erase(0, start);
-        if (!batch.empty() && !deliver(std::move(batch))) {
-            stopped = true;
-            return false;
-        }
-        return true;
-    });
+    std::string authorError;
+    std::thread authors([&] { authorError = streamLog(byAuthor, workDir, offer); });
+    const std::string messageError = streamLog(byMessage, workDir, offer);
+    authors.join();
     if (stopped) {
         return {};
     }
-    if (!pending.empty()) {
-        CommitHit hit;
-        if (parseHit(pending, hit) && hit.commit.id != pinned) {
-            deliver({std::move(hit)});
-        }
-    }
-    return run.exitCode == 0 ? std::string() : failureText(run);
+    return messageError.empty() ? authorError : messageError;
 }
 
 std::string Repository::diffCliText(const Oid& base, const Oid& target,

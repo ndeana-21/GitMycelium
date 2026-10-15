@@ -30,6 +30,10 @@ struct HistoryFilter {
     /// Only the commits on some ref's first-parent line: a merged branch that is
     /// gone shows as its merge commit alone.
     bool firstParentHistory = false;
+    /// With `firstParentHistory`: the trunk's short name. Remote branches already
+    /// merged into it (locally or on any remote) are not walked, so their commits
+    /// fold into the merge too.
+    std::string foldInto{};
 };
 
 struct RefInfo {
@@ -265,11 +269,11 @@ enum class ConflictSide { Ours, Base, Theirs };
 
 /// What a commit search looks at. `Message` and `Author` are literal, case-insensitive
 /// substrings; `Sha` resolves a hash (full or an unambiguous abbreviation).
-/// What the search window asks of the history. Every set part must match; text and
-/// author are case-insensitive substrings, or wildcards when they hold `*` or `?`.
+/// What the search window asks of the history. The text is found in the message or
+/// the author (name or email), or names a hash; a case-insensitive substring, or a
+/// wildcard pattern when it holds `*` or `?`. The dates, when set, narrow either.
 struct CommitQuery {
-    std::string text;   ///< the message, or a hash prefix
-    std::string author; ///< name or email
+    std::string text;
     std::int64_t since = 0; ///< unix time, 0 for open
     std::int64_t until = 0;
     /// Only the commits the folded graph draws (`--first-parent`).
@@ -280,6 +284,7 @@ struct CommitQuery {
 struct CommitHit {
     CommitInfo commit;
     std::string source;
+    bool hashMatch = false; ///< the text named this commit
 };
 
 /// One path in the index that carries conflict stages. An empty oid means the stage is

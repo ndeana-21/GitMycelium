@@ -9,18 +9,20 @@ All notable changes to GitMycelium are recorded here. The format follows
 ### Added
 
 - **One search window for everything.** `Ctrl+P` and `Ctrl+F` open the same window:
-  commands, then branches, then commits, each block under its own heading. Commits
-  appear while git is still looking, and typing never waits for it. A query matches
-  anywhere in the text (`*text*`), and `*` and `?` work inside it. The window also
-  searches by author, or by a date range, optionally with a message. A commit's row
-  shows its branch, subject, author and date, and its whole message shows at once
-  under the mouse. Choosing a branch or a commit brings it to the middle of the graph.
-  The old Search Commits panel is gone.
+  commands, then branches, then commits, each block under its own heading. One query
+  finds commit messages, authors, hashes and branch names; a checkbox narrows the
+  commits to a date range. Commits appear newest first while git is still looking, and
+  typing never waits for it. A query matches anywhere in the text (`*text*`), and `*`
+  and `?` work inside it. A commit's row shows its branch, subject, author and date,
+  and its whole message shows at once under the mouse. Choosing a branch or a commit
+  brings it to the middle of the graph. The old Search Commits panel is gone.
 - **An eye on every branch, folder and section** in the branch panel: a click hides
   it from the graph, and a closed eye marks what is hidden. On a folder or on Local,
   Remote or Pinned it hides every branch inside.
-- **Fold merged branches** (View → Show Commits of Merged Branches, off): a branch
-  that was merged and no longer exists shows as its merge commit alone.
+- **Fold merged branches** (Preferences → Graph, or View → Show Commits of Merged
+  Branches off): a branch merged into the main branch that no longer exists, or is
+  left only as a remote branch, shows as its merge commit alone. Preferences → Graph
+  also holds the labels of remote branches already on the main line.
 
 ## [1.2.1] - 2026-10-14
 

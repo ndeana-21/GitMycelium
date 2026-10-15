@@ -204,7 +204,29 @@ void PreferencesTest::theDialogWritesTheKeysTheWindowReads() {
     QVERIFY(animate->isChecked());
     animate->setChecked(false);
 
+    auto* fold = dialog.findChild<QCheckBox*>(QStringLiteral("foldMergedBranches"));
+    QVERIFY(fold);
+    QVERIFY(!fold->isChecked());
+    fold->setChecked(true);
+    auto* labels = dialog.findChild<QCheckBox*>(QStringLiteral("mergedRemoteLabels"));
+    QVERIFY(labels);
+    labels->setChecked(true);
+
     dialog.accept();
+
+    QVERIFY(!SettingsStore().boolValue(
+        SettingsStore::globalKey(QStringLiteral("showMergedCommits")), true));
+    QVERIFY(SettingsStore().boolValue(
+        SettingsStore::globalKey(QStringLiteral("showMergedRemotes")), false));
+    {
+        MainWindow window;
+        QVERIFY(window.openRepository(m_path));
+        const QString report =
+            window.visibilityForDiagnostics(QStringLiteral("report"), {}).join('\n');
+        QVERIFY2(report.contains(QStringLiteral("merged commits: merge only")), qPrintable(report));
+    }
+    SettingsStore().setBool(SettingsStore::globalKey(QStringLiteral("showMergedCommits")), true);
+    SettingsStore().setBool(SettingsStore::globalKey(QStringLiteral("showMergedRemotes")), false);
 
     const SettingsStore store(m_path);
     QVERIFY(store.boolValue(store.repositoryKey(QStringLiteral("preflight")), false));

@@ -7,7 +7,7 @@
 #include "ui/themed_icons.h"
 
 #include <QApplication>
-#include <QButtonGroup>
+#include <QCheckBox>
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QElapsedTimer>
@@ -20,13 +20,13 @@
 #include <QPainter>
 #include <QRegularExpression>
 #include <QStyledItemDelegate>
-#include <QToolButton>
 #include <QToolTip>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <limits>
 
 namespace gk {
 namespace {
@@ -37,6 +37,7 @@ constexpr int kToolTipRole = Qt::UserRole + 3;
 constexpr int kPillRole = Qt::UserRole + 4;
 constexpr int kPillColorRole = Qt::UserRole + 5;
 constexpr int kPillKindRole = Qt::UserRole + 6;
+constexpr int kWhenRole = Qt::UserRole + 7;
 /// The chip column has one width, so the subjects after it start in one line.
 constexpr int kPillColumn = 170;
 
@@ -259,56 +260,45 @@ CommandPalette::CommandPalette(const CommandRegistry& registry, QWidget* parent)
     layout->setContentsMargins(10, 10, 10, 10);
     layout->setSpacing(8);
 
-    auto* top = new QHBoxLayout;
-    top->setSpacing(4);
     m_filter = new QLineEdit(this);
     m_filter->setClearButtonEnabled(true);
     m_filter->installEventFilter(this);
+    m_filter->setPlaceholderText(
+        QStringLiteral("Commands, branches, commit messages, authors, hashes…"));
     QAction* filterIcon =
         m_filter->addAction(icon(Icon::Search, theme::textDim()), QLineEdit::LeadingPosition);
     setThemedIcon(filterIcon, Icon::Search, IconTint::Dim);
-    top->addWidget(m_filter, 1);
+    layout->addWidget(m_filter);
 
-    auto* modes = new QButtonGroup(this);
-    const auto modeButton = [this, modes, top](const QString& text, const QString& tip, Mode mode) {
-        auto* button = new QToolButton(this);
-        button->setText(text);
-        button->setToolTip(tip);
-        button->setCheckable(true);
-        button->setFocusPolicy(Qt::NoFocus);
-        modes->addButton(button);
-        top->addWidget(button);
-        connect(button, &QToolButton::clicked, this, [this, mode] { setMode(mode); });
-        return button;
-    };
-    m_textMode = modeButton(QStringLiteral("Text"),
-                            QStringLiteral("Commands, branches, and commits by message or hash"),
-                            Mode::Text);
-    m_authorMode = modeButton(QStringLiteral("Author"),
-                              QStringLiteral("Commits by author name or email"), Mode::Author);
-    m_datesMode = modeButton(QStringLiteral("Dates"),
-                             QStringLiteral("Commits in a date range, optionally by message"),
-                             Mode::Dates);
-    m_textMode->setChecked(true);
-    layout->addLayout(top);
-
-    m_dateRow = new QWidget(this);
-    auto* dates = new QHBoxLayout(m_dateRow);
+    auto* dates = new QHBoxLayout;
     dates->setContentsMargins(0, 0, 0, 0);
+    m_useDates = new QCheckBox(QStringLiteral("Only commits from"), this);
+    m_useDates->setObjectName(QStringLiteral("paletteUseDates"));
+    m_useDates->setFocusPolicy(Qt::NoFocus);
     const QDate today = QDate::currentDate();
-    m_from = new QDateEdit(today.addMonths(-1), m_dateRow);
-    m_to = new QDateEdit(today, m_dateRow);
+    m_from = new QDateEdit(today.addMonths(-1), this);
+    m_to = new QDateEdit(today, this);
     for (QDateEdit* edit : {m_from, m_to}) {
         edit->setCalendarPopup(true);
+        // The calendar picks a date; up/down steppers on a date field change whichever
+        // part the caret is in, and nobody can tell which.
+        edit->setButtonSymbols(QAbstractSpinBox::NoButtons);
         edit->setDisplayFormat(QStringLiteral("yyyy-MM-dd"));
+        edit->setEnabled(false);
         connect(edit, &QDateEdit::dateChanged, this, [this] { scheduleSearch(); });
     }
-    dates->addWidget(new QLabel(QStringLiteral("From"), m_dateRow));
+    connect(m_useDates, &QCheckBox::toggled, this, [this](bool on) {
+        m_from->setEnabled(on);
+        m_to->setEnabled(on);
+        m_readerMoved = false;
+        refill();
+    });
+    dates->addWidget(m_useDates);
     dates->addWidget(m_from);
-    dates->addWidget(new QLabel(QStringLiteral("to"), m_dateRow));
+    dates->addWidget(new QLabel(QStringLiteral("to"), this));
     dates->addWidget(m_to);
     dates->addStretch(1);
-    layout->addWidget(m_dateRow);
+    layout->addLayout(dates);
 
     m_list = new QTreeWidget(this);
     m_list->setColumnCount(3);
@@ -347,7 +337,6 @@ CommandPalette::CommandPalette(const CommandRegistry& registry, QWidget* parent)
         }
     });
 
-    updateModeControls();
     refill();
     m_filter->setFocus();
 }
@@ -372,19 +361,7 @@ void CommandPalette::setSession(RepoSession* session, bool firstParent) {
 
 void CommandPalette::setPreferHistory(bool prefer) {
     m_preferHistory = prefer;
-    m_filter->setPlaceholderText(prefer ? QStringLiteral("Find a branch or commit…")
-                                        : m_filter->placeholderText());
     selectFirst();
-}
-
-void CommandPalette::setMode(Mode mode) {
-    if (m_mode == mode) {
-        return;
-    }
-    m_mode = mode;
-    updateModeControls();
-    m_readerMoved = false;
-    refill();
 }
 
 void CommandPalette::setQuery(const QString& query) {
@@ -392,30 +369,18 @@ void CommandPalette::setQuery(const QString& query) {
 }
 
 void CommandPalette::setDateRange(const QDate& from, const QDate& to) {
-    const QSignalBlocker blockFrom(m_from);
-    const QSignalBlocker blockTo(m_to);
-    m_from->setDate(from);
-    m_to->setDate(to);
-    scheduleSearch();
-}
-
-void CommandPalette::updateModeControls() {
-    m_textMode->setChecked(m_mode == Mode::Text);
-    m_authorMode->setChecked(m_mode == Mode::Author);
-    m_datesMode->setChecked(m_mode == Mode::Dates);
-    m_dateRow->setVisible(m_mode == Mode::Dates);
-    switch (m_mode) {
-    case Mode::Text:
-        m_filter->setPlaceholderText(m_preferHistory
-                                         ? QStringLiteral("Find a branch or commit…")
-                                         : QStringLiteral("Type a command, branch, or commit…"));
-        break;
-    case Mode::Author:
-        m_filter->setPlaceholderText(QStringLiteral("Author name or email…"));
-        break;
-    case Mode::Dates:
-        m_filter->setPlaceholderText(QStringLiteral("Message (optional)…"));
-        break;
+    {
+        const QSignalBlocker blockFrom(m_from);
+        const QSignalBlocker blockTo(m_to);
+        if (from.isValid()) {
+            m_from->setDate(from);
+            m_to->setDate(to);
+        }
+    }
+    if (m_useDates->isChecked() != from.isValid()) {
+        m_useDates->setChecked(from.isValid());
+    } else {
+        refill();
     }
 }
 
@@ -437,7 +402,7 @@ void CommandPalette::refill() {
     m_commitHeader = nullptr;
     const QString query = m_filter->text();
 
-    if (m_mode == Mode::Text) {
+    {
         const std::vector<const Command*> commands = m_registry.search(query);
         if (!commands.empty()) {
             addHeader(QStringLiteral("Commands"));
@@ -507,19 +472,10 @@ void CommandPalette::refill() {
 
 CommitQuery CommandPalette::currentQuery() const {
     CommitQuery query;
-    const std::string text = m_filter->text().trimmed().toStdString();
-    switch (m_mode) {
-    case Mode::Text:
-        query.text = text;
-        break;
-    case Mode::Author:
-        query.author = text;
-        break;
-    case Mode::Dates:
-        query.text = text;
+    query.text = m_filter->text().trimmed().toStdString();
+    if (m_useDates->isChecked()) {
         query.since = m_from->date().startOfDay().toSecsSinceEpoch();
         query.until = m_to->date().endOfDay().toSecsSinceEpoch();
-        break;
     }
     query.firstParent = m_firstParent;
     return query;
@@ -543,7 +499,7 @@ void CommandPalette::scheduleSearch() {
         m_commitHeader = nullptr;
     }
     const CommitQuery query = currentQuery();
-    if (!m_session || (query.text.empty() && query.author.empty() && query.since == 0)) {
+    if (!m_session || (query.text.empty() && query.since == 0)) {
         return;
     }
     m_searching = true;
@@ -588,7 +544,26 @@ void CommandPalette::addCommitRow(const CommitHit& hit) {
             break;
         }
     }
-    auto* item = new QTreeWidgetItem(m_list);
+    // Newest first, whichever of the two searches found it first; a commit the text
+    // names by hash stays on top.
+    const qint64 when = hit.hashMatch ? std::numeric_limits<qint64>::max()
+                                      : static_cast<qint64>(commit.author.whenUnix);
+    int position = m_list->topLevelItemCount();
+    const int firstCommit = m_list->indexOfTopLevelItem(m_commitHeader) + 1;
+    int low = firstCommit;
+    int high = position;
+    while (low < high) {
+        const int middle = (low + high) / 2;
+        if (m_list->topLevelItem(middle)->data(0, kWhenRole).toLongLong() >= when) {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+    position = low;
+    auto* item = new QTreeWidgetItem;
+    m_list->insertTopLevelItem(position, item);
+    item->setData(0, kWhenRole, when);
     item->setText(0, QString::fromStdString(commit.summary));
     item->setText(1, QString::fromStdString(commit.author.name));
     item->setText(2, QDateTime::fromSecsSinceEpoch(commit.author.whenUnix)

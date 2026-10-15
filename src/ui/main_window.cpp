@@ -4856,6 +4856,9 @@ HistoryFilter MainWindow::historyFilter() const {
     if (!m_session || !m_session->isOpen()) {
         return filter; // an empty visibleRefs is "every ref"
     }
+    if (filter.firstParentHistory) {
+        filter.foldInto = m_session->info().trunkBranch;
+    }
     bool active = false;
     const std::vector<std::string> wanted = visibilityWantedRefs(&active);
     if (!active && m_visibility.empty()) {
@@ -8723,6 +8726,7 @@ void MainWindow::openPreferences() {
     // Re-read rather than trust the dialog: QSettings is the one source of truth,
     // and the same loaders run on every repository open.
     loadGraphAnimation();
+    loadGraphViewOptions();
     loadSavedAppearance();
     loadCommitDateFormat();
     loadAutoFetch();
@@ -9507,12 +9511,9 @@ QStringList MainWindow::searchForDiagnostics(const QString& query, const QString
     refreshCommands();
     CommandPalette palette(m_commands);
     preparePalette(palette, true);
-    if (field == QStringLiteral("author")) {
-        palette.setMode(CommandPalette::Mode::Author);
-    } else if (field.startsWith(QLatin1String("dates:"))) {
+    if (field.startsWith(QLatin1String("dates:"))) {
         // dates:<from>..<to>, both yyyy-MM-dd
         const QStringList range = field.mid(6).split(QStringLiteral(".."));
-        palette.setMode(CommandPalette::Mode::Dates);
         palette.setDateRange(QDate::fromString(range.value(0), Qt::ISODate),
                              QDate::fromString(range.value(1), Qt::ISODate));
     }
@@ -10837,6 +10838,19 @@ QStringList MainWindow::visibilityForDiagnostics(const QString& operation, const
                            ? m_visibilityButton->text()
                            : QStringLiteral("(hidden)"));
     return report;
+}
+
+void MainWindow::loadGraphViewOptions() {
+    const SettingsStore store;
+    const auto apply = [](QAction* action, bool on) {
+        if (action && action->isChecked() != on) {
+            action->setChecked(on);
+        }
+    };
+    apply(m_mergedCommitsAction,
+          store.boolValue(SettingsStore::globalKey(QStringLiteral("showMergedCommits")), true));
+    apply(m_mergedRemotesAction,
+          store.boolValue(SettingsStore::globalKey(QStringLiteral("showMergedRemotes")), false));
 }
 
 void MainWindow::loadGraphAnimation() {

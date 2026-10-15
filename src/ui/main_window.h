@@ -411,6 +411,7 @@ private:
     /// applies the look.
     void applyAppearance();
     void loadGraphAnimation();
+    void loadGraphViewOptions();
     void refreshCommands();
     /// A menu action keeps its binding, anything else gets a shortcut, and a command
     /// with no sequence gets none.

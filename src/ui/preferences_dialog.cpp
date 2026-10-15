@@ -144,6 +144,25 @@ QWidget* PreferencesDialog::buildGraphPage() {
     m_animateBox->setChecked(
         SettingsStore().boolValue(SettingsStore::globalKey(QStringLiteral("graph/animate")), true));
     layout->addWidget(m_animateBox);
+
+    m_foldMergedBox =
+        new QCheckBox(QStringLiteral("Hide the commits of merged branches"), page);
+    m_foldMergedBox->setObjectName(QStringLiteral("foldMergedBranches"));
+    m_foldMergedBox->setToolTip(QStringLiteral(
+        "A branch merged into the main branch that is gone, or only left on a remote, "
+        "shows as its merge commit alone."));
+    m_foldMergedBox->setChecked(!SettingsStore().boolValue(
+        SettingsStore::globalKey(QStringLiteral("showMergedCommits")), true));
+    layout->addWidget(m_foldMergedBox);
+
+    m_mergedRemoteLabelsBox =
+        new QCheckBox(QStringLiteral("Label remote branches already on the main line"), page);
+    m_mergedRemoteLabelsBox->setObjectName(QStringLiteral("mergedRemoteLabels"));
+    m_mergedRemoteLabelsBox->setToolTip(QStringLiteral(
+        "Off: a remote branch whose tip is a commit of the main branch carries no label."));
+    m_mergedRemoteLabelsBox->setChecked(SettingsStore().boolValue(
+        SettingsStore::globalKey(QStringLiteral("showMergedRemotes")), false));
+    layout->addWidget(m_mergedRemoteLabelsBox);
     layout->addStretch(1);
     return page;
 }
@@ -451,6 +470,10 @@ void PreferencesDialog::save() {
     SettingsStore store(m_repositoryPath);
     store.setBool(SettingsStore::globalKey(QStringLiteral("graph/animate")),
                   m_animateBox->isChecked());
+    store.setBool(SettingsStore::globalKey(QStringLiteral("showMergedCommits")),
+                  !m_foldMergedBox->isChecked());
+    store.setBool(SettingsStore::globalKey(QStringLiteral("showMergedRemotes")),
+                  m_mergedRemoteLabelsBox->isChecked());
     store.setString(SettingsStore::globalKey(QStringLiteral("theme")),
                     m_themeBox->currentData().toString());
     store.setInt(SettingsStore::globalKey(QStringLiteral("zoom")), m_zoomBox->value());

@@ -530,7 +530,7 @@ QTreeView#unstagedFiles::item:selected {
 /* the command palette and the recent list behave like opencode's dialogs */
 gk--CommandPalette QTreeWidget, gk--CommandPalette { background: %(panel)s; }
 gk--CommandPalette QTreeWidget::item { padding: 5px 10px; }
-gk--CommandPalette QTreeWidget::item:selected { background: %(accent)s; color: %(onAccent)s; }
+gk--CommandPalette QTreeWidget::item:selected { background: %(selection)s; color: %(text)s; }
 gk--CommandPalette QLineEdit { padding: 8px 10px; }
 
 /* side panels sit one step above the canvas */

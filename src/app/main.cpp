@@ -320,7 +320,7 @@ void printUsage() {
                  "  --ui-keymap <list|set <id> <seq>|reset <id>|reset-all>\n"
                  "                      list, rebind or clear a command shortcut through\n"
                  "                      the window's own binding path\n"
-                 "  --ui-search <query> [text|author|dates:<from>..<to>] [reveal-hash]\n"
+                 "  --ui-search <query> [text|dates:<from>..<to>] [reveal-hash]\n"
                  "                      fill the search window (Ctrl+F) and report its\n"
                  "                      blocks once git is done; optionally page the graph\n"
                  "                      to the named commit and report its row\n"

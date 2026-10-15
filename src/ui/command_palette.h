@@ -12,8 +12,8 @@
 #include <functional>
 #include <vector>
 
+class QCheckBox;
 class QLineEdit;
-class QToolButton;
 class QTreeWidget;
 class QTreeWidgetItem;
 class QWidget;
@@ -68,9 +68,10 @@ bool paletteMatches(const QString& candidate, const QString& query);
 /// One window for everything a reader types to find: commands, then branches, then
 /// commits, each block under its own heading.
 ///
-/// Commits come from a `git log` running on a worker while the reader types; rows are
-/// added as git finds them and each keystroke stops the search before. Besides the
-/// text (message or hash), the search can be by author or by a date range.
+/// Commits come from `git log` running on a worker while the reader types; rows are
+/// added as git finds them, newest first, and each keystroke stops the search before.
+/// The text is looked for in commit messages, authors, hashes and branch names at
+/// once; a ticked date range narrows the commits.
 ///
 /// Selecting does not run anything here. The dialog only records the choice and
 /// accepts; the window acts after `exec()` returns, so a command that opens its own
@@ -79,7 +80,6 @@ class CommandPalette : public QDialog {
     Q_OBJECT
 
 public:
-    enum class Mode { Text, Author, Dates };
     enum class Choice { None, Command, Ref, Commit };
     static constexpr int kCommitLimit = 500;
     static constexpr int kRefLimit = 30;
@@ -92,8 +92,8 @@ public:
     void setSession(RepoSession* session, bool firstParent);
     /// Ctrl+F: the first branch or commit is the current row, not the first command.
     void setPreferHistory(bool prefer);
-    void setMode(Mode mode);
     void setQuery(const QString& query);
+    /// Ticks the date range and sets it; an invalid `from` unticks it.
     void setDateRange(const QDate& from, const QDate& to);
 
     Choice choice() const { return m_choice; }
@@ -136,7 +136,6 @@ private:
     void updateCommitHeader();
     QTreeWidgetItem* addHeader(const QString& title);
     void selectFirst();
-    void updateModeControls();
     CommitQuery currentQuery() const;
     int rowType(const QTreeWidgetItem* item) const;
 
@@ -145,13 +144,9 @@ private:
     RepoSession* m_session = nullptr;
     bool m_firstParent = false;
     bool m_preferHistory = false;
-    Mode m_mode = Mode::Text;
 
     QLineEdit* m_filter = nullptr;
-    QToolButton* m_textMode = nullptr;
-    QToolButton* m_authorMode = nullptr;
-    QToolButton* m_datesMode = nullptr;
-    QWidget* m_dateRow = nullptr;
+    QCheckBox* m_useDates = nullptr;
     QDateEdit* m_from = nullptr;
     QDateEdit* m_to = nullptr;
     QTreeWidget* m_list = nullptr;

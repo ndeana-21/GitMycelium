@@ -473,6 +473,8 @@ private:
     /// The tips the history walk starts from, in the order git lists them for
     /// `--all`: every ref by name, then HEAD.
     std::vector<std::array<unsigned char, 20>> walkStarts(const HistoryFilter& filter) const;
+    void dropMergedRemotes(std::vector<std::pair<std::string, std::array<unsigned char, 20>>>& named,
+                           const std::string& trunk) const;
     std::string trunkBranch() const;
     /// The history walk kept between pages. Building one re-pushes every ref and
     /// counts children down to the depth it needs, which on a monorepo costs more

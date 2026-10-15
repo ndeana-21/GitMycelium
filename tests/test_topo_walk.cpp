@@ -12,6 +12,7 @@
 #include <QDir>
 #include <QFile>
 #include <QProcess>
+#include <QSet>
 #include <QSignalSpy>
 #include <QStringList>
 #include <QTemporaryDir>
@@ -73,6 +74,7 @@ private slots:
     void visibleRefsAreWalkedInGitsOrder();
     void aBrokenGraphIsIgnored();
     void aGoneMergedBranchShowsAsItsMergeAlone();
+    void aMergedRemoteBranchFoldsIntoItsMerge();
     void theRawHeaderGivesParentsAndDate();
     void aLongHistoryIsIndexedOnceInTheBackground();
     void indexingNeedsToBeAskedFor();
@@ -292,6 +294,39 @@ void TopoWalkTest::aGoneMergedBranchShowsAsItsMergeAlone() {
             }
         }
     }
+}
+
+void TopoWalkTest::aMergedRemoteBranchFoldsIntoItsMerge() {
+    // feature is merged into main and gone locally, but its remote-tracking branch
+    // is still there; side is not merged. The trunk's own remote twin is kept.
+    const QString f2 = gitOut(m_path, {"rev-parse", "feature"});
+    QVERIFY(git(m_path, {"update-ref", "refs/remotes/origin/feature", f2}));
+    QVERIFY(git(m_path, {"update-ref", "refs/remotes/origin/side", "side"}));
+    QVERIFY(git(m_path, {"update-ref", "refs/remotes/origin/main", "main~1"}));
+    QVERIFY(git(m_path, {"branch", "-D", "feature"}));
+    QVERIFY(git(m_path, {"tag", "-d", "v-annotated"}));
+
+    HistoryFilter filter{HistoryScope::AllRefs, {}};
+    filter.firstParentHistory = true;
+    RepoSession session;
+    QVERIFY(session.open(m_path));
+    bool more = false;
+    const auto ids = [&] {
+        QSet<QString> out;
+        for (const CommitInfo& commit : session.commitsBlocking(0, 1000, &more, filter)) {
+            out.insert(QString::fromStdString(commit.id));
+        }
+        return out;
+    };
+    QVERIFY(ids().contains(f2));
+
+    filter.foldInto = "main";
+    const QSet<QString> folded = ids();
+    QVERIFY(!folded.contains(f2));
+    QVERIFY(!folded.contains(gitOut(m_path, {"rev-parse", ":/f1"})));
+    QVERIFY(folded.contains(gitOut(m_path, {"rev-parse", ":/merge feature"})));
+    QVERIFY(folded.contains(gitOut(m_path, {"rev-parse", "side"})));
+    QVERIFY(folded.contains(gitOut(m_path, {"rev-parse", "origin/main"})));
 }
 
 void TopoWalkTest::aBrokenGraphIsIgnored() {
