@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(gitmycelium VERSION 1.2.1
+project(gitmycelium VERSION 1.3.0
         DESCRIPTION "A fast, native Git client for large repositories"
         LANGUAGES CXX)
 

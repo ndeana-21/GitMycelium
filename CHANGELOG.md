@@ -4,7 +4,7 @@ All notable changes to GitMycelium are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.3.0] - 2026-10-16
 
 ### Added
 
@@ -23,6 +23,12 @@ All notable changes to GitMycelium are recorded here. The format follows
   Branches off): a branch merged into the main branch that no longer exists, or is
   left only as a remote branch, shows as its merge commit alone. Preferences → Graph
   also holds the labels of remote branches already on the main line.
+
+### Downloads
+
+- **Linux x86_64:** `GitMycelium-1.3.0-x86_64.AppImage`.
+- **macOS (Apple Silicon):** `GitMycelium-1.3.0-arm64.dmg`.
+- **Windows x86_64:** `GitMycelium-1.3.0-windows-x86_64.zip`.
 
 ## [1.2.1] - 2026-10-14
 
