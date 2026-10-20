@@ -3564,9 +3564,14 @@ void MainWindow::reloadHistory() {
 void MainWindow::refreshHistory() {
     m_restoreCommit = m_selectedCommitId;
     m_restoreWip = m_selectedCommitId.isEmpty() && m_details && m_details->showingWorkingTree();
+    // The rows down to the bottom of the screen; with the graph not laid out (another
+    // page on top) its last two pages are enough, not every row ever paged in.
     const QModelIndex bottom =
         m_commitView->indexAt(QPoint(1, m_commitView->viewport()->height() - 1));
-    const int visible = bottom.isValid() ? bottom.row() + 1 : m_commitModel->rowCount();
+    const int visible = bottom.isValid()
+                            ? bottom.row() + 1
+                            : std::min(m_commitModel->rowCount(),
+                                       2 * static_cast<int>(RepoSession::kPageSize));
     m_commitModel->refresh(visible);
 }
 

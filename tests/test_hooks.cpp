@@ -135,7 +135,9 @@ void HooksTest::writingDisablingAndEnabling() {
                                &error),
              qPrintable(error));
 
-    const HookEntry* written = findHook(session.hooks(), QStringLiteral("pre-commit"));
+    // Bound first: findHook points into the list, and a temporary list is gone at the `;`.
+    const std::vector<HookEntry> hooks = session.hooks();
+    const HookEntry* written = findHook(hooks, QStringLiteral("pre-commit"));
     QVERIFY(written != nullptr);
     QVERIFY(written->state == HookState::Disabled);
     QCOMPARE(session.hookContent(QStringLiteral("pre-commit")).trimmed(),
