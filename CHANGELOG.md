@@ -6,6 +6,17 @@ All notable changes to GitMycelium are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Squash a stretch of the branch from one commit**: right-click a commit for
+  "Squash this and all newer commits into one" or "Squash from the branch start up to
+  this commit".
+
+### Fixed
+
+- Squashing or dropping selected commits that are not at the tip of the branch was
+  refused: the rewrite plan named only the selection, not the commits above it.
+
 ### Changed
 
 - **A commit, a stash or any other local change no longer reloads the whole graph.**

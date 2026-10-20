@@ -100,6 +100,7 @@ private slots:
 
     void shiftTakesEverythingBetweenTheTwoClicks();
     void squashingTheRootAndItsChildIsAllowed();
+    void oneCommitSquashesTheStretchToTheTipOrFromTheStart();
 };
 
 void GraphSelectionTest::init() {
@@ -209,6 +210,90 @@ void GraphSelectionTest::squashingTheRootAndItsChildIsAllowed() {
         QString::fromStdString(runGit({"rev-list", "--count", "HEAD"}, path.toStdString()).out)
             .trimmed();
     QCOMPARE(count, QStringLiteral("1"));
+}
+
+void GraphSelectionTest::oneCommitSquashesTheStretchToTheTipOrFromTheStart() {
+    const auto out = [this](const QStringList& args) {
+        std::vector<std::string> argv;
+        for (const QString& a : args) {
+            argv.push_back(a.toStdString());
+        }
+        return QString::fromStdString(runGit(argv, m_path.toStdString()).out).trimmed();
+    };
+    const auto buildFeature = [&] {
+        QVERIFY(git(m_path, {"checkout", "-q", "-B", "feature", "main"}));
+        for (int step = 1; step <= 4; ++step) {
+            QVERIFY(commitFile(QStringLiteral("f%1.txt").arg(step), "f\n",
+                               QStringLiteral("f%1").arg(step)));
+        }
+    };
+
+    buildFeature();
+    QString tree = out({"rev-parse", "feature^{tree}"});
+    {
+        MainWindow window;
+        window.setHeadless(true);
+        QVERIFY(window.openRepository(m_path));
+        QTRY_VERIFY_WITH_TIMEOUT(window.commitsAreLoaded(), 5000);
+        const QString report =
+            window.runCommitMenuEntry(QStringLiteral("squash-to-tip"), QStringLiteral("feature~2"))
+                .join('\n');
+        QVERIFY2(out({"rev-list", "--count", "main..feature"}) == QStringLiteral("2"),
+                 qPrintable(report));
+        QVERIFY2(out({"rev-parse", "feature^{tree}"}) == tree, qPrintable(report));
+        QCOMPARE(out({"log", "-1", "--format=%s", "feature~1"}), QStringLiteral("f1"));
+    }
+
+    buildFeature();
+    tree = out({"rev-parse", "feature^{tree}"});
+    {
+        MainWindow window;
+        window.setHeadless(true);
+        QVERIFY(window.openRepository(m_path));
+        QTRY_VERIFY_WITH_TIMEOUT(window.commitsAreLoaded(), 5000);
+        const QString report = window
+                                   .runCommitMenuEntry(QStringLiteral("squash-from-start"),
+                                                       QStringLiteral("feature~1"))
+                                   .join('\n');
+        QVERIFY2(out({"rev-list", "--count", "main..feature"}) == QStringLiteral("2"),
+                 qPrintable(report));
+        QCOMPARE(out({"rev-parse", "feature^{tree}"}), tree);
+        QCOMPARE(out({"log", "-1", "--format=%s", "feature"}), QStringLiteral("f4"));
+        QCOMPARE(out({"rev-parse", "feature~2"}), out({"rev-parse", "main"}));
+
+        // The trunk has no start of its own.
+        QVERIFY(git(m_path, {"checkout", "-q", "main"}));
+        const QString before = out({"rev-parse", "main"});
+        const QString refused =
+            window.runCommitMenuEntry(QStringLiteral("squash-from-start"), QStringLiteral("main~1"))
+                .join('\n');
+        QVERIFY2(refused.contains(QStringLiteral("Cannot squash")), qPrintable(refused));
+        QCOMPARE(out({"rev-parse", "main"}), before);
+    }
+
+    // Two selected commits in the middle: the commit above them is replayed, not lost.
+    // The plan used to name the selection alone, and the rewrite refused it.
+    buildFeature();
+    tree = out({"rev-parse", "feature^{tree}"});
+    {
+        MainWindow window;
+        window.setHeadless(true);
+        QVERIFY(window.openRepository(m_path));
+        QTRY_VERIFY_WITH_TIMEOUT(window.commitsAreLoaded(), 5000);
+        auto* view = window.findChild<CommitGraphView*>();
+        QVERIFY(view);
+        const int f3 = rowOf(view, out({"rev-parse", "feature~1"}));
+        const int f2 = rowOf(view, out({"rev-parse", "feature~2"}));
+        QVERIFY(f3 >= 0 && f2 >= 0);
+        const QString run =
+            window.runSelectionForDiagnostics(QVector<int>{f3, f2}, QStringLiteral("squash"))
+                .join('\n');
+        QVERIFY2(out({"rev-list", "--count", "main..feature"}) == QStringLiteral("3"),
+                 qPrintable(run));
+        QCOMPARE(out({"rev-parse", "feature^{tree}"}), tree);
+        QCOMPARE(out({"log", "-1", "--format=%s", "feature"}), QStringLiteral("f4"));
+        QCOMPARE(out({"log", "-1", "--format=%s", "feature~2"}), QStringLiteral("f1"));
+    }
 }
 
 QTEST_MAIN(GraphSelectionTest)

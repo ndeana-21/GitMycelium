@@ -49,6 +49,7 @@
 #include <QThreadPool>
 
 #include <algorithm>
+#include <set>
 #include <QCloseEvent>
 #include <QFileDialog>
 #include <QHash>
@@ -5674,6 +5675,24 @@ void MainWindow::buildCommitMenu(QMenu& menu, const QString& commitId) const {
                                                : QString::fromStdString(multi.squashRefusal)));
         }
     }
+    if (!many) {
+        // One commit picks a stretch of the branch: itself and everything newer, or
+        // everything from where the branch left the trunk up to it.
+        QString reason;
+        QAction* toTip = add(QStringLiteral("Squash this and all newer commits into one"),
+                             QStringLiteral("squash-to-tip"));
+        if (squashRange(commitId, true, &reason).empty()) {
+            toTip->setEnabled(false);
+            toTip->setText(toTip->text() + QStringLiteral(" — ") + reason);
+        }
+        QAction* fromStart =
+            add(QStringLiteral("Squash from the branch start up to this commit"),
+                QStringLiteral("squash-from-start"));
+        if (squashRange(commitId, false, &reason).empty()) {
+            fromStart->setEnabled(false);
+            fromStart->setText(fromStart->text() + QStringLiteral(" — ") + reason);
+        }
+    }
     add(QStringLiteral("Fixup into the commit below"), QStringLiteral("fixup"));
     add(QStringLiteral("Reword commit…"), QStringLiteral("reword"));
 
@@ -5816,6 +5835,16 @@ void MainWindow::dispatchCommitMenuAction(const QString& key, const QString& com
         runSelectionOperation(SelectionOperation::Squash);
     } else if (key == QLatin1String("squash")) {
         rewriteCommitInHistory(commitId, RewriteAction::Squash);
+    } else if (key == QLatin1String("squash-to-tip") ||
+               key == QLatin1String("squash-from-start")) {
+        QString reason;
+        const std::vector<Oid> range =
+            squashRange(commitId, key == QLatin1String("squash-to-tip"), &reason);
+        if (range.empty()) {
+            setStatus(QStringLiteral("Cannot squash: %1.").arg(reason));
+        } else {
+            runSelectionOperation(SelectionOperation::Squash, range);
+        }
     } else if (key == QLatin1String("fixup")) {
         rewriteCommitInHistory(commitId, RewriteAction::Fixup);
     } else if (key == QLatin1String("reword")) {
@@ -5998,7 +6027,52 @@ QString MainWindow::rebaseBaseBelow(const QString& commitId) const {
 }
 
 SelectionPlan MainWindow::selectionPlan() const {
-    const std::vector<Oid> selection = m_commitView->selectedCommitIds();
+    return selectionPlan(m_commitView->selectedCommitIds());
+}
+
+std::vector<Oid> MainWindow::squashRange(const QString& commitId, bool toTip,
+                                         QString* reason) const {
+    const std::vector<Oid> lineage = m_commitModel->headLineage();
+    const auto at = std::find(lineage.begin(), lineage.end(), commitId.toStdString());
+    if (at == lineage.end()) {
+        *reason = QStringLiteral("only commits of the checked-out branch");
+        return {};
+    }
+    std::vector<Oid> range;
+    if (toTip) {
+        range.assign(lineage.begin(), at + 1);
+    } else {
+        // The branch starts after the commit it shares with the trunk.
+        const QString trunk = QString::fromStdString(m_session->info().trunkBranch);
+        const QString head = QString::fromStdString(m_session->info().headBranch);
+        if (trunk.isEmpty() || trunk == head) {
+            *reason = QStringLiteral("this is the main branch, it has no start of its own");
+            return {};
+        }
+        QString trunkTip = m_session->resolveRevision(trunk);
+        if (trunkTip.isEmpty()) {
+            trunkTip = m_session->resolveRevision(QStringLiteral("origin/") + trunk);
+        }
+        const std::string base =
+            trunkTip.isEmpty()
+                ? std::string()
+                : m_session->mergeBase(trunkTip, QString::fromStdString(m_commitModel->headTipId()))
+                      .toStdString();
+        const auto stop = std::find(at, lineage.end(), base);
+        if (base.empty() || stop == lineage.end()) {
+            *reason = QStringLiteral("the branch's start is not loaded or not on its line");
+            return {};
+        }
+        range.assign(at, stop);
+    }
+    if (range.size() < 2) {
+        *reason = QStringLiteral("there is only this one commit");
+        return {};
+    }
+    return range;
+}
+
+SelectionPlan MainWindow::selectionPlan(const std::vector<Oid>& selection) const {
     const std::vector<Oid> lineage = m_commitModel->headLineage();
 
     // Asked twice: the structure decides whether a squash is conceivable at all, and only
@@ -6019,8 +6093,9 @@ SelectionPlan MainWindow::selectionPlan() const {
     return plan;
 }
 
-void MainWindow::runSelectionOperation(SelectionOperation operation) {
-    const SelectionPlan plan = selectionPlan();
+void MainWindow::runSelectionOperation(SelectionOperation operation,
+                                       const std::vector<Oid>& selection) {
+    const SelectionPlan plan = selection.empty() ? selectionPlan() : selectionPlan(selection);
 
     if (operation == SelectionOperation::CherryPick) {
         if (!plan.canCherryPick) {
@@ -6099,17 +6174,25 @@ void MainWindow::runSelectionOperation(SelectionOperation operation) {
         }
     }
 
+    // The plan names every commit from the root to the tip, in git's order (oldest
+    // first): the rewrite refuses a plan that leaves one out, and the commits above the
+    // selection are replayed as they are. Of a squash the oldest selected commit stays
+    // and the newer ones fold into it.
+    const std::set<Oid> chosen(plan.branchCommits.begin(), plan.branchCommits.end());
     std::vector<RewriteStep> steps;
-    for (std::size_t index = 0; index < plan.branchCommits.size(); ++index) {
+    bool keptOldest = false;
+    for (const RebaseCandidate& candidate :
+         m_session->rebaseCandidates(root, QString::fromStdString(m_commitModel->headTipId()))) {
         RewriteStep step;
-        step.commit = plan.branchCommits[index];
-        if (operation == SelectionOperation::Drop) {
-            step.action = RewriteAction::Drop;
-        } else {
-            // The oldest stays and the rest fold into it: a squash folds into the line
-            // above, and the line above the oldest selected commit is the next one down,
-            // which the reader did not select.
-            step.action = index == 0 ? RewriteAction::Keep : RewriteAction::Squash;
+        step.commit = candidate.id;
+        step.action = RewriteAction::Keep;
+        if (chosen.count(candidate.id)) {
+            if (operation == SelectionOperation::Drop) {
+                step.action = RewriteAction::Drop;
+            } else {
+                step.action = keptOldest ? RewriteAction::Squash : RewriteAction::Keep;
+                keptOldest = true;
+            }
         }
         steps.push_back(step);
     }
@@ -7839,6 +7922,16 @@ QStringList MainWindow::runCommitMenuEntry(const QString& key, const QString& re
         dropCommitFromHistory(commitId);
     } else if (key == QLatin1String("squash")) {
         rewriteCommitInHistory(commitId, RewriteAction::Squash);
+    } else if (key == QLatin1String("squash-to-tip") ||
+               key == QLatin1String("squash-from-start")) {
+        QString reason;
+        const std::vector<Oid> range =
+            squashRange(commitId, key == QLatin1String("squash-to-tip"), &reason);
+        if (range.empty()) {
+            setStatus(QStringLiteral("Cannot squash: %1.").arg(reason));
+        } else {
+            runSelectionOperation(SelectionOperation::Squash, range);
+        }
     } else if (key == QLatin1String("fixup")) {
         rewriteCommitInHistory(commitId, RewriteAction::Fixup);
     } else if (key == QLatin1String("reword")) {

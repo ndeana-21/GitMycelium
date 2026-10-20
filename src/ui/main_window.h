@@ -175,6 +175,11 @@ public:
     enum class SelectionOperation { Drop, Squash, CherryPick };
 
     SelectionPlan selectionPlan() const;
+    SelectionPlan selectionPlan(const std::vector<Oid>& selection) const;
+    /// The checked-out branch's commits from `commitId` up to the tip (`toTip`), or from
+    /// the branch's first commit after the trunk up to `commitId`, newest first. Empty
+    /// with `reason` set when there is no such stretch of two or more loaded commits.
+    std::vector<Oid> squashRange(const QString& commitId, bool toTip, QString* reason) const;
 
     /// Runs `action` once the model has rows. A selection made before the first page
     /// lands is wiped by the reset that brings it in, which made a multi-row check
@@ -191,7 +196,8 @@ public:
 
     QString rebaseBaseBelow(const QString& commitId) const;
 
-    void runSelectionOperation(SelectionOperation operation);
+    void runSelectionOperation(SelectionOperation operation,
+                               const std::vector<Oid>& selection = {});
 
     QStringList runSelectionForDiagnostics(const QVector<int>& rows, const QString& operation);
     QStringList contextMenuForDiagnostics(const QVector<int>& rows, int menuRow);
