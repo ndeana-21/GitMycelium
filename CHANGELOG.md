@@ -4,7 +4,7 @@ All notable changes to GitMycelium are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.4.0] - 2026-10-20
 
 ### Added
 
@@ -51,6 +51,12 @@ All notable changes to GitMycelium are recorded here. The format follows
 - Hiding a local branch hides its remote branch too. Hiding a whole folder or the
   Remote section leaves the remote branches of your local ones on screen; those are
   hidden one by one.
+
+### Downloads
+
+- **Linux x86_64:** `GitMycelium-1.4.0-x86_64.AppImage`.
+- **macOS (Apple Silicon):** `GitMycelium-1.4.0-arm64.dmg`.
+- **Windows x86_64:** `GitMycelium-1.4.0-windows-x86_64.zip`.
 
 ## [1.3.0] - 2026-10-16
 
