@@ -25,13 +25,11 @@ struct SyncResult {
 /// the local commits on top of the fetched ones.
 enum class PullMode { FfOnly, Merge, Rebase };
 
-/// How a push treats a remote that has moved.
-///
-/// `ForceWithLease` overwrites the remote branch, but only while its
-/// remote-tracking ref still points where we last saw it — git refuses the moment
-/// somebody else pushed, so it cannot silently discard work we never read. It is
-/// deliberately not `--force`.
-enum class PushMode { Normal, ForceWithLease };
+/// How a push treats a remote that has moved. `Force` is plain `--force`: the
+/// remote branch becomes ours whatever it held. `--force-with-lease` refused in most
+/// real cases (a fetch moves the lease without anyone reading the work), so the
+/// window asks once and overwrites.
+enum class PushMode { Normal, Force };
 
 /// Fetch / pull / push, delegated to the `git` binary rather than libgit2; the CLI
 /// honours the user's credential helpers, SSH agent, proxy settings, hooks and LFS

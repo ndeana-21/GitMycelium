@@ -314,8 +314,8 @@ void CommitModel::setWorktreeWip(const std::vector<WorktreeWip>& list) {
         m_currentWipRow = currentRow;
         m_wipInfo = list;
         if (parentMoved) {
-            rebuildTipColors();
-            rebuildTipPriority();
+            rebuildTipColors(false);
+            rebuildTipPriority(false);
             m_graph.setNodeTypeHints(nodeTypeHints());
             m_graph.setCommits(asVector(m_rows));
             m_pathDirty = true;
@@ -354,8 +354,8 @@ void CommitModel::setWorktreeWip(const std::vector<WorktreeWip>& list) {
     }
     // The rows changed, so the working-tree nodes' colours do too: each inherits its
     // branch's, which is what keeps it on that branch's line.
-    rebuildTipColors();
-    rebuildTipPriority();
+    rebuildTipColors(false);
+    rebuildTipPriority(false);
     m_graph.setNodeTypeHints(nodeTypeHints());
     m_graph.setCommits(asVector(m_rows));
     m_pathDirty = true;
@@ -694,8 +694,10 @@ void CommitModel::refreshRefs() {
         assignColor(name);
     }
 
-    rebuildTipColors();
-    rebuildTipPriority();
+    const bool colorsMoved = rebuildTipColors(false);
+    if (rebuildTipPriority(false) || colorsMoved) {
+        m_graph.relayout();
+    }
     applyGraphNodeTypes();
 
     if (!m_rows.isEmpty()) {
@@ -704,7 +706,7 @@ void CommitModel::refreshRefs() {
     }
 }
 
-void CommitModel::rebuildTipColors() {
+bool CommitModel::rebuildTipColors(bool relayout) {
     m_tipColors.clear();
     // A tip's colour is the colour of the most significant label on it: a local
     // branch outranks a remote-tracking branch, which outranks a tag.
@@ -730,9 +732,10 @@ void CommitModel::rebuildTipColors() {
             m_tipColors[wip.id] = parentColor;
         }
     }
-    m_graph.setTipColors(m_tipColors);
+    const bool changed = m_graph.setTipColors(m_tipColors, relayout);
     m_pathDirty = true;
     m_shownDirty = true;
+    return changed;
 }
 
 namespace {
@@ -752,7 +755,7 @@ bool CommitModel::isTrunk(const RefInfo& ref) const {
            name.at(slash) == QLatin1Char('/') && !name.left(slash).contains(QLatin1Char('/'));
 }
 
-void CommitModel::rebuildTipPriority() {
+bool CommitModel::rebuildTipPriority(bool relayout) {
     // 0 = the trunk, 1 = the branch you are on, 2 = a branch pinned to the left,
     // 3 = the branch you last clicked, 4 = a labelled branch, and everything
     // unlisted keeps the walk order, which the layout preserves. The trunk comes
@@ -796,10 +799,11 @@ void CommitModel::rebuildTipPriority() {
             priority[wip.id] = parentPriority;
         }
     }
-    m_graph.setTipPriority(std::move(priority));
+    const bool changed = m_graph.setTipPriority(std::move(priority), relayout);
     m_pathDirty = true;
     m_shownDirty = true;
     emit graphChanged();
+    return changed;
 }
 
 void CommitModel::setRefIcons(bool show) {
@@ -1162,7 +1166,13 @@ void CommitModel::onPage(CommitPage page) {
     m_loading = false;
     emit loadingChanged();
     if (!page.error.isEmpty()) {
+        m_replacing = false;
         onFailed(page.error);
+        return;
+    }
+    if (m_replacing) {
+        m_replacing = false;
+        replaceRows(page);
         return;
     }
     if (page.skip != static_cast<quint64>(realRowCount())) {
@@ -1173,31 +1183,8 @@ void CommitModel::onPage(CommitPage page) {
         return;
     }
 
-    // Interleave the date separators before the rows are inserted, so a single
-    // beginInsertRows/endInsertRows covers commits and separators together.
-    std::vector<CommitInfo> block;
-    block.reserve(static_cast<std::size_t>(page.commits.size()) * 2);
-    const CommitInfo* previous = lastRealCommit();
-    qint64 previousKey = 0;
-    bool havePrevious = false;
-    if (previous) {
-        const PeriodStamp stamp = periodStamp(previous->committer.whenUnix, m_timelinePeriod);
-        havePrevious = stamp.valid;
-        previousKey = stamp.key;
-    }
     int separators = 0;
-    for (const CommitInfo& commit : page.commits) {
-        const PeriodStamp stamp = periodStamp(commit.committer.whenUnix, m_timelinePeriod);
-        if (stamp.valid && (!havePrevious || stamp.key != previousKey)) {
-            block.push_back(timelineRow(m_timelinePeriod, stamp));
-            ++separators;
-        }
-        if (stamp.valid) {
-            previousKey = stamp.key;
-            havePrevious = true;
-        }
-        block.push_back(commit);
-    }
+    const std::vector<CommitInfo> block = withSeparators(page.commits, lastRealCommit(), &separators);
 
     const int first = m_rows.size();
     const int last = first + static_cast<int>(block.size()) - 1;
@@ -1251,8 +1238,81 @@ void CommitModel::onRefMeta(gk::RefMetaSnapshot snapshot) {
     }
 }
 
+std::vector<CommitInfo> CommitModel::withSeparators(const QVector<CommitInfo>& commits,
+                                                    const CommitInfo* previous,
+                                                    int* separators) const {
+    // Interleave the date separators before the rows are inserted, so a single
+    // beginInsertRows/endInsertRows covers commits and separators together.
+    std::vector<CommitInfo> block;
+    block.reserve(static_cast<std::size_t>(commits.size()) * 2);
+    qint64 previousKey = 0;
+    bool havePrevious = false;
+    if (previous) {
+        const PeriodStamp stamp = periodStamp(previous->committer.whenUnix, m_timelinePeriod);
+        havePrevious = stamp.valid;
+        previousKey = stamp.key;
+    }
+    *separators = 0;
+    for (const CommitInfo& commit : commits) {
+        const PeriodStamp stamp = periodStamp(commit.committer.whenUnix, m_timelinePeriod);
+        if (stamp.valid && (!havePrevious || stamp.key != previousKey)) {
+            block.push_back(timelineRow(m_timelinePeriod, stamp));
+            ++*separators;
+        }
+        if (stamp.valid) {
+            previousKey = stamp.key;
+            havePrevious = true;
+        }
+        block.push_back(commit);
+    }
+    return block;
+}
+
+void CommitModel::replaceRows(const CommitPage& page) {
+    int separators = 0;
+    const std::vector<CommitInfo> block = withSeparators(page.commits, nullptr, &separators);
+    // The labels are already current: the refresh that noticed the refs move re-read
+    // them (`refreshRefs`) before or after this page, and either way lays out once.
+    beginResetModel();
+    m_rows.resize(m_wipCount);
+    for (const CommitInfo& row : block) {
+        m_rows.push_back(row);
+    }
+    m_timelineCount = separators;
+    m_hasMore = page.hasMore;
+    rebuildTipColors(false);
+    rebuildTipPriority(false);
+    m_graph.setNodeTypeHints(nodeTypeHints());
+    m_graph.setCommits(asVector(m_rows));
+    m_pathDirty = true;
+    m_shownDirty = true;
+    applyGraphNodeTypes();
+    endResetModel();
+    emit graphChanged();
+    if (!m_highlightBranch.isEmpty()) {
+        rebuildHighlight();
+    }
+}
+
+void CommitModel::refresh(int neededRows) {
+    if (realRowCount() == 0 || !m_session || !m_session->isOpen()) {
+        reset();
+        return;
+    }
+    // A newer generation drops any page still in flight for the old rows.
+    ++m_generation;
+    m_replacing = true;
+    m_loading = true;
+    emit loadingChanged();
+    const auto page = static_cast<int>(RepoSession::kPageSize);
+    const int pages = std::max(1, (std::max(neededRows, 1) + page - 1) / page);
+    m_session->requestCommits(m_generation, 0, static_cast<quint32>(pages * page),
+                              m_historyFilter);
+}
+
 void CommitModel::reset() {
     ++m_generation;
+    m_replacing = false;
     beginResetModel();
     m_rows.clear();
     m_graph.reset();

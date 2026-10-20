@@ -209,6 +209,7 @@ private slots:
     /// loaded; the model never pages on its own.
     void fetchIfNearEnd();
     void onModelAboutToBeReset();
+    void onModelReset();
     void onRowsAboutToBeInserted(const QModelIndex& parent, int first, int last);
     void onRowsInserted(const QModelIndex& parent, int first, int last);
     void onRowsAboutToBeRemoved(const QModelIndex& parent, int first, int last);
@@ -292,6 +293,7 @@ private:
     QString m_dropTarget;
     QRect m_dropTargetRect;
     QVariantAnimation* m_dropPulse = nullptr;
+    int m_scrollBeforeReset = 0;
 };
 
 } // namespace gk

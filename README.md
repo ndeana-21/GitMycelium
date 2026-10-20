@@ -181,7 +181,7 @@ repositories is sent. Turn it off in **Preferences → Appearance → Updates**.
 ### Remotes and repositories
 
 - Clone (shallow, single-branch and partial `--filter=blob:none` clones), fetch,
-  fetch all, pull (fast-forward only, merge or rebase), push, and force-with-lease.
+  fetch all, pull (fast-forward only, merge or rebase), push, and force push.
 - Optional background auto-fetch for each repository.
 - Linked **worktrees**, **submodules** (including nested ones), **Git LFS**,
   sparse checkout, and git hooks management.

@@ -4,6 +4,7 @@
 #include "model/path_tree.h"
 
 #include <QColor>
+#include <QSet>
 #include <QStandardItemModel>
 #include <QString>
 #include <QStringList>
@@ -51,6 +52,10 @@ public:
         /// The eye in the rail: `EyeNone`, `EyeShown` or `EyeHidden`. A folder or a
         /// section is hidden when every branch under it is.
         EyeRole,
+        /// A remote-tracking branch whose local branch exists (`origin/x` beside `x`).
+        /// It follows its local branch's eye and is left out of a folder's or a
+        /// section's: hiding every remote must not take the branches you work on.
+        TwinRole,
     };
     enum Eye { EyeNone = 0, EyeShown, EyeHidden };
 
@@ -170,6 +175,7 @@ private:
     bool isGraphHidden(const RefInfo& ref) const;
 
     std::vector<RefInfo> m_refs;
+    QSet<QString> m_localNames;
     bool m_built = false;
     QString m_builtHeadBranch;
     QStringList m_stashMessages;

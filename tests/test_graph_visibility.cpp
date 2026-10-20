@@ -149,6 +149,7 @@ private slots:
     void theTreeMarksHiddenBranches();
     void theWindowPathReportsTheFilteredGraph();
     void theEyeHidesASectionAndShowsItAgain();
+    void aRemoteTwinFollowsItsLocalBranch();
     void aGoneMergedBranchCanFoldIntoItsMerge();
 
 private:
@@ -484,6 +485,74 @@ void GraphVisibilityTest::theEyeHidesASectionAndShowsItAgain() {
     click(find(QStringLiteral("Local")));
     text = window.visibilityForDiagnostics(QStringLiteral("show"), {}).join('\n');
     QVERIFY(text.contains(QStringLiteral("rows: 4")));
+}
+
+void GraphVisibilityTest::aRemoteTwinFollowsItsLocalBranch() {
+    // origin/feature-a is feature-a's twin; origin/other has no local branch.
+    QVERIFY(git(m_path, {"update-ref", "refs/remotes/origin/feature-a", "feature-a"}));
+    QVERIFY(git(m_path, {"update-ref", "refs/remotes/origin/other", "feature-b"}));
+    MainWindow window;
+    window.setHeadless(true);
+    window.resize(1200, 800);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    QVERIFY(window.openRepository(m_path));
+    auto* tree = window.findChild<RefTreeView*>();
+    QVERIFY(tree);
+    const auto find = [tree](const QString& text) {
+        tree->expandAll();
+        const QModelIndexList found = tree->model()->match(
+            tree->model()->index(0, 0), RefModel::ShortNameRole, text, 1,
+            Qt::MatchExactly | Qt::MatchRecursive);
+        if (!found.isEmpty()) {
+            return found.front();
+        }
+        const QModelIndexList byText = tree->model()->match(
+            tree->model()->index(0, 0), Qt::DisplayRole, text, 1,
+            Qt::MatchExactly | Qt::MatchRecursive);
+        return byText.isEmpty() ? QModelIndex() : byText.front();
+    };
+    const auto click = [tree](const QModelIndex& index) {
+        const QPoint at = tree->eyeRect(index).center();
+        QMouseEvent move(QEvent::MouseMove, at, tree->viewport()->mapToGlobal(at), Qt::NoButton,
+                         Qt::NoButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(tree->viewport(), &move);
+        QTest::mouseClick(tree->viewport(), Qt::LeftButton, {}, at);
+    };
+    const auto report = [&window] {
+        return window.visibilityForDiagnostics(QStringLiteral("report"), {}).join('\n');
+    };
+
+    // Hiding every remote leaves the twin of a local branch on screen.
+    click(find(QStringLiteral("Remote")));
+    QString text = report();
+    QVERIFY2(text.contains(QStringLiteral("label: origin/feature-a")), qPrintable(text));
+    QVERIFY(!text.contains(QStringLiteral("label: origin/other")));
+    QCOMPARE(find(QStringLiteral("Remote")).data(RefModel::EyeRole).toInt(),
+             int(RefModel::EyeHidden));
+    QCOMPARE(find(QStringLiteral("origin/feature-a")).data(RefModel::EyeRole).toInt(),
+             int(RefModel::EyeShown));
+
+    // Hiding the local branch takes its twin along.
+    click(find(QStringLiteral("feature-a")));
+    text = report();
+    QVERIFY2(!text.contains(QStringLiteral("label: origin/feature-a")), qPrintable(text));
+    QVERIFY(!text.contains(QStringLiteral("label: feature-a")));
+    QCOMPARE(find(QStringLiteral("origin/feature-a")).data(RefModel::EyeRole).toInt(),
+             int(RefModel::EyeHidden));
+
+    // Showing the twin brings both back.
+    click(find(QStringLiteral("origin/feature-a")));
+    text = report();
+    QVERIFY2(text.contains(QStringLiteral("label: origin/feature-a")), qPrintable(text));
+    QVERIFY(text.contains(QStringLiteral("label: feature-a")));
+
+    // The twin can still be hidden on its own.
+    click(find(QStringLiteral("origin/feature-a")));
+    text = report();
+    QVERIFY(!text.contains(QStringLiteral("label: origin/feature-a")));
+    QVERIFY(text.contains(QStringLiteral("label: feature-a")));
+    window.visibilityForDiagnostics(QStringLiteral("show"), {});
 }
 
 void GraphVisibilityTest::aGoneMergedBranchCanFoldIntoItsMerge() {

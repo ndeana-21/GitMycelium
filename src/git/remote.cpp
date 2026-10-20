@@ -128,11 +128,8 @@ SyncResult RemoteOps::pull(const std::string& remote, const std::string& branch,
 SyncResult RemoteOps::push(const std::string& remote, const std::string& branch,
                            bool setUpstream, PushMode mode) const {
     std::vector<std::string> args{"push"};
-    if (mode == PushMode::ForceWithLease) {
-        // No explicit expected value: git uses the remote-tracking ref as the
-        // lease, and refuses if it has moved since we last fetched. That is the
-        // whole difference from `--force`.
-        args.push_back("--force-with-lease");
+    if (mode == PushMode::Force) {
+        args.push_back("--force");
     }
     if (setUpstream) {
         args.push_back("--set-upstream");

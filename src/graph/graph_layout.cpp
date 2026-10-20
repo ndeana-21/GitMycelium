@@ -154,15 +154,30 @@ void GraphLayout::append(const std::vector<CommitInfo>& commits) {
     updateLaneOrder(firstNew);
 }
 
-void GraphLayout::setTipColors(std::unordered_map<std::string, int> tipColors) {
-    m_tipColors = std::move(tipColors);
-    if (!m_commits.empty()) {
-        rebuild();
+bool GraphLayout::setTipColors(std::unordered_map<std::string, int> tipColors, bool relayout) {
+    if (tipColors == m_tipColors) {
+        return false;
     }
+    m_tipColors = std::move(tipColors);
+    if (relayout) {
+        this->relayout();
+    }
+    return true;
 }
 
-void GraphLayout::setTipPriority(std::unordered_map<std::string, int> tipPriority) {
+bool GraphLayout::setTipPriority(std::unordered_map<std::string, int> tipPriority,
+                                 bool relayout) {
+    if (tipPriority == m_tipPriority) {
+        return false;
+    }
     m_tipPriority = std::move(tipPriority);
+    if (relayout) {
+        this->relayout();
+    }
+    return true;
+}
+
+void GraphLayout::relayout() {
     if (!m_commits.empty()) {
         rebuild();
     }

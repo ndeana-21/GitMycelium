@@ -10,6 +10,10 @@
 #include "model/commit_model.h"
 #include "repo/repo_session.h"
 #include "ui/commit_graph_view.h"
+#include "ui/main_window.h"
+
+#include <QFile>
+#include <QScrollBar>
 
 #include <QProcess>
 #include <QTemporaryDir>
@@ -60,6 +64,7 @@ private slots:
     void cleanup();
 
     void anIdleViewHoldsOnePageAndScrollingLoadsTheRest();
+    void aCommitRefreshesTheGraphInPlace();
 
 private:
     std::unique_ptr<QTemporaryDir> m_dir;
@@ -73,6 +78,47 @@ void GraphPagingTest::init() {
 
 void GraphPagingTest::cleanup() {
     m_dir.reset();
+}
+
+void GraphPagingTest::aCommitRefreshesTheGraphInPlace() {
+    // A local operation must not throw the graph away: no empty graph while the walk
+    // runs, the reader's place and selection kept, the new commit on top.
+    MainWindow window;
+    window.setHeadless(true);
+    window.resize(1200, 800);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    QVERIFY(window.openRepository(m_dir->path()));
+    auto* view = window.findChild<CommitGraphView*>();
+    QVERIFY(view);
+    auto* model = qobject_cast<CommitModel*>(view->model());
+    QVERIFY(model);
+    QTRY_VERIFY(model->realRowCount() >= 500 && !model->isLoading());
+    model->fetchMore(QModelIndex());
+    QTRY_VERIFY(model->realRowCount() >= 1000 && !model->isLoading());
+
+    const int target = model->rowCount() - 300;
+    const QModelIndex chosen = model->index(target, CommitModel::Message);
+    view->setCurrentIndex(chosen);
+    view->scrollTo(chosen, QAbstractItemView::PositionAtCenter);
+    QCoreApplication::processEvents();
+    const QString selected = QString::fromStdString(model->commitAt(target)->id);
+    const int scroll = view->verticalScrollBar()->value();
+    QVERIFY(scroll > 0);
+
+    QFile file(m_dir->path() + QStringLiteral("/local.txt"));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("local\n");
+    file.close();
+    window.commitPanelForDiagnostics({}, QStringLiteral("local commit"));
+    QVERIFY(model->realRowCount() >= 1000);
+    QTRY_VERIFY(!model->isLoading());
+    QCOMPARE(QString::fromStdString(model->commitAt(0)->summary), QStringLiteral("local commit"));
+    QVERIFY(model->realRowCount() > target);
+    QTRY_COMPARE(view->verticalScrollBar()->value(), scroll);
+    // The commit sends the panel back to the working tree, so nothing stays selected,
+    // but the row the reader looked at is where it was.
+    QCOMPARE(QString::fromStdString(model->commitAt(target + 1)->id), selected);
 }
 
 void GraphPagingTest::anIdleViewHoldsOnePageAndScrollingLoadsTheRest() {

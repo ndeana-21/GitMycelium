@@ -81,8 +81,8 @@ private slots:
     void setUpstreamMakesTheBranchFollow();
     void deleteTagRemovesTheName();
     void deleteRemoteTagRemovesItOnEveryRemote();
-    void forceWithLeaseOverwritesARewrittenBranch();
-    void forceWithLeaseRefusesAStaleLease();
+    void aForcePushOverwritesARewrittenBranch();
+    void aForcePushOverwritesWorkPushedSince();
     void autoFetchFetchesOnlyTheChosenRemote();
     void theWindowRunsNetworkOperations();
     void theWindowForcePushesAndAutoFetches();
@@ -295,7 +295,7 @@ void RemotesTest::deleteRemoteTagRemovesItOnEveryRemote() {
     QVERIFY(gitOut(m_bare2, {"tag", "-l"}).trimmed().isEmpty());
 }
 
-void RemotesTest::forceWithLeaseOverwritesARewrittenBranch() {
+void RemotesTest::aForcePushOverwritesARewrittenBranch() {
     const QString before = gitOut(m_bare, {"rev-parse", "refs/heads/main"}).trimmed();
 
     QVERIFY(writeFile(m_path, "f.txt", "amended\n"));
@@ -308,17 +308,18 @@ void RemotesTest::forceWithLeaseOverwritesARewrittenBranch() {
     QVERIFY(!normal.ok);
     QCOMPARE(gitOut(m_bare, {"rev-parse", "refs/heads/main"}).trimmed(), before);
 
-    const SyncResult forced = ops.push("origin", "main", false, PushMode::ForceWithLease);
+    const SyncResult forced = ops.push("origin", "main", false, PushMode::Force);
     QVERIFY2(forced.ok, forced.output.c_str());
     QCOMPARE(gitOut(m_bare, {"rev-parse", "refs/heads/main"}).trimmed(), amended);
 }
 
-void RemotesTest::forceWithLeaseRefusesAStaleLease() {
+void RemotesTest::aForcePushOverwritesWorkPushedSince() {
     QVERIFY(writeFile(m_path, "f.txt", "amended\n"));
     QVERIFY(git(m_path, {"add", "-A"}));
     QVERIFY(git(m_path, {"commit", "--amend", "-qm", "amended"}));
+    const QString amended = gitOut(m_path, {"rev-parse", "HEAD"}).trimmed();
 
-    // Somebody else pushes after our last fetch, so our remote-tracking ref is stale.
+    // Somebody else pushes after our last fetch; a lease would refuse, --force does not.
     const QString side = m_dir->path() + "/side-lease";
     QVERIFY(cloneAt(m_bare, side));
     QVERIFY(writeFile(side, "s.txt", "side\n"));
@@ -327,14 +328,9 @@ void RemotesTest::forceWithLeaseRefusesAStaleLease() {
     QVERIFY(git(side, {"push", "-q", "origin", "main"}));
 
     const RemoteOps ops(m_path.toStdString());
-    const SyncResult stale = ops.push("origin", "main", false, PushMode::ForceWithLease);
-    QVERIFY(!stale.ok);
-
-    // Fetch first, and the lease now matches what we are overwriting.
-    const SyncResult fetched = ops.fetch("origin", true);
-    QVERIFY2(fetched.ok, fetched.output.c_str());
-    const SyncResult forced = ops.push("origin", "main", false, PushMode::ForceWithLease);
+    const SyncResult forced = ops.push("origin", "main", false, PushMode::Force);
     QVERIFY2(forced.ok, forced.output.c_str());
+    QCOMPARE(gitOut(m_bare, {"rev-parse", "refs/heads/main"}).trimmed(), amended);
 }
 
 void RemotesTest::autoFetchFetchesOnlyTheChosenRemote() {

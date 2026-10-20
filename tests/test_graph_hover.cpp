@@ -255,7 +255,8 @@ void GraphHoverTest::theWindowReportsAndActsOnTheGhost() {
     QVERIFY(ghostRow >= 0);
 
     const QString text = window.describeHoverRow(ghostRow).join(QLatin1Char('\n'));
-    QVERIFY(text.contains(QStringLiteral("highlight: feature")));
+    QVERIFY2(text.contains(QStringLiteral("highlight: (none)")), qPrintable(text));
+    QVERIFY(text.contains(QStringLiteral("dimmed: 0/")));
 
     bool foundLabelled = false;
     for (int row = 0; row < 6; ++row) {

@@ -4,6 +4,23 @@ All notable changes to GitMycelium are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **A commit, a stash or any other local change no longer reloads the whole graph.**
+  The rows on screen are re-read in the background and swapped in place: the graph
+  does not go blank, keeps its scroll position and the rows paged in below. Only
+  fetch, pull, a new filter or a new tab load it from the top. The working-tree row
+  appearing or leaving lays the graph out once instead of three times.
+- Hovering a commit in the graph no longer dims the others. Hovering a branch in the
+  branch panel still lights its commits.
+- **Force push is a plain `--force`.** `--force-with-lease` refused in most real
+  cases; the confirmation now says that remote commits your branch lacks are lost.
+- Hiding a local branch hides its remote branch too. Hiding a whole folder or the
+  Remote section leaves the remote branches of your local ones on screen; those are
+  hidden one by one.
+
 ## [1.3.0] - 2026-10-16
 
 ### Added

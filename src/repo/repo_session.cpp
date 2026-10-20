@@ -2547,7 +2547,7 @@ SyncResult RepoSession::syncBlocking(SyncKind kind, const QString& remote,
         // A force push rewrites a branch that already exists; there is nothing to
         // configure tracking for, and setUpstream would be a lie.
         return ops.push(remote.toStdString(), branch.toStdString(), /*setUpstream=*/false,
-                        PushMode::ForceWithLease);
+                        PushMode::Force);
     case SyncKind::PushTags:
         return ops.pushTags(remote.toStdString());
     }

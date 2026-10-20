@@ -97,6 +97,12 @@ public:
     Qt::DropActions supportedDropActions() const override;
 
     void reset();
+    /// Re-reads the history after a local operation (a commit, a stash, a branch
+    /// moved) without clearing the graph: the first `neededRows` commits, rounded up
+    /// to a page, are walked on a worker and replace the rows in one go, so the view
+    /// keeps its place and the rows below it page in again on demand. Before any page
+    /// has loaded it is `reset`.
+    void refresh(int neededRows);
 
     void refreshRefs();
 
@@ -218,8 +224,13 @@ private slots:
     void onRefMeta(gk::RefMetaSnapshot snapshot);
 
 private:
-    void rebuildTipColors();
-    void rebuildTipPriority();
+    /// Both answer whether the layout's input changed; `relayout` false leaves the
+    /// re-layout to the caller, who does it once.
+    std::vector<CommitInfo> withSeparators(const QVector<CommitInfo>& commits,
+                                           const CommitInfo* previous, int* separators) const;
+    void replaceRows(const CommitPage& page);
+    bool rebuildTipColors(bool relayout = true);
+    bool rebuildTipPriority(bool relayout = true);
     bool isTrunk(const RefInfo& ref) const;
     void ensureShownRefs() const;
     void rebuildHighlight();
@@ -244,6 +255,7 @@ private:
     std::vector<WorktreeWip> m_wipInfo;
     bool m_hasMore = true;
     bool m_loading = false;
+    bool m_replacing = false;
     quint64 m_generation = 0;
 
     std::unordered_map<std::string, std::vector<RefInfo>> m_refsByCommit;

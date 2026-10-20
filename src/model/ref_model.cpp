@@ -206,6 +206,12 @@ bool RefModel::isMovedToPinned(const RefInfo& ref) const {
 
 void RefModel::refresh() {
     clear();
+    m_localNames.clear();
+    for (const RefInfo& ref : m_refs) {
+        if (ref.kind == RefKind::LocalBranch) {
+            m_localNames.insert(QString::fromStdString(ref.shortName));
+        }
+    }
     setHorizontalHeaderLabels({QStringLiteral("Reference")});
 
     m_filterError.clear();
@@ -229,7 +235,8 @@ void RefModel::refresh() {
 RefModel::EyeCount RefModel::markEyes(QStandardItem* item) {
     EyeCount count;
     const int eye = item->data(EyeRole).toInt();
-    if (item->data(ItemTypeRole).toInt() == RefItem && eye != EyeNone) {
+    if (item->data(ItemTypeRole).toInt() == RefItem && eye != EyeNone &&
+        !item->data(TwinRole).toBool()) {
         count.branches = 1;
         count.hidden = eye == EyeHidden ? 1 : 0;
     }
@@ -256,7 +263,10 @@ QStringList RefModel::eyeBranchNames(const QModelIndex& index) {
     }
     const QAbstractItemModel* model = index.model();
     for (int row = 0; row < model->rowCount(index); ++row) {
-        names << eyeBranchNames(model->index(row, 0, index));
+        const QModelIndex child = model->index(row, 0, index);
+        if (!child.data(TwinRole).toBool()) {
+            names << eyeBranchNames(child);
+        }
     }
     return names;
 }
@@ -311,6 +321,10 @@ QStandardItem* RefModel::makeRefItem(const RefInfo& ref, const QString& label) c
     const bool branch = ref.kind == RefKind::LocalBranch || ref.kind == RefKind::RemoteBranch;
     if (branch && name != m_headBranch) {
         item->setData(isGraphHidden(ref) ? EyeHidden : EyeShown, EyeRole);
+    }
+    if (ref.kind == RefKind::RemoteBranch) {
+        const qsizetype slash = name.indexOf(QLatin1Char('/'));
+        item->setData(slash > 0 && m_localNames.contains(name.mid(slash + 1)), TwinRole);
     }
     if (!m_headBranch.isEmpty() && name == m_headBranch) {
         QFont font = item->font();

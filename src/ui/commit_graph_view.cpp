@@ -150,6 +150,7 @@ void CommitGraphView::setModel(QAbstractItemModel* model) {
     }
     connect(model, &QAbstractItemModel::modelAboutToBeReset, this,
             &CommitGraphView::onModelAboutToBeReset);
+    connect(model, &QAbstractItemModel::modelReset, this, &CommitGraphView::onModelReset);
     connect(model, &QAbstractItemModel::rowsAboutToBeInserted, this,
             &CommitGraphView::onRowsAboutToBeInserted);
     connect(model, &QAbstractItemModel::rowsInserted, this, &CommitGraphView::onRowsInserted);
@@ -285,6 +286,7 @@ void CommitGraphView::onModelAboutToBeReset() {
     // The overlay points at rows that are about to be replaced; its coordinates
     // would be stale, so it goes with them.
     clearHoverExpansion();
+    m_scrollBeforeReset = verticalScrollBar()->value();
     if (!m_animationsEnabled) {
         return;
     }
@@ -292,6 +294,21 @@ void CommitGraphView::onModelAboutToBeReset() {
     // moment later, so the change is measured across that gap.
     captureGhosts();
     m_capturePending = true;
+}
+
+void CommitGraphView::onModelReset() {
+    // A refresh in place swaps the rows in one reset, so the change is measured
+    // across it; a plain reset leaves no rows and waits for the first page.
+    auto* commits = qobject_cast<CommitModel*>(model());
+    if (!commits || commits->realRowCount() == 0) {
+        return;
+    }
+    // The reader stays where they were; the range is known once the rows are laid out.
+    const int scroll = m_scrollBeforeReset;
+    QTimer::singleShot(0, this, [this, scroll] { verticalScrollBar()->setValue(scroll); });
+    if (m_capturePending) {
+        observeAnimation();
+    }
 }
 
 void CommitGraphView::onRowsAboutToBeInserted(const QModelIndex& parent, int first, int last) {

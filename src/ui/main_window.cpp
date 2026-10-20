@@ -424,6 +424,13 @@ void MainWindow::wireContext(RepoContext* context) {
                     tryRevealCommit();
                 }
             });
+    // A refresh in place swaps the rows with one reset; the selection goes back on the
+    // commit it was on.
+    connect(model, &QAbstractItemModel::modelReset, this, [this, context, model] {
+        if (active() == context && model->realRowCount() > 0) {
+            restoreSelectionAfterReload();
+        }
+    });
     connect(model, &CommitModel::graphChanged, this, [this, context] {
         if (active() == context) {
             updateGraphColumnWidth();
@@ -1271,7 +1278,7 @@ void MainWindow::buildUi() {
     m_remoteMenu->addAction(QStringLiteral("Push Tags"), this,
                             [this] { startSync(SyncKind::PushTags); });
     m_remoteMenu->addSeparator();
-    m_forcePushAction = m_remoteMenu->addAction(QStringLiteral("Force Push (with lease)…"), this,
+    m_forcePushAction = m_remoteMenu->addAction(QStringLiteral("Force Push…"), this,
                                                 &MainWindow::forcePushInteractive);
     m_autoFetchMenu = m_remoteMenu->addMenu(QStringLiteral("Auto-fetch"));
     m_autoFetchAction = m_autoFetchMenu->addAction(QStringLiteral("Enabled (every 5 min)"));
@@ -1547,7 +1554,7 @@ void MainWindow::buildToolBar() {
     m_pushButton->setPopupMode(QToolButton::MenuButtonPopup);
     m_pushButton->setProperty("variant", QStringLiteral("menu"));
     auto* pushMenu = new QMenu(m_pushButton);
-    m_forcePushAction = pushMenu->addAction(QStringLiteral("Force Push (with lease)…"));
+    m_forcePushAction = pushMenu->addAction(QStringLiteral("Force Push…"));
     connect(m_forcePushAction, &QAction::triggered, this, &MainWindow::forcePushInteractive);
     m_pushButton->setMenu(pushMenu);
     toolbar->addWidget(m_pushButton);
@@ -1718,12 +1725,9 @@ void MainWindow::buildCommitPanel() {
 
     connect(m_commitView, &CommitGraphView::refDroppedOnRef, this,
             &MainWindow::onRefDroppedOnRef);
-    // Hovering a label — or a ghost badge — in the graph lights that branch's
-    // commits and dims the rest. The view holds no model pointer of its own, so it
-    // reports the name and the window decides.
-    connect(m_commitView, &CommitGraphView::refHovered, this, [this](const QString& name) {
-        m_commitModel->setHighlightedBranch(name);
-    });
+    // Hovering a commit or a label in the graph dims nothing: the dimming followed the
+    // pointer across every row it passed and made the graph flicker while reading it.
+    // Hovering a branch in the rail still lights its commits.
     // The list is asking for its prediction; answer before it is shown. git access
     // lives here, not in the view.
     connect(m_commitView, &CommitGraphView::dropOperationsOpened, this,
@@ -2798,7 +2802,7 @@ void MainWindow::openGitFlow() {
         QMessageBox::warning(this, QStringLiteral("Gitflow"), error);
         return;
     }
-    m_commitModel->reset();
+    refreshHistory();
     refreshPanels();
     notify(NotificationLog::Success, what);
 }
@@ -3037,7 +3041,7 @@ void MainWindow::amendSelectedCommitMessage(const QString& message) {
     // The amended commit is a new object with a new hash, so the old one is gone
     // from the graph: follow HEAD rather than the id we came in with.
     m_selectedCommitId = QString::fromStdString(m_session->info().headId);
-    m_commitModel->reset();
+    refreshHistory();
     refreshPanels();
     showCommitFiles(m_selectedCommitId);
     setStatus(QStringLiteral("Commit message amended."));
@@ -3446,7 +3450,7 @@ bool MainWindow::syncHistoryWithRefs(const RepoInfo& info, const std::vector<Ref
     context->historyDigest = digest;
     context->historyDigestKnown = true;
     if (moved && !reloadedSince) {
-        reloadHistory();
+        refreshHistory();
     }
     context->historyGeneration = m_commitModel->generation();
     return !known || moved;
@@ -3457,6 +3461,15 @@ void MainWindow::reloadHistory() {
     m_restoreWip = m_selectedCommitId.isEmpty() && m_details && m_details->showingWorkingTree();
     m_commitModel->reset();
     restoreSelectionAfterReload();
+}
+
+void MainWindow::refreshHistory() {
+    m_restoreCommit = m_selectedCommitId;
+    m_restoreWip = m_selectedCommitId.isEmpty() && m_details && m_details->showingWorkingTree();
+    const QModelIndex bottom =
+        m_commitView->indexAt(QPoint(1, m_commitView->viewport()->height() - 1));
+    const int visible = bottom.isValid() ? bottom.row() + 1 : m_commitModel->rowCount();
+    m_commitModel->refresh(visible);
 }
 
 void MainWindow::restoreSelectionAfterReload() {
@@ -3511,7 +3524,7 @@ void MainWindow::runWrite(const QString& what, const std::function<bool(QString*
         return;
     }
     if (resetHistory) {
-        m_commitModel->reset();
+        refreshHistory();
     }
     refreshPanels();
 }
@@ -3525,7 +3538,7 @@ void MainWindow::runCheckout(const QString& what, const QString& target,
             QMessageBox::warning(this, what, error);
             return;
         }
-        m_commitModel->reset();
+        refreshHistory();
         refreshPanels();
         if (done) {
             done();
@@ -3567,7 +3580,7 @@ void MainWindow::runCheckout(const QString& what, const QString& target,
                 QMessageBox::warning(this, what, outcome.error);
                 return;
             }
-            m_commitModel->reset();
+            refreshHistory();
             refreshPanels();
             if (done) {
                 done();
@@ -3715,7 +3728,7 @@ void MainWindow::commitStaged(const QString& message) {
     // The new commit is HEAD; nothing is selected in the graph, and the commit
     // panel goes back to the working tree, which is now clean.
     m_selectedCommitId.clear();
-    m_commitModel->reset();
+    refreshHistory();
     m_details->clearCommitMessage();
     refreshPanels();
     setStatus(amend ? QStringLiteral("Amended %1").arg(newId.left(7))
@@ -3959,7 +3972,7 @@ void MainWindow::undoLastOperation() {
     // The tip moved, so the graph is stale and the selected commit may no longer
     // be there at all.
     m_selectedCommitId.clear();
-    m_commitModel->reset();
+    refreshHistory();
     refreshPanels();
     setStatus(QStringLiteral("Undid %1").arg(label));
 }
@@ -3975,7 +3988,7 @@ void MainWindow::redoLastOperation() {
         return;
     }
     m_selectedCommitId.clear();
-    m_commitModel->reset();
+    refreshHistory();
     refreshPanels();
     setStatus(QStringLiteral("Redid %1").arg(label));
 }
@@ -4109,7 +4122,7 @@ void MainWindow::buildCommands() {
         });
     add(QStringLiteral("remote.push-tags"), QStringLiteral("Push All Tags"),
         QStringLiteral("Remote"), {}, {}, [this] { pushAllTags(); });
-    add(QStringLiteral("remote.push-force"), QStringLiteral("Force Push (with lease)…"),
+    add(QStringLiteral("remote.push-force"), QStringLiteral("Force Push…"),
         QStringLiteral("Remote"), {}, {}, [this] { forcePushInteractive(); });
     add(QStringLiteral("remote.autofetch"), QStringLiteral("Toggle Auto-fetch"),
         QStringLiteral("Remote"), {}, {}, [this] { setAutoFetch(!m_autoFetchEnabled); });
@@ -4831,11 +4844,37 @@ std::vector<std::string> MainWindow::visibilityWantedRefs(bool* active) const {
     return out;
 }
 
+QStringList MainWindow::withRemoteTwins(const QStringList& hidden) const {
+    if (hidden.isEmpty() || !m_session || !m_session->isOpen()) {
+        return hidden;
+    }
+    const QSet<QString> hiddenSet(hidden.begin(), hidden.end());
+    QSet<QString> hiddenLocals;
+    for (const RefInfo& ref : m_session->refs()) {
+        const QString name = QString::fromStdString(ref.shortName);
+        if (ref.kind == RefKind::LocalBranch && hiddenSet.contains(name)) {
+            hiddenLocals.insert(name);
+        }
+    }
+    QStringList out = hidden;
+    for (const RefInfo& ref : m_session->refs()) {
+        if (ref.kind != RefKind::RemoteBranch) {
+            continue;
+        }
+        const QString name = QString::fromStdString(ref.shortName);
+        const qsizetype slash = name.indexOf(QLatin1Char('/'));
+        if (slash > 0 && hiddenLocals.contains(name.mid(slash + 1)) && !hiddenSet.contains(name)) {
+            out << name;
+        }
+    }
+    return out;
+}
+
 QStringList MainWindow::graphHiddenBranchNames() const {
     bool active = false;
     const std::vector<std::string> wanted = visibilityWantedRefs(&active);
     if (!active) {
-        return m_visibility.hiddenNames();
+        return withRemoteTwins(m_visibility.hiddenNames());
     }
     QStringList hidden;
     for (const RefInfo& ref : m_session->refs()) {
@@ -4871,6 +4910,8 @@ HistoryFilter MainWindow::historyFilter() const {
     }
 
     const QString head = QString::fromStdString(m_session->info().headBranch);
+    const QStringList hiddenNames = withRemoteTwins(m_visibility.hiddenNames());
+    const QSet<QString> hidden(hiddenNames.begin(), hiddenNames.end());
     for (const RefInfo& ref : m_session->refs()) {
         // Only branches are filtered: a tag is a name for a commit, and taking it
         // out of the walk would drop the label that says a release exists.
@@ -4886,7 +4927,7 @@ HistoryFilter MainWindow::historyFilter() const {
             if (m_visibility.soloActive()) {
                 visible = m_visibility.isSolo(name) || name == head;
             } else {
-                visible = !m_visibility.isHidden(name) || name == head;
+                visible = !hidden.contains(name) || name == head;
             }
         }
         if (visible) {
@@ -5005,13 +5046,17 @@ void MainWindow::toggleEye(const QModelIndex& index) {
         return;
     }
     QSet<QString> hidden = effectiveHiddenBranches();
-    const bool show = std::all_of(names.begin(), names.end(),
-                                  [&hidden](const QString& name) { return hidden.contains(name); });
+    const bool show = index.data(RefModel::EyeRole).toInt() == RefModel::EyeHidden;
     for (const QString& name : names) {
-        if (show) {
-            hidden.remove(name);
-        } else {
+        if (!show) {
             hidden.insert(name);
+            continue;
+        }
+        hidden.remove(name);
+        // A remote branch hidden with its local one comes back with it: the two are
+        // one branch on screen.
+        if (index.data(RefModel::TwinRole).toBool()) {
+            hidden.remove(name.mid(name.indexOf(QLatin1Char('/')) + 1));
         }
     }
     QStringList stored(hidden.begin(), hidden.end());
@@ -5974,7 +6019,7 @@ void MainWindow::runSelectionOperation(SelectionOperation operation) {
             picked.push_back(QString::fromStdString(id));
         }
         if (!m_session->cherryPick(picked, &created, &error)) {
-            m_commitModel->reset();
+            refreshHistory();
             refreshPanels();
             if (!m_session->conflicts().empty()) {
                 showConflictsPage();
@@ -5986,7 +6031,7 @@ void MainWindow::runSelectionOperation(SelectionOperation operation) {
             QMessageBox::warning(this, QStringLiteral("Cherry pick"), error);
             return;
         }
-        m_commitModel->reset();
+        refreshHistory();
         refreshPanels();
         setStatus(QStringLiteral("Cherry-picked %1 commits, newest is %2.")
                       .arg(plan.pickedCommits.size())
@@ -6186,14 +6231,14 @@ void MainWindow::cherryPickCommit(const QString& commitId) {
         QMessageBox::warning(this, QStringLiteral("Cherry pick"), error);
         // A failed cherry-pick leaves conflicts in the index, so go where they
         // can be resolved rather than leaving the user staring at the graph.
-        m_commitModel->reset();
+        refreshHistory();
         refreshPanels();
         if (!m_session->conflicts().empty()) {
             showConflictsPage();
         }
         return;
     }
-    m_commitModel->reset();
+    refreshHistory();
     refreshPanels();
     setStatus(QStringLiteral("Cherry-picked %1 as %2.").arg(commitId.left(7), created.left(7)));
 }
@@ -6203,14 +6248,14 @@ void MainWindow::revertCommit(const QString& commitId) {
     QString created;
     if (!m_session->revertCommit(commitId, &created, &error)) {
         QMessageBox::warning(this, QStringLiteral("Revert"), error);
-        m_commitModel->reset();
+        refreshHistory();
         refreshPanels();
         if (!m_session->conflicts().empty()) {
             showConflictsPage();
         }
         return;
     }
-    m_commitModel->reset();
+    refreshHistory();
     refreshPanels();
     setStatus(QStringLiteral("Reverted %1 as %2.").arg(commitId.left(7), created.left(7)));
 }
@@ -6695,7 +6740,7 @@ void MainWindow::applyPatchInteractive() {
         return;
     }
     if (mailbox) {
-        m_commitModel->reset();
+        refreshHistory();
         refreshPanels();
         setStatus(QStringLiteral("Applied %1 as commits.").arg(QFileInfo(path).fileName()));
     } else {
@@ -7093,7 +7138,7 @@ void MainWindow::mergeBranchInto(const QString& source, const QString& target,
         return;
     }
 
-    m_commitModel->reset();
+    refreshHistory();
     refreshPanels();
 
     switch (result.status) {
@@ -7126,7 +7171,7 @@ void MainWindow::sweepConflictsAfterOperation(const QString& what) {
     }
 
     const RepoSession::SweepOutcome sweep = m_session->sweepOperationConflicts();
-    m_commitModel->reset();
+    refreshHistory();
     refreshPanels();
 
     if (sweep.finished) {
@@ -7898,7 +7943,7 @@ void MainWindow::rebaseBranchOnto(const QString& branch, const QString& onto,
         return;
     }
 
-    m_commitModel->reset();
+    refreshHistory();
     refreshPanels();
 
     switch (result.status) {
@@ -7969,7 +8014,7 @@ void MainWindow::squashMergeBranch(const QString& source, const QString& target,
         return;
     }
 
-    m_commitModel->reset();
+    refreshHistory();
     refreshPanels();
 
     switch (result.status) {
@@ -8377,11 +8422,9 @@ void MainWindow::forcePushInteractive() {
     }
     const QString branch = QString::fromStdString(info.headBranch);
     const QString remote = currentSyncRemote();
-    // The lease is the point: this refuses the moment somebody else has pushed,
-    // rather than discarding work we never read. Say so rather than just "force".
     if (!askYes(QStringLiteral("Force push"),
-                QStringLiteral("Rewrite “%1” on %2 with --force-with-lease?\n"
-                               "git will refuse if the remote has moved since the last fetch.")
+                QStringLiteral("Overwrite “%1” on %2 with your branch (--force)?\n"
+                               "Commits on the remote that your branch does not have are lost.")
                     .arg(branch, remote))) {
         return;
     }
@@ -10496,7 +10539,7 @@ QStringList MainWindow::conflictForDiagnostics(const QString& action, const QStr
     } else if (action == QStringLiteral("refresh")) {
         // The window's own refresh, which is what decides the page. A close has to
         // survive the pass that used to drag the reader back to the conflict page.
-        m_commitModel->reset();
+        refreshHistory();
         refreshPanels();
     } else if (action == QStringLiteral("select") && !args.isEmpty()) {
         const bool ok = m_conflictView->selectFile(args.at(0));
@@ -10517,19 +10560,19 @@ QStringList MainWindow::conflictForDiagnostics(const QString& action, const QStr
         const bool ok = m_conflictView->trySaveResolution(&error);
         report << QStringLiteral("save: %1")
                       .arg(ok ? QStringLiteral("ok") : error);
-        m_commitModel->reset();
+        refreshHistory();
         refreshPanels();
     } else if (action == QStringLiteral("rerere-stage")) {
         QString error;
         const bool ok = m_conflictView->stageRecordedResolution(&error);
         report << QStringLiteral("rerere-stage: %1").arg(ok ? QStringLiteral("ok") : error);
-        m_commitModel->reset();
+        refreshHistory();
         refreshPanels();
     } else if (action == QStringLiteral("stage-worktree")) {
         QString error;
         const bool ok = m_conflictView->stageWorkingTree(&error);
         report << QStringLiteral("stage-worktree: %1").arg(ok ? QStringLiteral("ok") : error);
-        m_commitModel->reset();
+        refreshHistory();
         refreshPanels();
     } else if (action == QStringLiteral("mark-all")) {
         QStringList skipped;
@@ -10543,7 +10586,7 @@ QStringList MainWindow::conflictForDiagnostics(const QString& action, const QStr
             report << QStringLiteral("mark-all: ok, skipped %1")
                           .arg(skipped.join(QLatin1Char(',')));
         }
-        m_commitModel->reset();
+        refreshHistory();
         refreshPanels();
     } else if (action == QStringLiteral("resolve") && !args.isEmpty()) {
         // One shot for a single headless run: settle every region with one side and
@@ -10555,14 +10598,14 @@ QStringList MainWindow::conflictForDiagnostics(const QString& action, const QStr
         const bool ok = m_conflictView->trySaveResolution(&error);
         report << QStringLiteral("resolve %1: %2")
                       .arg(args.at(0), ok ? QStringLiteral("ok") : error);
-        m_commitModel->reset();
+        refreshHistory();
         refreshPanels();
     } else if (action == QStringLiteral("keep") && !args.isEmpty()) {
         QString error;
         const bool ok = m_conflictView->keepSide(args.at(0), &error);
         report << QStringLiteral("keep %1: %2")
                       .arg(args.at(0), ok ? QStringLiteral("ok") : error);
-        m_commitModel->reset();
+        refreshHistory();
         refreshPanels();
     } else if (action == QStringLiteral("smart")) {
         QString error;
@@ -10574,7 +10617,7 @@ QStringList MainWindow::conflictForDiagnostics(const QString& action, const QStr
             const bool saved = m_conflictView->trySaveResolution(&saveError);
             report << QStringLiteral("smart: %1")
                           .arg(saved ? QStringLiteral("staged") : saveError);
-            m_commitModel->reset();
+            refreshHistory();
             refreshPanels();
         } else {
             report << QStringLiteral("smart: %1 region(s) left")
@@ -10598,7 +10641,7 @@ QStringList MainWindow::conflictForDiagnostics(const QString& action, const QStr
         QString error;
         const bool ok = m_conflictView->deleteCurrentFile(&error);
         report << QStringLiteral("delete: %1").arg(ok ? QStringLiteral("ok") : error);
-        m_commitModel->reset();
+        refreshHistory();
         refreshPanels();
     } else if (action == QStringLiteral("clear-choices")) {
         m_conflictView->clearChoices();
@@ -10607,7 +10650,7 @@ QStringList MainWindow::conflictForDiagnostics(const QString& action, const QStr
         QString error;
         const bool ok = m_conflictView->markConflicted(args.at(0), &error);
         report << QStringLiteral("unresolve %1: %2").arg(args.at(0), ok ? QStringLiteral("ok") : error);
-        m_commitModel->reset();
+        refreshHistory();
         refreshPanels();
     } else if (action == QStringLiteral("deleted") && !args.isEmpty()) {
         QString error;
@@ -10616,7 +10659,7 @@ QStringList MainWindow::conflictForDiagnostics(const QString& action, const QStr
         report << QStringLiteral("deleted %1 (changed on %2): %3")
                       .arg(args.at(0), living.isEmpty() ? QStringLiteral("-") : living,
                            ok ? QStringLiteral("ok") : error);
-        m_commitModel->reset();
+        refreshHistory();
         refreshPanels();
     } else if (action == QStringLiteral("takelines") && args.size() >= 2) {
         bool regionOk = false;
@@ -10637,7 +10680,7 @@ QStringList MainWindow::conflictForDiagnostics(const QString& action, const QStr
         for (const QString& file : autoPass.needsAPerson) {
             report << QStringLiteral("auto-needs-person: %1").arg(file);
         }
-        m_commitModel->reset();
+        refreshHistory();
         refreshPanels();
     } else if (action == QStringLiteral("text")) {
         const QStringList lines = m_conflictView->assembledText().split(QLatin1Char('\n'));
@@ -10889,7 +10932,7 @@ QStringList MainWindow::runGraphAnimationOp(const QString& operation, const QStr
         if (!m_session->createBranch(argument, head, &error)) {
             report << QStringLiteral("error: %1").arg(error);
         } else {
-            m_commitModel->reset();
+            refreshHistory();
             refreshPanels();
             report << QStringLiteral("branch %1").arg(argument);
         }
@@ -11151,7 +11194,7 @@ QStringList MainWindow::rerereForDiagnostics(const QString& operation, const QSt
         QString error;
         const bool ok = m_session->applyRerere(&error);
         report << QStringLiteral("apply: %1").arg(ok ? QStringLiteral("ok") : error);
-        m_commitModel->reset();
+        refreshHistory();
         refreshPanels();
     } else if (operation == QStringLiteral("forget") && !path.isEmpty()) {
         QString error;

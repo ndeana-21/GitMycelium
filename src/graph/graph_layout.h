@@ -179,9 +179,13 @@ public:
     /// Colour index to use for the branch tip at a given commit. Without this
     /// the graph would invent a colour per lane, and a branch's line would not
     /// match its label. Keys are commit ids; values index the branch palette.
-    void setTipColors(std::unordered_map<std::string, int> tipColors);
+    /// Both answer whether anything changed. With `relayout` false the caller lays
+    /// the rows out once afterwards (`setCommits` or `relayout`): every re-layout is
+    /// every loaded row, and a refresh that sets both used to pay for it twice.
+    bool setTipColors(std::unordered_map<std::string, int> tipColors, bool relayout = true);
 
-    void setTipPriority(std::unordered_map<std::string, int> tipPriority);
+    bool setTipPriority(std::unordered_map<std::string, int> tipPriority, bool relayout = true);
+    void relayout();
 
     /// Types the commit list cannot tell on its own: a stash tip, a working-tree
     /// row, an operation left open. Keyed by commit id. Set after

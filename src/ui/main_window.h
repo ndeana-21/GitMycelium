@@ -426,6 +426,9 @@ private:
     /// Re-reads the history and puts the selection back once its row is loaded again.
     void reloadHistory();
     void restoreSelectionAfterReload();
+    /// After a local operation: the graph re-reads what is on screen in place
+    /// (`CommitModel::refresh`); a fetch or pull, a new filter or a new tab resets.
+    void refreshHistory();
     /// True when the refs or HEAD moved since the last refresh (or nothing was known).
     bool syncHistoryWithRefs(const RepoInfo& info, const std::vector<RefInfo>& refs);
     QWidget* buildReferencePanel();
@@ -666,6 +669,8 @@ private:
     void clearVisibility();
     void toggleEye(const QModelIndex& index);
     QSet<QString> effectiveHiddenBranches() const;
+    /// `hidden` plus the remote-tracking twin of every hidden local branch.
+    QStringList withRemoteTwins(const QStringList& hidden) const;
     void toggleHidden(const QModelIndex& index);
     void toggleSolo(const QModelIndex& index);
     void toggleSmart();
