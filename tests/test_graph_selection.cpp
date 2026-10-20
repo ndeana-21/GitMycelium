@@ -272,9 +272,11 @@ void GraphSelectionTest::oneCommitSquashesTheStretchToTheTipOrFromTheStart() {
     }
 
     // Two selected commits in the middle: the commit above them is replayed, not lost.
-    // The plan used to name the selection alone, and the rewrite refused it.
+    // The plan used to name the selection alone, and the rewrite refused it. A change
+    // not yet committed is set aside for the rewrite and comes back after it.
     buildFeature();
     tree = out({"rev-parse", "feature^{tree}"});
+    QVERIFY(writeFile(m_path + QStringLiteral("/f1.txt"), "uncommitted\n"));
     {
         MainWindow window;
         window.setHeadless(true);
@@ -282,9 +284,10 @@ void GraphSelectionTest::oneCommitSquashesTheStretchToTheTipOrFromTheStart() {
         QTRY_VERIFY_WITH_TIMEOUT(window.commitsAreLoaded(), 5000);
         auto* view = window.findChild<CommitGraphView*>();
         QVERIFY(view);
+        // The working-tree row lands before the history: wait for the commits.
+        QTRY_VERIFY(rowOf(view, out({"rev-parse", "feature~2"})) >= 0);
         const int f3 = rowOf(view, out({"rev-parse", "feature~1"}));
         const int f2 = rowOf(view, out({"rev-parse", "feature~2"}));
-        QVERIFY(f3 >= 0 && f2 >= 0);
         const QString run =
             window.runSelectionForDiagnostics(QVector<int>{f3, f2}, QStringLiteral("squash"))
                 .join('\n');
@@ -293,6 +296,10 @@ void GraphSelectionTest::oneCommitSquashesTheStretchToTheTipOrFromTheStart() {
         QCOMPARE(out({"rev-parse", "feature^{tree}"}), tree);
         QCOMPARE(out({"log", "-1", "--format=%s", "feature"}), QStringLiteral("f4"));
         QCOMPARE(out({"log", "-1", "--format=%s", "feature~2"}), QStringLiteral("f1"));
+        QCOMPARE(out({"status", "--porcelain"}), QStringLiteral("M f1.txt"));
+        QFile kept(m_path + QStringLiteral("/f1.txt"));
+        QVERIFY(kept.open(QIODevice::ReadOnly));
+        QCOMPARE(kept.readAll(), QByteArray("uncommitted\n"));
     }
 }
 

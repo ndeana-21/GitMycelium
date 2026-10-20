@@ -266,6 +266,7 @@ libgit2 forbids concurrent calls on the same repository handle. Therefore:
 
 ### Rebase and rewrite
 
+- Every rebase the window starts passes `--autostash` (`rewriteHistory`, `rebaseOnto`, the drop): git refuses to rebase over uncommitted changes, and the reader expects them set aside and put back, as `git stash` would. `rebasingKeepsUncommittedChanges`.
 - A rewrite needs a base, and the first commit has none — that base is `--root`. `rootBelow` returns the oldest selected commit's parent, which does not resolve for the root; name the root (`kRebaseRoot`) and run `git rebase -i --root`, whose todo still starts with a `pick` (the root) and folds the *second* commit with `squash` (a `squash` as the first line
   has nothing below it). Headless: `--ui-rebase-editor root …`.
 - A selection's squash or drop builds its plan from `rebaseCandidates(root, tip)`, the selection's actions on its own commits and Keep on the rest; a plan of the selection alone was refused whenever a commit sat above it. One commit offers its stretch to the tip or from the branch start (`MainWindow::squashRange`, the trunk's merge base, resolved to an id: `Repository::mergeBase` takes ids). `oneCommitSquashesTheStretchToTheTipOrFromTheStart`.

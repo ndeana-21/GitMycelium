@@ -3818,7 +3818,9 @@ RebaseResult Repository::rebaseOnto(const std::string& branch, const std::string
     const long before = std::strtol(countBefore.out.c_str(), nullptr, 10);
     const ProcessResult tipBefore = runGit({"rev-parse", branch}, workDir);
 
-    const ProcessResult run = runGit({"rebase", onto}, workDir);
+    // Uncommitted changes are set aside for the rebase and put back after it, as the
+    // reader would with `git stash`; git refuses to start over a dirty tree otherwise.
+    const ProcessResult run = runGit({"rebase", "--autostash", onto}, workDir);
 
     RebaseResult result;
     if (run.exitCode == 0) {
@@ -4019,7 +4021,7 @@ true
     std::vector<std::string> args = {
         "-c", "sequence.editor=" + shellQuoted((temp / "sequence-editor").generic_string()),
         "-c", "core.editor=" + shellQuoted((temp / "message-editor").generic_string()),
-        "rebase", "-i"};
+        "rebase", "-i", "--autostash"};
     if (!onto.empty()) {
         args.push_back("--onto");
         args.push_back(onto);
@@ -4109,7 +4111,7 @@ void Repository::dropCommit(const Oid& commitId) {
     // parent, which leaves `commitId` out. Through the binary, like the rebase, so the
     // same skipped cherry-picks and the same conflict behaviour apply.
     const ProcessResult run =
-        runGit({"rebase", "--onto", parent, commitId}, workDir);
+        runGit({"rebase", "--autostash", "--onto", parent, commitId}, workDir);
     if (run.exitCode != 0) {
         if (rebaseInProgress()) {
             RebaseResult conflict;

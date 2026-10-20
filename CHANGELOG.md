@@ -23,6 +23,9 @@ All notable changes to GitMycelium are recorded here. The format follows
 
 ### Fixed
 
+- A squash, drop, reword or rebase with uncommitted changes failed with "You have
+  unstaged changes". The changes are now set aside for the rewrite and put back
+  after it (`git rebase --autostash`).
 - Squashing or dropping selected commits that are not at the tip of the branch was
   refused: the rewrite plan named only the selection, not the commits above it.
 

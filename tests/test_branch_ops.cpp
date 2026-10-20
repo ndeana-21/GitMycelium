@@ -129,7 +129,7 @@ private slots:
     void operationsReportWhyTheyRefused();
 
     void mergingWithUncommittedChangesIsRefused();
-    void rebasingWithUncommittedChangesIsRefused();
+    void rebasingKeepsUncommittedChanges();
     void switchingBranchesDuringARebaseIsRefused();
     void startingASecondRebaseWhileOneIsOpenIsRefused();
     void checkingOutOverAnUntrackedFileIsRefused();
@@ -1192,7 +1192,7 @@ void BranchOpsTest::mergingWithUncommittedChangesIsRefused() {
     QVERIFY(session.conflicts().empty() || !session.conflicts().empty());
 }
 
-void BranchOpsTest::rebasingWithUncommittedChangesIsRefused() {
+void BranchOpsTest::rebasingKeepsUncommittedChanges() {
     buildTwoBranches();
     QVERIFY(writeFile(m_path, QStringLiteral("base.txt"), QStringLiteral("edited, not committed\n")));
 
@@ -1203,13 +1203,13 @@ void BranchOpsTest::rebasingWithUncommittedChangesIsRefused() {
 
     QVERIFY(writeFile(m_path, QStringLiteral("base.txt"), QStringLiteral("edited on feature\n")));
 
+    // The edit is set aside for the rebase and put back after it (`--autostash`).
     RebaseResult result;
-    const bool rebased =
-        session.rebaseOnto(QStringLiteral("feature"), QStringLiteral("main"), &result, &error);
-    if (rebased && result.status == RebaseStatus::Completed) {
-        QFAIL("a rebase ran over uncommitted changes");
-    }
+    QVERIFY2(session.rebaseOnto(QStringLiteral("feature"), QStringLiteral("main"), &result, &error),
+             qPrintable(error));
+    QCOMPARE(result.status, RebaseStatus::Completed);
     QCOMPARE(readFile(m_path, QStringLiteral("base.txt")), QStringLiteral("edited on feature\n"));
+    QVERIFY(git(m_path, {"merge-base", "--is-ancestor", "main", "feature"}));
 }
 
 void BranchOpsTest::switchingBranchesDuringARebaseIsRefused() {
