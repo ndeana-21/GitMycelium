@@ -7,6 +7,7 @@
 #include "theme/theme.h"
 #include "ui/main_window.h"
 #include "ui/ref_tree_view.h"
+#include "ui/commit_graph_view.h"
 
 #include <QDir>
 #include <QFile>
@@ -150,6 +151,8 @@ private slots:
     void theWindowPathReportsTheFilteredGraph();
     void theEyeHidesASectionAndShowsItAgain();
     void aRemoteTwinFollowsItsLocalBranch();
+    void aTagCanBeHidden();
+    void aDoubleClickShowsTheTipInsteadOfActing();
     void aGoneMergedBranchCanFoldIntoItsMerge();
 
 private:
@@ -553,6 +556,119 @@ void GraphVisibilityTest::aRemoteTwinFollowsItsLocalBranch() {
     QVERIFY(!text.contains(QStringLiteral("label: origin/feature-a")));
     QVERIFY(text.contains(QStringLiteral("label: feature-a")));
     window.visibilityForDiagnostics(QStringLiteral("show"), {});
+}
+
+void GraphVisibilityTest::aTagCanBeHidden() {
+    // A tag on a commit no branch reaches, and a branch with the tag's name: hiding
+    // the tag drops its commit and its label and leaves the branch alone.
+    QVERIFY(git(m_path, {"checkout", "-q", "--detach", "main"}));
+    QVERIFY(writeFile(m_path, "r.txt", "release\n"));
+    QVERIFY(git(m_path, {"add", "-A"}));
+    QVERIFY(git(m_path, identity() + QStringList{"commit", "-q", "-m", "release only"}));
+    QVERIFY(git(m_path, {"tag", "release"}));
+    QVERIFY(git(m_path, {"branch", "v1.0", "feature-b"}));
+    QVERIFY(git(m_path, {"checkout", "-q", "main"}));
+
+    MainWindow window;
+    window.setHeadless(true);
+    window.resize(1200, 800);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    QVERIFY(window.openRepository(m_path));
+    auto* tree = window.findChild<RefTreeView*>();
+    QVERIFY(tree);
+    const auto find = [tree](int role, const QString& text) {
+        tree->expandAll();
+        const QModelIndexList found = tree->model()->match(
+            tree->model()->index(0, 0), role, text, 1, Qt::MatchExactly | Qt::MatchRecursive);
+        return found.isEmpty() ? QModelIndex() : found.front();
+    };
+    const auto click = [tree](const QModelIndex& index) {
+        const QPoint at = tree->eyeRect(index).center();
+        QMouseEvent move(QEvent::MouseMove, at, tree->viewport()->mapToGlobal(at), Qt::NoButton,
+                         Qt::NoButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(tree->viewport(), &move);
+        QTest::mouseClick(tree->viewport(), Qt::LeftButton, {}, at);
+    };
+    const auto report = [&window] {
+        return window.visibilityForDiagnostics(QStringLiteral("report"), {}).join('\n');
+    };
+    QString text = report();
+    QVERIFY2(text.contains(QStringLiteral("rows: 5")), qPrintable(text));
+
+    const QModelIndex release = find(RefModel::FullNameRole, QStringLiteral("refs/tags/release"));
+    QVERIFY(release.isValid());
+    QCOMPARE(release.data(RefModel::EyeRole).toInt(), int(RefModel::EyeShown));
+    click(release);
+    text = report();
+    QVERIFY2(text.contains(QStringLiteral("rows: 4")), qPrintable(text));
+    QVERIFY(!text.contains(QStringLiteral("label: release")));
+    QCOMPARE(find(RefModel::FullNameRole, QStringLiteral("refs/tags/release"))
+                 .data(RefModel::EyeRole)
+                 .toInt(),
+             int(RefModel::EyeHidden));
+
+    // The whole Tags section; the branch named like a tag stays.
+    click(find(Qt::DisplayRole, QStringLiteral("Tags")));
+    text = report();
+    QVERIFY2(text.contains(QStringLiteral("label: v1.0")), qPrintable(text));
+    QCOMPARE(find(Qt::DisplayRole, QStringLiteral("Tags")).data(RefModel::EyeRole).toInt(),
+             int(RefModel::EyeHidden));
+    QCOMPARE(find(RefModel::FullNameRole, QStringLiteral("refs/heads/v1.0"))
+                 .data(RefModel::EyeRole)
+                 .toInt(),
+             int(RefModel::EyeShown));
+
+    click(find(Qt::DisplayRole, QStringLiteral("Tags")));
+    text = report();
+    QVERIFY(text.contains(QStringLiteral("rows: 5")));
+    QVERIFY(text.contains(QStringLiteral("label: release")));
+    window.visibilityForDiagnostics(QStringLiteral("show"), {});
+}
+
+void GraphVisibilityTest::aDoubleClickShowsTheTipInsteadOfActing() {
+    QVERIFY(writeFile(m_path, "base.txt", "stashed\n"));
+    QVERIFY(git(m_path, identity() + QStringList{"stash", "push", "-q", "-m", "kept"}));
+    const QString stash = gitOut(m_path, {"rev-parse", "refs/stash"});
+    const QString featureA = gitOut(m_path, {"rev-parse", "feature-a"});
+
+    MainWindow window;
+    window.setHeadless(true);
+    window.resize(1200, 800);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    QVERIFY(window.openRepository(m_path));
+    auto* tree = window.findChild<RefTreeView*>();
+    auto* graph = window.findChild<CommitGraphView*>();
+    QVERIFY(tree && graph);
+    auto* model = qobject_cast<CommitModel*>(graph->model());
+    QTRY_VERIFY(model->realRowCount() > 0 && !model->isLoading());
+    const auto doubleClick = [tree](int role, const QString& value) {
+        tree->expandAll();
+        const QModelIndexList found = tree->model()->match(
+            tree->model()->index(0, 0), role, value, 1, Qt::MatchExactly | Qt::MatchRecursive);
+        QVERIFY(!found.isEmpty());
+        const QPoint at = tree->visualRect(found.front()).center();
+        QTest::mouseClick(tree->viewport(), Qt::LeftButton, {}, at);
+        QTest::mouseDClick(tree->viewport(), Qt::LeftButton, {}, at);
+    };
+    const auto currentId = [graph, model] {
+        const QModelIndex current = graph->currentIndex();
+        const CommitInfo* commit = current.isValid() ? model->commitAt(current.row()) : nullptr;
+        return commit ? QString::fromStdString(commit->id) : QString();
+    };
+
+    doubleClick(RefModel::ShortNameRole, QStringLiteral("feature-a"));
+    QTRY_COMPARE(currentId(), featureA);
+    QCOMPARE(gitOut(m_path, {"rev-parse", "--abbrev-ref", "HEAD"}), QStringLiteral("main"));
+
+    doubleClick(RefModel::StashOidRole, stash);
+    QTRY_COMPARE(currentId(), stash);
+    QCOMPARE(gitOut(m_path, {"rev-parse", "refs/stash"}), stash);
+    QCOMPARE(gitOut(m_path, {"show", "HEAD:base.txt"}), QStringLiteral("base"));
+    QFile base(QDir(m_path).filePath(QStringLiteral("base.txt")));
+    QVERIFY(base.open(QIODevice::ReadOnly));
+    QCOMPARE(base.readAll(), QByteArray("base\n"));
 }
 
 void GraphVisibilityTest::aGoneMergedBranchCanFoldIntoItsMerge() {

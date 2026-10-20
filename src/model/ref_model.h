@@ -102,8 +102,12 @@ public:
     static QString pinKey(const QModelIndex& index);
 
     static bool isRef(const QModelIndex& index);
-    /// Every branch at or under `index` the eye can hide (not the current branch).
+    /// Every branch or tag at or under `index` the eye can hide (not the current
+    /// branch), as `hiddenKey`s.
     static QStringList eyeBranchNames(const QModelIndex& index);
+    /// How the hidden list names a ref: a branch by its short name, a tag by its full
+    /// one (`refs/tags/v1`), so a tag cannot share an entry with a branch `v1`.
+    static QString hiddenKey(RefKind kind, const QString& shortName, const QString& fullName);
 
     static bool isStash(const QModelIndex& index);
 

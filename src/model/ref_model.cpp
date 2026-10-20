@@ -253,13 +253,19 @@ RefModel::EyeCount RefModel::markEyes(QStandardItem* item) {
     return count;
 }
 
+QString RefModel::hiddenKey(RefKind kind, const QString& shortName, const QString& fullName) {
+    return kind == RefKind::Tag ? fullName : shortName;
+}
+
 QStringList RefModel::eyeBranchNames(const QModelIndex& index) {
     QStringList names;
     if (!index.isValid()) {
         return names;
     }
     if (index.data(ItemTypeRole).toInt() == RefItem && index.data(EyeRole).toInt() != EyeNone) {
-        names << index.data(ShortNameRole).toString();
+        names << hiddenKey(static_cast<RefKind>(index.data(KindRole).toInt()),
+                           index.data(ShortNameRole).toString(),
+                           index.data(FullNameRole).toString());
     }
     const QAbstractItemModel* model = index.model();
     for (int row = 0; row < model->rowCount(index); ++row) {
@@ -317,9 +323,10 @@ QStandardItem* RefModel::makeRefItem(const RefInfo& ref, const QString& label) c
                          .arg(QString::fromStdString(ref.fullName),
                               QString::fromStdString(ref.target),
                               name == m_headBranch ? QStringLiteral("current branch")
-                                                   : QStringLiteral("double-click to check out")));
-    const bool branch = ref.kind == RefKind::LocalBranch || ref.kind == RefKind::RemoteBranch;
-    if (branch && name != m_headBranch) {
+                                                   : QStringLiteral("double-click to show it in the graph")));
+    const bool hideable = ref.kind == RefKind::LocalBranch ||
+                          ref.kind == RefKind::RemoteBranch || ref.kind == RefKind::Tag;
+    if (hideable && (ref.kind == RefKind::Tag || name != m_headBranch)) {
         item->setData(isGraphHidden(ref) ? EyeHidden : EyeShown, EyeRole);
     }
     if (ref.kind == RefKind::RemoteBranch) {
@@ -341,8 +348,12 @@ QStandardItem* RefModel::makeRefItem(const RefInfo& ref, const QString& label) c
 }
 
 bool RefModel::isGraphHidden(const RefInfo& ref) const {
+    if (ref.kind == RefKind::Tag) {
+        // Solo picks branches; a tag is hidden only by its own eye.
+        return m_hidden.contains(QString::fromStdString(ref.fullName));
+    }
     if (ref.kind != RefKind::LocalBranch && ref.kind != RefKind::RemoteBranch) {
-        return false; // a tag is never hidden
+        return false;
     }
     const QString name = QString::fromStdString(ref.shortName);
     if (m_solo.isEmpty() && m_hidden.isEmpty()) {

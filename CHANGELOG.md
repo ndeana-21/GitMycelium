@@ -17,6 +17,11 @@ All notable changes to GitMycelium are recorded here. The format follows
   branch panel still lights its commits.
 - **Force push is a plain `--force`.** `--force-with-lease` refused in most real
   cases; the confirmation now says that remote commits your branch lacks are lost.
+- **Tags can be hidden** with their own eye, one by one or the whole Tags section.
+  Hiding a tag drops the commits only it reaches.
+- Double-clicking a branch, tag or stash in the branch panel shows its commit in the
+  middle of the graph instead of checking out or popping the stash. Both stay in the
+  right-click menu.
 - Hiding a local branch hides its remote branch too. Hiding a whole folder or the
   Remote section leaves the remote branches of your local ones on screen; those are
   hidden one by one.

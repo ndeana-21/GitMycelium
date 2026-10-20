@@ -1662,8 +1662,8 @@ QWidget* MainWindow::buildReferencePanel() {
     refView->header()->setStretchLastSection(true);
     refView->setContextMenuPolicy(Qt::CustomContextMenu);
     refView->setToolTip(QStringLiteral(
-        "Double-click a branch to check it out.\nDrag a branch onto another branch to merge or "
-        "rebase, or onto a commit to move it there."));
+        "Double-click a branch, tag or stash to show it in the graph.\nDrag a branch onto "
+        "another branch to merge or rebase, or onto a commit to move it there."));
     refView->setDragEnabled(true);
     refView->setAcceptDrops(true);
     refView->setDropIndicatorShown(true);
@@ -1674,9 +1674,20 @@ QWidget* MainWindow::buildReferencePanel() {
     connect(refView, &QTreeView::customContextMenuRequested, this, &MainWindow::onRefContextMenu);
     connect(refView, &RefTreeView::eyeClicked, this, &MainWindow::toggleEye);
     connect(refView, &QTreeView::doubleClicked, this, [this](const QModelIndex& index) {
+        // A branch, tag or stash is shown, not acted on: checking out or popping from a
+        // double-click was too easy to do by accident. Both stay in the context menu.
         if (RefModel::isStash(index)) {
-            restoreStash(index.data(RefModel::StashOidRole).toString(), false,
-                         index.data(Qt::DisplayRole).toString());
+            revealCommit(index.data(RefModel::StashOidRole).toString());
+            return;
+        }
+        if (RefModel::isRef(index)) {
+            // A branch names its commit; an annotated tag names a tag object.
+            const QString target = RefModel::refKind(index) == RefKind::Tag
+                                       ? m_session->resolveRevision(
+                                             index.data(RefModel::FullNameRole).toString() +
+                                             QStringLiteral("^{commit}"))
+                                       : index.data(RefModel::TargetRole).toString();
+            revealCommit(target);
             return;
         }
         if (RefModel::isWorktree(index)) {
@@ -1687,7 +1698,6 @@ QWidget* MainWindow::buildReferencePanel() {
             openSubmodule(index.data(RefModel::SubmodulePathRole).toString());
             return;
         }
-        checkoutSelectedBranch();
     });
     connect(refView, &RefTreeView::refFocused, this, [this](const QString& name) {
         m_commitModel->setFocusedBranch(name);
@@ -4913,12 +4923,14 @@ HistoryFilter MainWindow::historyFilter() const {
     const QStringList hiddenNames = withRemoteTwins(m_visibility.hiddenNames());
     const QSet<QString> hidden(hiddenNames.begin(), hiddenNames.end());
     for (const RefInfo& ref : m_session->refs()) {
-        // Only branches are filtered: a tag is a name for a commit, and taking it
-        // out of the walk would drop the label that says a release exists.
+        // Solo and the filter modes pick branches; a tag leaves the walk only by its
+        // own eye, so a release label does not vanish because a branch was soloed.
         const bool branch =
             ref.kind == RefKind::LocalBranch || ref.kind == RefKind::RemoteBranch;
         bool visible = true;
-        if (active) {
+        if (ref.kind == RefKind::Tag) {
+            visible = active || !hidden.contains(QString::fromStdString(ref.fullName));
+        } else if (active) {
             if (branch) {
                 visible = std::find(wanted.begin(), wanted.end(), ref.fullName) != wanted.end();
             }
@@ -5037,6 +5049,11 @@ QSet<QString> MainWindow::effectiveHiddenBranches() const {
             hidden.insert(name);
         }
     }
+    for (const QString& name : m_visibility.hiddenNames()) {
+        if (name.startsWith(QLatin1String("refs/tags/"))) {
+            hidden.insert(name);
+        }
+    }
     return hidden;
 }
 
@@ -5063,8 +5080,9 @@ void MainWindow::toggleEye(const QModelIndex& index) {
     stored.sort();
     m_visibility.replaceHidden(stored);
     refreshPanels();
-    const QString what = names.size() == 1 ? names.front()
-                                           : QStringLiteral("%1 branches").arg(names.size());
+    QString what = names.size() == 1 ? names.front()
+                                     : QStringLiteral("%1 branches and tags").arg(names.size());
+    what.remove(QRegularExpression(QStringLiteral("^refs/tags/")));
     setStatus(show ? QStringLiteral("Showing %1").arg(what) : QStringLiteral("Hid %1").arg(what));
 }
 
