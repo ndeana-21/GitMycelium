@@ -27,11 +27,15 @@ signals:
     void refFocused(QString shortName);
     void refHovered(QString shortName);
     void eyeClicked(const QModelIndex& index);
+    /// Commits dragged out of the graph and dropped on a local branch, newest first.
+    void commitsDroppedOnBranch(QStringList commitIds, QString branch);
 
 protected:
     /// The drop itself is handled by the model; record where it landed here, so the
     /// menu it leads to opens under the reader's hand rather than where the drag began.
     void dropEvent(QDropEvent* event) override;
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dragMoveEvent(QDragMoveEvent* event) override;
 
 protected:
     void startDrag(Qt::DropActions supportedActions) override;
@@ -44,6 +48,8 @@ protected:
 private:
     std::function<int(const QString&)> m_colorResolver;
     bool onEye(const QPoint& pos, QModelIndex* index = nullptr) const;
+    /// The local branch under `pos`, for a commit drop; empty elsewhere.
+    QString localBranchAt(const QPoint& pos) const;
 
     QString m_hoveredRef;
     QPersistentModelIndex m_hoveredRow;

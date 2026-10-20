@@ -392,6 +392,10 @@ add_executable(test_window_width test_window_width.cpp ${CMAKE_SOURCE_DIR}/src/t
 target_link_libraries(test_window_width PRIVATE gmc_ui gmc_model gmc_repo gmc_git gmc_core gmc_theme Qt6::Widgets Qt6::Test)
 add_test(NAME window_width COMMAND test_window_width)
 
+add_executable(test_pick_onto test_pick_onto.cpp ${CMAKE_SOURCE_DIR}/src/theme/icons.qrc)
+target_link_libraries(test_pick_onto PRIVATE gmc_ui gmc_model gmc_repo gmc_git gmc_core gmc_theme Qt6::Widgets Qt6::Test)
+add_test(NAME pick_onto COMMAND test_pick_onto)
+
 add_executable(test_stash_graph test_stash_graph.cpp ${CMAKE_SOURCE_DIR}/src/theme/icons.qrc)
 target_link_libraries(test_stash_graph PRIVATE gmc_ui gmc_model gmc_repo gmc_git gmc_core gmc_theme Qt6::Widgets Qt6::Test)
 add_test(NAME stash_graph COMMAND test_stash_graph)

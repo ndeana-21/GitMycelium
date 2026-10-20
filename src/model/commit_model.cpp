@@ -924,7 +924,9 @@ Qt::ItemFlags CommitModel::flags(const QModelIndex& index) const {
                             Qt::ItemIsDragEnabled);
         }
         base |= Qt::ItemIsDropEnabled;
-        if (index.column() == Refs && !refsAt(index.row()).empty()) {
+        // A label drags its branch; anywhere else on a commit's row drags the commit
+        // (or the selection) to be picked onto a branch.
+        if (!isWipRow(index.row())) {
             base |= Qt::ItemIsDragEnabled;
         }
     } else {
@@ -934,7 +936,7 @@ Qt::ItemFlags CommitModel::flags(const QModelIndex& index) const {
 }
 
 QStringList CommitModel::mimeTypes() const {
-    return {QString::fromLatin1(kRefMimeType)};
+    return {QString::fromLatin1(kRefMimeType), QString::fromLatin1(kCommitsMimeType)};
 }
 
 bool CommitModel::canDropMimeData(const QMimeData* data, Qt::DropAction action, int row, int column,

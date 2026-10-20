@@ -1584,9 +1584,13 @@ void CommitGraphView::startDrag(Qt::DropActions supportedActions) {
     } else {
         ref = refAt(m_pressPos, &shortName);
     }
-    if (!ref || ref->fullName.rfind("refs/stash", 0) == 0) {
-        // Not on a label: no drag. A half-working drag is worse than none. A stash
-        // is not a branch: nothing merges it, rebases it or moves it by dropping.
+    if (!ref) {
+        startCommitDrag();
+        return;
+    }
+    if (ref->fullName.rfind("refs/stash", 0) == 0) {
+        // A stash is not a branch: nothing merges it, rebases it or moves it by
+        // dropping.
         return;
     }
 
@@ -1611,7 +1615,89 @@ void CommitGraphView::startDrag(Qt::DropActions supportedActions) {
     drag->exec(Qt::MoveAction);
 }
 
+void CommitGraphView::startCommitDrag() {
+    const auto* model = qobject_cast<const CommitModel*>(this->model());
+    const QModelIndex pressed = indexAt(m_pressPos);
+    if (!model || !pressed.isValid() || model->isWipRow(pressed.row()) ||
+        model->isTimelineRow(pressed.row())) {
+        return;
+    }
+    QStringList ids;
+    if (selectionModel() && selectionModel()->isSelected(pressed)) {
+        for (const Oid& id : selectedCommitIds()) {
+            ids << QString::fromStdString(id);
+        }
+    }
+    const CommitInfo* commit = model->commitAt(pressed.row());
+    if (ids.isEmpty() && commit) {
+        ids << QString::fromStdString(commit->id);
+    }
+    if (ids.isEmpty()) {
+        return;
+    }
+    auto* data = new QMimeData;
+    data->setData(QString::fromLatin1(kCommitsMimeType), ids.join(QLatin1Char('\n')).toUtf8());
+    auto* drag = new QDrag(this);
+    drag->setMimeData(data);
+    const QString caption =
+        ids.size() == 1 && commit
+            ? QFontMetrics(theme::labelFont())
+                  .elidedText(QString::fromStdString(commit->id).left(7) + QLatin1Char(' ') +
+                                  QString::fromStdString(commit->summary),
+                              Qt::ElideRight, 260)
+            : QStringLiteral("%1 commits").arg(ids.size());
+    const QPixmap chip = RefsDelegate::dragPixmap(caption, 0, RefKind::Other);
+    drag->setPixmap(chip);
+    const QSizeF logical = chip.deviceIndependentSize();
+    drag->setHotSpot(QPoint(static_cast<int>(logical.width() / 2.0),
+                            static_cast<int>(logical.height() / 2.0)));
+    drag->exec(Qt::CopyAction);
+}
+
+QString CommitGraphView::localBranchAt(const QPoint& pos, QRect* pill) const {
+    QString name;
+    const RefInfo* ref = refAt(pos, &name);
+    if (!ref || ref->kind != RefKind::LocalBranch) {
+        return QString();
+    }
+    if (const QModelIndex row = indexAt(pos); row.isValid() && pill) {
+        for (const RefPill& candidate : rowPills(row.row())) {
+            if (candidate.shortName == name) {
+                *pill = candidate.rect;
+            }
+        }
+    }
+    return name;
+}
+
+void CommitGraphView::dragEnterEvent(QDragEnterEvent* event) {
+    if (event->mimeData()->hasFormat(QString::fromLatin1(kCommitsMimeType))) {
+        event->acceptProposedAction();
+        return;
+    }
+    QTreeView::dragEnterEvent(event);
+}
+
 void CommitGraphView::dragMoveEvent(QDragMoveEvent* event) {
+    if (const QByteArray commits =
+            event->mimeData()->data(QString::fromLatin1(kCommitsMimeType));
+        !commits.isEmpty()) {
+        QRect pill;
+        const QString branch = localBranchAt(event->position().toPoint(), &pill);
+        if (branch.isEmpty()) {
+            setDropTarget(QString(), QRect());
+            event->ignore();
+            return;
+        }
+        const int count = static_cast<int>(commits.count('\n')) + 1;
+        setDropTarget(branch, pill,
+                      count == 1 ? QStringLiteral("Release: cherry-pick onto %1").arg(branch)
+                                 : QStringLiteral("Release: cherry-pick %1 commits onto %2")
+                                       .arg(count)
+                                       .arg(branch));
+        event->acceptProposedAction();
+        return;
+    }
     if (!m_acceptedMimeType.isEmpty() &&
         !event->mimeData()->hasFormat(m_acceptedMimeType)) {
         event->ignore();
@@ -1661,10 +1747,12 @@ void CommitGraphView::dragLeaveEvent(QDragLeaveEvent* event) {
     QTreeView::dragLeaveEvent(event);
 }
 
-void CommitGraphView::setDropTarget(const QString& name, const QRect& pill) {
-    if (name == m_dropTarget && pill == m_dropTargetRect) {
+void CommitGraphView::setDropTarget(const QString& name, const QRect& pill,
+                                    const QString& hint) {
+    if (name == m_dropTarget && pill == m_dropTargetRect && hint == m_dropHint) {
         return;
     }
+    m_dropHint = hint;
     m_dropTarget = name;
     m_dropTargetRect = name.isEmpty() ? QRect() : pill;
     if (!m_dropPulse) {
@@ -1708,7 +1796,9 @@ void CommitGraphView::paintDropTarget(QPainter& painter) {
     painter.setBrush(Qt::NoBrush);
     painter.drawRoundedRect(QRectF(m_dropTargetRect).adjusted(-1.5, -1.5, 1.5, 1.5), 4, 4);
 
-    const QString hint = QStringLiteral("Release: merge / rebase onto %1").arg(m_dropTarget);
+    const QString hint = m_dropHint.isEmpty()
+                             ? QStringLiteral("Release: merge / rebase onto %1").arg(m_dropTarget)
+                             : m_dropHint;
     const QFont font = theme::labelFont();
     const QFontMetrics metrics(font);
     QRect box(m_dropTargetRect.right() + 8, m_dropTargetRect.top(),
@@ -1731,6 +1821,20 @@ void CommitGraphView::dropEvent(QDropEvent* event) {
     // The menu for this drop opens where the drop is. The cursor position is not a
     // reliable answer while a drag is in flight.
     rememberDropPoint(viewport()->mapToGlobal(event->position().toPoint()));
+
+    if (const QByteArray commits =
+            event->mimeData()->data(QString::fromLatin1(kCommitsMimeType));
+        !commits.isEmpty()) {
+        const QString branch = localBranchAt(event->position().toPoint(), nullptr);
+        if (branch.isEmpty()) {
+            event->ignore();
+            return;
+        }
+        event->acceptProposedAction();
+        emit commitsDroppedOnBranch(
+            QString::fromUtf8(commits).split(QLatin1Char('\n'), Qt::SkipEmptyParts), branch);
+        return;
+    }
 
     const RefModel::DraggedRef source = RefModel::decode(event->mimeData());
     if (source.shortName.isEmpty()) {

@@ -8,6 +8,11 @@ All notable changes to GitMycelium are recorded here. The format follows
 
 ### Added
 
+- **Cherry-pick by dragging.** Drag a commit (or the selected commits) from the graph
+  onto a local branch's label, or onto the branch in the branch panel. A branch that
+  is not checked out gets the commits without a checkout: your working tree and
+  current branch stay as they are. If a commit conflicts there, the app offers to
+  check the branch out and resolve it in the merge editor.
 - **Squash a stretch of the branch from one commit**: right-click a commit for
   "Squash this and all newer commits into one" or "Squash from the branch start up to
   this commit".

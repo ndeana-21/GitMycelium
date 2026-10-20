@@ -4335,6 +4335,98 @@ Oid Repository::cherryPick(const std::vector<Oid>& commits) {
     return resolveRevision("HEAD");
 }
 
+PickOntoResult Repository::cherryPickOnto(const std::string& branch,
+                                          const std::vector<Oid>& commits) {
+    PickOntoResult result;
+    if (commits.empty()) {
+        fail("nothing to cherry-pick");
+    }
+    if (gpgSignConfigured()) {
+        result.needsCheckout = true;
+        result.reason = "commits here are signed, which only git can do on a checked-out branch";
+        return result;
+    }
+    git_reference* ref = nullptr;
+    check(git_branch_lookup(&ref, m_repo, branch.c_str(), GIT_BRANCH_LOCAL),
+          "no local branch " + branch);
+    const std::unique_ptr<git_reference, decltype(&git_reference_free)> refGuard(
+        ref, git_reference_free);
+    if (git_branch_is_checked_out(ref) == 1) {
+        fail(branch + " is checked out in a worktree; pick there instead");
+    }
+    git_signature* committer = nullptr;
+    check(git_signature_default(&committer, m_repo),
+          "set user.name and user.email to commit");
+    const std::unique_ptr<git_signature, decltype(&git_signature_free)> committerGuard(
+        committer, git_signature_free);
+
+    git_oid tipId = *git_reference_target(ref);
+    for (const Oid& id : commits) {
+        const git_oid pickId = parseOid(id);
+        git_commit* pick = nullptr;
+        check(git_commit_lookup(&pick, m_repo, &pickId), "cannot read commit " + id);
+        const std::unique_ptr<git_commit, decltype(&git_commit_free)> pickGuard(pick,
+                                                                                 git_commit_free);
+        if (git_commit_parentcount(pick) > 1) {
+            fail("commit " + id.substr(0, 7) + " is a merge; pick its branch instead");
+        }
+        git_commit* onto = nullptr;
+        check(git_commit_lookup(&onto, m_repo, &tipId), "cannot read " + branch);
+        const std::unique_ptr<git_commit, decltype(&git_commit_free)> ontoGuard(onto,
+                                                                                 git_commit_free);
+        git_index* index = nullptr;
+        check(git_cherrypick_commit(&index, m_repo, pick, onto, 0, nullptr),
+              "cannot apply " + id.substr(0, 7));
+        const std::unique_ptr<git_index, decltype(&git_index_free)> indexGuard(index,
+                                                                               git_index_free);
+        if (git_index_has_conflicts(index)) {
+            git_index_conflict_iterator* conflicts = nullptr;
+            if (git_index_conflict_iterator_new(&conflicts, index) == 0) {
+                const git_index_entry* ancestor = nullptr;
+                const git_index_entry* ours = nullptr;
+                const git_index_entry* theirs = nullptr;
+                while (git_index_conflict_next(&ancestor, &ours, &theirs, conflicts) == 0) {
+                    const git_index_entry* any = ours ? ours : theirs ? theirs : ancestor;
+                    if (any) {
+                        result.conflicts.emplace_back(any->path);
+                    }
+                }
+                git_index_conflict_iterator_free(conflicts);
+            }
+            result.needsCheckout = true;
+            result.reason = "commit " + id.substr(0, 7) + " conflicts with " + branch;
+            return result;
+        }
+        git_oid treeId;
+        check(git_index_write_tree_to(&treeId, index, m_repo), "cannot write the picked tree");
+        if (git_oid_equal(&treeId, git_commit_tree_id(onto))) {
+            ++result.empty;
+            continue;
+        }
+        git_tree* tree = nullptr;
+        check(git_tree_lookup(&tree, m_repo, &treeId), "cannot read the picked tree");
+        const std::unique_ptr<git_tree, decltype(&git_tree_free)> treeGuard(tree, git_tree_free);
+        const git_commit* parents[] = {onto};
+        git_oid created;
+        check(git_commit_create(&created, m_repo, nullptr, git_commit_author(pick), committer,
+                                git_commit_message_encoding(pick), git_commit_message(pick), tree,
+                                1, parents),
+              "cannot write the picked commit");
+        tipId = created;
+        ++result.picked;
+    }
+    if (result.picked > 0) {
+        git_reference* moved = nullptr;
+        const std::string message = "cherry-pick onto " + branch + ": " +
+                                    std::to_string(result.picked) + " commit(s)";
+        check(git_reference_set_target(&moved, ref, &tipId, message.c_str()),
+              "cannot move " + branch);
+        git_reference_free(moved);
+    }
+    result.tip = oidToString(&tipId);
+    return result;
+}
+
 void Repository::amendHeadMessage(const std::string& message) {
     git_reference* head = nullptr;
     check(git_repository_head(&head, m_repo), "no commit to amend: HEAD is unborn");

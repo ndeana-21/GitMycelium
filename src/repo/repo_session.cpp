@@ -1700,6 +1700,20 @@ bool RepoSession::cherryPick(const std::vector<QString>& commitIds, QString* new
                     });
 }
 
+bool RepoSession::cherryPickOnto(const QString& branch, const std::vector<QString>& commitIds,
+                                 PickOntoResult* result, QString* errorOut) {
+    return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog,
+                    QStringLiteral("Cherry-pick onto %1").arg(branch), errorOut,
+                    [&](Repository& repo) {
+                        std::vector<Oid> ids;
+                        ids.reserve(commitIds.size());
+                        for (const QString& id : commitIds) {
+                            ids.push_back(id.toStdString());
+                        }
+                        *result = repo.cherryPickOnto(branch.toStdString(), ids);
+                    });
+}
+
 bool RepoSession::rangeIsLinear(const QString& onto, const QString& tip, QString* errorOut) const {
     QMutexLocker lock(&m_mutex);
     if (!m_repo) {

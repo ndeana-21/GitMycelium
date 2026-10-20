@@ -374,6 +374,18 @@ struct RewriteStep {
 /// One commit a rewrite would replay, in the order git's todo lists them: oldest first,
 /// merges flattened out. The subject is carried so the editor can show a list without a
 /// second lookup per row.
+/// What copying commits onto a branch that is not checked out came to. When the copy
+/// cannot be made without a working tree — a conflict, a signed commit — nothing moved,
+/// and `needsCheckout` says why in `reason`.
+struct PickOntoResult {
+    Oid tip;
+    int picked = 0;
+    int empty = 0; ///< commits whose change the branch already had, left out as git does
+    bool needsCheckout = false;
+    std::string reason;
+    std::vector<std::string> conflicts;
+};
+
 struct RebaseCandidate {
     Oid id;
     std::string subject;

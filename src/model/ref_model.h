@@ -18,6 +18,8 @@ enum class Glyph;
 
 /// Payload: "fullName|shortName|target|kind" — see RefModel::mimeData().
 inline constexpr const char* kRefMimeType = "application/x-gitmycelium-ref";
+/// Commits dragged out of the graph, newest first, one id per line.
+inline constexpr const char* kCommitsMimeType = "application/x-gitmycelium-commits";
 
 class RefModel : public QStandardItemModel {
     Q_OBJECT

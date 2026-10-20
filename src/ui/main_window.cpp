@@ -1674,6 +1674,8 @@ QWidget* MainWindow::buildReferencePanel() {
         [this](const QString& name) { return m_commitModel->refColorIndex(name); });
     connect(refView, &QTreeView::customContextMenuRequested, this, &MainWindow::onRefContextMenu);
     connect(refView, &RefTreeView::eyeClicked, this, &MainWindow::toggleEye);
+    connect(refView, &RefTreeView::commitsDroppedOnBranch, this,
+            &MainWindow::pickCommitsOntoBranch);
     connect(refView, &QTreeView::doubleClicked, this, [this](const QModelIndex& index) {
         // A branch, tag or stash is shown, not acted on: checking out or popping from a
         // double-click was too easy to do by accident. Both stay in the context menu.
@@ -1769,6 +1771,8 @@ void MainWindow::buildCommitPanel() {
             });
     connect(m_commitView, &CommitGraphView::checkoutTargetRequested, this,
             [this](const QString& target) { checkoutBranchFromGraph(target, RefKind::LocalBranch); });
+    connect(m_commitView, &CommitGraphView::commitsDroppedOnBranch, this,
+            &MainWindow::pickCommitsOntoBranch);
     connect(m_commitView, &CommitGraphView::refDroppedOnCommit, this,
             &MainWindow::onRefDroppedOnCommit);
 
@@ -6093,6 +6097,85 @@ SelectionPlan MainWindow::selectionPlan(const std::vector<Oid>& selection) const
     return plan;
 }
 
+void MainWindow::cherryPickOntoHead(const std::vector<QString>& oldestFirst) {
+    QString error;
+    QString created;
+    if (!m_session->cherryPick(oldestFirst, &created, &error)) {
+        refreshHistory();
+        refreshPanels();
+        if (!m_session->conflicts().empty()) {
+            showConflictsPage();
+            setStatus(QStringLiteral("Picking %1 commit(s) stopped on conflicts — %2 file(s) need you.")
+                          .arg(oldestFirst.size())
+                          .arg(m_session->conflicts().size()));
+            return;
+        }
+        reportFailure(QStringLiteral("Cherry pick"), error);
+        return;
+    }
+    refreshHistory();
+    refreshPanels();
+    setStatus(QStringLiteral("Cherry-picked %1 commit(s), newest is %2.")
+                  .arg(oldestFirst.size())
+                  .arg(created.left(7)));
+}
+
+void MainWindow::pickCommitsOntoBranch(const QStringList& newestFirst, const QString& branch) {
+    if (!m_session || !m_session->isOpen() || newestFirst.isEmpty() || branch.isEmpty()) {
+        return;
+    }
+    for (const QString& id : newestFirst) {
+        if (isStashCommit(id)) {
+            setStatus(QStringLiteral("A stash is not a commit to pick; apply it instead."));
+            return;
+        }
+    }
+    const std::vector<QString> oldestFirst(newestFirst.rbegin(), newestFirst.rend());
+    if (branch == QString::fromStdString(m_session->info().headBranch)) {
+        cherryPickOntoHead(oldestFirst);
+        return;
+    }
+    // Not checked out: the picks are merged in memory and the branch moves, with the
+    // working tree and the current branch left alone.
+    PickOntoResult result;
+    QString error;
+    if (!m_session->cherryPickOnto(branch, oldestFirst, &result, &error)) {
+        reportFailure(QStringLiteral("Cannot cherry-pick onto %1").arg(branch), error);
+        return;
+    }
+    if (result.needsCheckout) {
+        QString why = QString::fromStdString(result.reason);
+        if (!result.conflicts.empty()) {
+            QStringList paths;
+            for (const std::string& path : result.conflicts) {
+                paths << QString::fromStdString(path);
+            }
+            why += QStringLiteral(":\n") + paths.mid(0, 8).join(QLatin1Char('\n'));
+        }
+        if (!askYes(QStringLiteral("Cherry-pick onto %1").arg(branch),
+                    QStringLiteral("%1\n\nCheck out %2 and cherry-pick there? A conflict opens "
+                                   "in the merge editor.")
+                        .arg(why, branch))) {
+            setStatus(QStringLiteral("Nothing was picked onto %1.").arg(branch));
+            return;
+        }
+        QString checkoutError;
+        if (!m_session->checkoutBranch(branch, &checkoutError)) {
+            reportFailure(QStringLiteral("Cannot check out %1").arg(branch), checkoutError);
+            return;
+        }
+        cherryPickOntoHead(oldestFirst);
+        return;
+    }
+    refreshHistory();
+    refreshPanels();
+    QString status = QStringLiteral("Cherry-picked %1 commit(s) onto %2.").arg(result.picked).arg(branch);
+    if (result.empty > 0) {
+        status += QStringLiteral(" %1 were already there.").arg(result.empty);
+    }
+    setStatus(status);
+}
+
 void MainWindow::runSelectionOperation(SelectionOperation operation,
                                        const std::vector<Oid>& selection) {
     const SelectionPlan plan = selection.empty() ? selectionPlan() : selectionPlan(selection);
@@ -6104,31 +6187,12 @@ void MainWindow::runSelectionOperation(SelectionOperation operation,
                           : QString::fromStdString(plan.refusal));
             return;
         }
-        QString error;
-        QString created;
         std::vector<QString> picked;
         picked.reserve(plan.pickedCommits.size());
         for (const Oid& id : plan.pickedCommits) {
             picked.push_back(QString::fromStdString(id));
         }
-        if (!m_session->cherryPick(picked, &created, &error)) {
-            refreshHistory();
-            refreshPanels();
-            if (!m_session->conflicts().empty()) {
-                showConflictsPage();
-                setStatus(QStringLiteral("Picking %1 commits stopped on conflicts — %2 file(s) need you.")
-                              .arg(plan.pickedCommits.size())
-                              .arg(m_session->conflicts().size()));
-                return;
-            }
-            QMessageBox::warning(this, QStringLiteral("Cherry pick"), error);
-            return;
-        }
-        refreshHistory();
-        refreshPanels();
-        setStatus(QStringLiteral("Cherry-picked %1 commits, newest is %2.")
-                      .arg(plan.pickedCommits.size())
-                      .arg(created.left(7)));
+        cherryPickOntoHead(picked);
         return;
     }
 

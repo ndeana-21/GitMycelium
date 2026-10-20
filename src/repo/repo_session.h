@@ -463,6 +463,9 @@ public:
     /// On success `newCommitOut` (when not null) receives the created commit id.
     /// Copies the given commits onto the checked-out branch, oldest first.
     bool cherryPick(const std::vector<QString>& commitIds, QString* newCommitOut, QString* errorOut);
+    /// `Repository::cherryPickOnto`, recorded so one undo moves the branch back.
+    bool cherryPickOnto(const QString& branch, const std::vector<QString>& commitIds,
+                        PickOntoResult* result, QString* errorOut);
 
     bool rangeIsLinear(const QString& onto, const QString& tip, QString* errorOut) const;
 

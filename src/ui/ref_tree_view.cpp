@@ -9,6 +9,9 @@
 
 #include <QApplication>
 #include <QDrag>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
 #include <QHelpEvent>
 #include <QMimeData>
 #include <QMouseEvent>
@@ -109,8 +112,50 @@ bool RefTreeView::viewportEvent(QEvent* event) {
     return QTreeView::viewportEvent(event);
 }
 
+QString RefTreeView::localBranchAt(const QPoint& pos) const {
+    const QModelIndex index = indexAt(pos);
+    if (!index.isValid() || !RefModel::isRef(index) ||
+        RefModel::refKind(index) != RefKind::LocalBranch) {
+        return QString();
+    }
+    return RefModel::refShortName(index);
+}
+
+void RefTreeView::dragEnterEvent(QDragEnterEvent* event) {
+    if (event->mimeData()->hasFormat(QString::fromLatin1(kCommitsMimeType))) {
+        event->acceptProposedAction();
+        return;
+    }
+    QTreeView::dragEnterEvent(event);
+}
+
+void RefTreeView::dragMoveEvent(QDragMoveEvent* event) {
+    if (event->mimeData()->hasFormat(QString::fromLatin1(kCommitsMimeType))) {
+        if (localBranchAt(event->position().toPoint()).isEmpty()) {
+            event->ignore();
+        } else {
+            event->acceptProposedAction();
+        }
+        return;
+    }
+    QTreeView::dragMoveEvent(event);
+}
+
 void RefTreeView::dropEvent(QDropEvent* event) {
     rememberDropPoint(viewport()->mapToGlobal(event->position().toPoint()));
+    if (const QByteArray commits =
+            event->mimeData()->data(QString::fromLatin1(kCommitsMimeType));
+        !commits.isEmpty()) {
+        const QString branch = localBranchAt(event->position().toPoint());
+        if (branch.isEmpty()) {
+            event->ignore();
+            return;
+        }
+        event->acceptProposedAction();
+        emit commitsDroppedOnBranch(
+            QString::fromUtf8(commits).split(QLatin1Char('\n'), Qt::SkipEmptyParts), branch);
+        return;
+    }
     QTreeView::dropEvent(event);
 }
 

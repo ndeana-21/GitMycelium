@@ -366,6 +366,11 @@ public:
     /// change does not apply cleanly; the index is then left with conflict stages,
     /// which is what the conflict editor reads.
     Oid cherryPick(const std::vector<Oid>& commits);
+    /// Copies commits, oldest first, onto the local `branch` without checking it out:
+    /// each pick is merged in memory and committed with its author, and the branch moves
+    /// once at the end. Nothing moves when a pick conflicts or the commits must be
+    /// signed; the result says so and the caller checks the branch out instead.
+    PickOntoResult cherryPickOnto(const std::string& branch, const std::vector<Oid>& commits);
 
     /// True when the stretch `onto..tip` is a single line of first parents, with no merge
     /// and no commit reachable by a second path inside it. `onto` may be `kRebaseRoot`.

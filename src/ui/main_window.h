@@ -196,6 +196,7 @@ public:
 
     QString rebaseBaseBelow(const QString& commitId) const;
 
+    void cherryPickOntoHead(const std::vector<QString>& oldestFirst);
     void runSelectionOperation(SelectionOperation operation,
                                const std::vector<Oid>& selection = {});
 
@@ -268,6 +269,9 @@ public:
     /// Runs one commit-menu entry through the path the context menu and the keyboard
     /// both reach, returning the state afterwards so a run can be compared with git.
     QStringList runCommitMenuEntry(const QString& key, const QString& revision);
+    /// What dropping commits on a local branch's label does: pick them onto it, in
+    /// memory when it is not checked out. `newestFirst` is the graph's order.
+    void pickCommitsOntoBranch(const QStringList& newestFirst, const QString& branch);
 
     /// One line per command the palette offers: `enabled/disabled id  title`. With
     /// `runFirst`, the best match is run and its id reported.

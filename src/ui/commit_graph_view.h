@@ -135,6 +135,8 @@ signals:
     /// merge-tree prediction before it is measured.
     void dropOperationsOpened(QString source, QString target);
     void refDroppedOnCommit(gk::RefModel::DraggedRef source, QString commitId);
+    /// Commits dropped on a local branch's label, newest first: pick them onto it.
+    void commitsDroppedOnBranch(QStringList commitIds, QString branch);
     /// A label was left-clicked: focused, not checked out. Focus decides which
     /// branch gets the leftmost lane in the graph.
     void refFocused(QString shortName);
@@ -156,6 +158,7 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void startDrag(Qt::DropActions supportedActions) override;
+    void dragEnterEvent(QDragEnterEvent* event) override;
     void dragMoveEvent(QDragMoveEvent* event) override;
     void dragLeaveEvent(QDragLeaveEvent* event) override;
     void dropEvent(QDropEvent* event) override;
@@ -288,11 +291,15 @@ private:
     QString m_dropPreview;
     bool m_dropPreviewWarns = false;
 
-    void setDropTarget(const QString& name, const QRect& pill);
+    void setDropTarget(const QString& name, const QRect& pill, const QString& hint = QString());
+    void startCommitDrag();
+    /// The local branch whose label is under `pos`, or empty.
+    QString localBranchAt(const QPoint& pos, QRect* pill) const;
     void paintDropTarget(QPainter& painter);
     QString m_dropTarget;
     QRect m_dropTargetRect;
     QVariantAnimation* m_dropPulse = nullptr;
+    QString m_dropHint;
     int m_scrollBeforeReset = 0;
 };
 
