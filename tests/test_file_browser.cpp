@@ -69,6 +69,7 @@ private slots:
     void aFileIsReadAndTracedAcrossARename();
     void theWorkingTreeIsEditedInPlace();
     void aFileOpenInTheDiffOpensInTheFilesTab();
+    void aNestedFileOfACommitIsShownInTheTree();
 
 private:
     bool commit(const QString& message);
@@ -133,6 +134,7 @@ void FileBrowserTest::aFileIsReadAndTracedAcrossARename() {
     files->openFile(QStringLiteral("dir/b.txt"));
     QTRY_VERIFY(!files->busy());
     QCOMPARE(files->viewerText(), QStringLiteral("one\ntwo changed\nthree\nfour\nfive changed\n"));
+    QCOMPARE(files->selectedTreePath(), QStringLiteral("dir/b.txt"));
     QStringList history = files->historyRowsForDiagnostics();
     QVERIFY2(history.size() == 5, qPrintable(history.join('\n')));
     QVERIFY(history.at(4).endsWith(QStringLiteral("create a")));
@@ -164,6 +166,7 @@ void FileBrowserTest::aFileIsReadAndTracedAcrossARename() {
     QTRY_VERIFY(!files->busy() && files->treeRowsForDiagnostics().contains(QStringLiteral("a.txt")));
     files->openFile(QStringLiteral("a.txt"));
     QTRY_VERIFY(!files->busy());
+    QCOMPARE(files->selectedTreePath(), QStringLiteral("a.txt"));
     QVERIFY(!files->editable());
     QVERIFY(files->editor()->isReadOnly());
     QVERIFY(files->viewerTitle().endsWith(QStringLiteral("read-only")));
@@ -211,9 +214,25 @@ void FileBrowserTest::aFileOpenInTheDiffOpensInTheFilesTab() {
     FileBrowser* files = openFiles(window);
     QVERIFY(files);
     QCOMPARE(files->openPath(), QStringLiteral("readme.md"));
+    QTRY_COMPARE(files->selectedTreePath(), QStringLiteral("readme.md"));
     QVERIFY(files->workingTree());
     QTRY_VERIFY(!files->busy());
     QCOMPARE(files->viewerText(), QStringLiteral("changed\n"));
+}
+
+void FileBrowserTest::aNestedFileOfACommitIsShownInTheTree() {
+    // A commit's folders are read on workers, one level after another.
+    QVERIFY(writeFile(m_path + "/deep/er/still/file.txt", "deep\n"));
+    QVERIFY(commit("deep file"));
+    MainWindow window;
+    window.setHeadless(true);
+    QVERIFY(window.openRepository(m_path));
+    FileBrowser* files = openFiles(window);
+    QVERIFY(files);
+    files->setRevision(gitOut(m_path, {"rev-parse", "HEAD"}), QStringLiteral("head"));
+    files->openFile(QStringLiteral("deep/er/still/file.txt"));
+    QTRY_COMPARE(files->selectedTreePath(), QStringLiteral("deep/er/still/file.txt"));
+    QVERIFY(files->treeRowsForDiagnostics().contains(QStringLiteral("      file.txt")));
 }
 
 QTEST_MAIN(FileBrowserTest)

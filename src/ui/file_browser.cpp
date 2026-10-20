@@ -397,9 +397,51 @@ void FileBrowser::reload() {
             });
     }
     if (!m_openPath.isEmpty()) {
+        m_revealPath = m_openPath;
         showFileContent();
         showFileHistory();
     }
+}
+
+void FileBrowser::revealOpenFile() {
+    if (m_revealPath.isEmpty()) {
+        return;
+    }
+    QStandardItem* parent = m_model->invisibleRootItem();
+    const QStringList parts = m_revealPath.split(QLatin1Char('/'));
+    QString prefix;
+    for (qsizetype i = 0; i < parts.size(); ++i) {
+        prefix = prefix.isEmpty() ? parts[i] : prefix + QLatin1Char('/') + parts[i];
+        QStandardItem* found = nullptr;
+        for (int row = 0; row < parent->rowCount(); ++row) {
+            if (parent->child(row)->data(kPathRole).toString() == prefix) {
+                found = parent->child(row);
+                break;
+            }
+        }
+        if (!found) {
+            // Not read yet (the folder's answer is on its way) or not in this tree.
+            return;
+        }
+        const bool last = i + 1 == parts.size();
+        if (last) {
+            m_tree->setCurrentIndex(found->index());
+            m_tree->scrollTo(found->index());
+            m_revealPath.clear();
+            return;
+        }
+        // Expanding reads a folder not read yet (`onExpanded`); a commit's folder
+        // arrives from a worker, and its arrival carries on from here.
+        m_tree->expand(found->index());
+        if (!found->data(kLoadedRole).toBool()) {
+            return;
+        }
+        parent = found;
+    }
+}
+
+QString FileBrowser::selectedTreePath() const {
+    return m_tree->currentIndex().data(kPathRole).toString();
 }
 
 void FileBrowser::fillDirectory(QStandardItem* parent, const QString& directory,
@@ -423,6 +465,7 @@ void FileBrowser::fillDirectory(QStandardItem* parent, const QString& directory,
         }
         parent->appendRow(item);
     }
+    revealOpenFile();
 }
 
 void FileBrowser::loadDirectory(QStandardItem* parent, const QString& directory) {
@@ -497,6 +540,8 @@ void FileBrowser::openFile(const QString& path) {
         return;
     }
     m_openPath = path;
+    m_revealPath = path;
+    revealOpenFile();
     showFileContent();
     showFileHistory();
 }

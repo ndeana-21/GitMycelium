@@ -73,6 +73,8 @@ public:
 
     void openFile(const QString& path);
     QString openPath() const { return m_openPath; }
+    /// The path the tree's current row stands for.
+    QString selectedTreePath() const;
     /// The history of lines `first`..`last` (1-based) of the open file.
     void showLineHistory(int first, int last);
     void showFileHistory();
@@ -106,6 +108,9 @@ private:
     void fillDirectory(QStandardItem* parent, const QString& directory,
                        const std::vector<TreeEntry>& entries);
     void onExpanded(const QModelIndex& index);
+    /// Opens the folders down to the open file and selects it, reading a folder that
+    /// has not been read yet and carrying on when it arrives.
+    void revealOpenFile();
     void onActivated(const QModelIndex& index);
     void fillHistory(const std::vector<FileHistoryEntry>& entries, const QString& title);
     void showViewerMenu(const QPoint& pos);
@@ -121,6 +126,7 @@ private:
     bool m_workingTree = false;
     bool m_headless = false;
     QString m_openPath;
+    QString m_revealPath;
     QString m_contentTitle;
     quint64 m_generation = 0;
     int m_pending = 0;
