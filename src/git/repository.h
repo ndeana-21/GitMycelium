@@ -107,6 +107,11 @@ public:
     /// first, then by name.
     std::vector<TreeEntry> treeEntries(const std::string& revision,
                                        const std::string& directory) const;
+    /// Every file of the working tree git does not ignore, tracked or not, as paths
+    /// relative to the work tree (`git ls-files -co --exclude-standard`).
+    std::vector<std::string> workingTreeFiles() const;
+    /// Replaces `path` in the working tree with `bytes`, byte for byte.
+    void writeWorkingFile(const std::string& path, const std::string& bytes);
     /// The change `commit` made to `path`, as git prints it (`git show`).
     std::string commitFilePatch(const Oid& commit, const std::string& path) const;
     /// The commits that changed lines `first`..`last` (1-based) of `path` as it is in

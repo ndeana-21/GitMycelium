@@ -3274,6 +3274,49 @@ std::vector<TreeEntry> Repository::treeEntries(const std::string& revision,
     return out;
 }
 
+std::vector<std::string> Repository::workingTreeFiles() const {
+    const std::string workDir = workDirOf(m_repo).string();
+    if (workDir.empty()) {
+        fail("a bare repository has no working tree");
+    }
+    const ProcessResult run =
+        runGit({"ls-files", "-z", "--cached", "--others", "--exclude-standard"}, workDir);
+    if (run.exitCode != 0) {
+        fail("cannot list the working tree: " + failureText(run));
+    }
+    std::vector<std::string> out;
+    std::size_t start = 0;
+    for (std::size_t end = run.out.find('\0'); end != std::string::npos;
+         end = run.out.find('\0', start)) {
+        if (end > start) {
+            out.push_back(run.out.substr(start, end - start));
+        }
+        start = end + 1;
+    }
+    // A conflicted path is listed once per stage.
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+}
+
+void Repository::writeWorkingFile(const std::string& path, const std::string& bytes) {
+    const std::filesystem::path workDir = workDirOf(m_repo);
+    if (workDir.empty()) {
+        fail("a bare repository has no working tree");
+    }
+    const std::filesystem::path relative = std::filesystem::path(path).lexically_normal();
+    if (path.empty() || relative.is_absolute() || *relative.begin() == "..") {
+        fail("not a path inside the working tree: " + path);
+    }
+    std::ofstream out(workDir / relative, std::ios::binary | std::ios::trunc);
+    if (!out) {
+        fail("cannot write " + path);
+    }
+    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    if (!out) {
+        fail("cannot write " + path);
+    }
+}
+
 std::string Repository::commitFilePatch(const Oid& commit, const std::string& path) const {
     const ProcessResult run =
         runGit({"-c", "core.quotepath=false", "show", "--format=", "--no-color", "--no-ext-diff",

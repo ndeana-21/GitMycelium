@@ -362,6 +362,18 @@ std::vector<TreeEntry> RepoSession::treeEntries(const QString& revision,
     });
 }
 
+std::vector<std::string> RepoSession::workingTreeFiles() const {
+    return readOr(std::vector<std::string>{},
+                  [&](Repository& repo) { return repo.workingTreeFiles(); });
+}
+
+bool RepoSession::writeWorkingFile(const QString& path, const std::string& bytes,
+                                   QString* errorOut) {
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
+        repo.writeWorkingFile(path.toStdString(), bytes);
+    });
+}
+
 QString RepoSession::commitFilePatch(const QString& commit, const QString& path) const {
     return readOr(QString(), [&](Repository& repo) {
         return QString::fromStdString(repo.commitFilePatch(commit.toStdString(), path.toStdString()));

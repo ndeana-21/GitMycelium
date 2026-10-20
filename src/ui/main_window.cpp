@@ -1352,6 +1352,10 @@ void MainWindow::buildUi() {
     m_fileBrowser = new FileBrowser(this);
     m_fileBrowser->setSession(m_session);
     connect(m_fileBrowser, &FileBrowser::commitActivated, this, &MainWindow::revealCommit);
+    connect(m_fileBrowser, &FileBrowser::fileSaved, this, [this](const QString& path) {
+        refreshPanels();
+        setStatus(QStringLiteral("Saved %1.").arg(path));
+    });
     m_centerStack->addWidget(m_fileBrowser);
     sizeToCurrentPage(m_centerStack);
 
@@ -3207,6 +3211,12 @@ void MainWindow::renderFile(const QString& path, bool workingTree, bool staged) 
     m_renderedPath = path;
     m_renderedContext = context;
     m_renderedStaged = staged;
+    m_filesPath = path;
+    m_filesWorkingTree = workingTree || (!m_compareBase.isEmpty() &&
+                                         m_compareMode == CompareMode::WorkingTree);
+    m_filesRevision = m_filesWorkingTree
+                          ? QString()
+                          : (m_compareBase.isEmpty() ? m_selectedCommitId : m_compareTarget);
     if (!workingTree && m_compareBase.isEmpty() && m_selectedCommitId.isEmpty()) {
         return;
     }
@@ -3369,6 +3379,8 @@ void MainWindow::showFilesPage() {
     if (!m_centerStack || !m_fileBrowser) {
         return;
     }
+    // A file open in the diff view opens in the Files tab, where it was read from.
+    const bool fromDiff = diffPageVisible() && !m_filesPath.isEmpty();
     if (m_centerTabs) {
         const QSignalBlocker block(m_centerTabs);
         m_centerTabs->setCurrentIndex(1);
@@ -3377,24 +3389,24 @@ void MainWindow::showFilesPage() {
     if (!m_session || !m_session->isOpen()) {
         return;
     }
-    QString revision = m_selectedCommitId;
-    QString label;
-    if (revision.isEmpty()) {
+    const bool working = fromDiff ? m_filesWorkingTree : m_selectedCommitId.isEmpty();
+    const QString revision = fromDiff ? m_filesRevision : m_selectedCommitId;
+    if (working) {
         const RepoInfo info = m_session->info();
-        revision = QString::fromStdString(info.headId);
-        label = info.headBranch.empty()
-                    ? QStringLiteral("HEAD %1").arg(revision.left(8))
-                    : QStringLiteral("%1 (%2)").arg(QString::fromStdString(info.headBranch),
-                                                    revision.left(8));
-    } else {
+        m_fileBrowser->setWorkingTree(info.headBranch.empty()
+                                          ? QStringLiteral("detached HEAD")
+                                          : QString::fromStdString(info.headBranch));
+    } else if (!revision.isEmpty()) {
         const int row = m_commitModel->rowForCommit(revision);
         const CommitInfo* commit = row >= 0 ? m_commitModel->commitAt(row) : nullptr;
-        label = commit ? QStringLiteral("%1 %2").arg(revision.left(8),
-                                                     QString::fromStdString(commit->summary))
-                       : revision.left(8);
+        m_fileBrowser->setRevision(revision,
+                                   commit ? QStringLiteral("%1 %2").arg(
+                                                revision.left(8),
+                                                QString::fromStdString(commit->summary))
+                                          : revision.left(8));
     }
-    if (!revision.isEmpty()) {
-        m_fileBrowser->setRevision(revision, label);
+    if (fromDiff) {
+        m_fileBrowser->openFile(m_filesPath);
     }
 }
 
@@ -7459,6 +7471,9 @@ QStringList MainWindow::simulateBranchDrop(const QString& source, const QString&
 
 void MainWindow::setHeadless(bool headless) {
     m_headless = headless;
+    if (m_fileBrowser) {
+        m_fileBrowser->setHeadless(headless);
+    }
     if (!headless) {
         return;
     }

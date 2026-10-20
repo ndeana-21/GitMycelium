@@ -446,6 +446,11 @@ private:
 public:
     FileBrowser* fileBrowserForDiagnostics() const { return m_fileBrowser; }
     void showFilesPageForDiagnostics() { showFilesPage(); }
+    /// Opens a file in the diff view as the right panel's file list does.
+    void openFileForDiagnostics(const QString& path, bool workingTree) {
+        renderFile(path, workingTree);
+        showDiffPage();
+    }
 private:
     /// True when the refs or HEAD moved since the last refresh (or nothing was known).
     bool syncHistoryWithRefs(const RepoInfo& info, const std::vector<RefInfo>& refs);
@@ -848,6 +853,11 @@ private:
     QStackedWidget* m_centerStack = nullptr;
     QTabBar* m_centerTabs = nullptr;
     FileBrowser* m_fileBrowser = nullptr;
+    /// The file last opened in the diff view and where it was read from, for the Files
+    /// tab to open on: empty revision with `m_filesWorkingTree` is the working tree.
+    QString m_filesPath;
+    QString m_filesRevision;
+    bool m_filesWorkingTree = false;
     QAction* m_refsAction = nullptr;
     QAction* m_detailsAction = nullptr;
     QAction* m_mergedRemotesAction = nullptr;

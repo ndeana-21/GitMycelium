@@ -1,18 +1,23 @@
 #include "ui/file_browser.h"
 
+#include "core/unified_diff.h"
 #include "repo/repo_session.h"
 #include "theme/theme.h"
+#include "ui/diff_view.h"
 #include "ui/elided_label.h"
+#include "ui/syntax_highlight.h"
 
 #include <QDateTime>
 #include <QHBoxLayout>
 #include <QHeaderView>
-#include <QLabel>
 #include <QMenu>
+#include <QMessageBox>
 #include <QPainter>
-#include <QScrollBar>
+#include <QShortcut>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QStandardItemModel>
+#include <QStringDecoder>
 #include <QSyntaxHighlighter>
 #include <QTextBlock>
 #include <QToolButton>
@@ -21,6 +26,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <functional>
 
 namespace gk {
 namespace {
@@ -29,8 +35,10 @@ constexpr int kPathRole = Qt::UserRole + 1;
 constexpr int kDirectoryRole = Qt::UserRole + 2;
 constexpr int kLoadedRole = Qt::UserRole + 3;
 /// Past this the viewer shows the start of the file: a text widget holding hundreds
-/// of megabytes is not a way to read anything.
+/// of megabytes is not a way to read anything, and the start is not editable.
 constexpr std::size_t kShownBytes = 4 * 1024 * 1024;
+/// Colouring every line of a larger file at once stalls the window.
+constexpr qsizetype kHighlightedBytes = 1024 * 1024;
 
 class LineNumbers : public QWidget {
 public:
@@ -44,50 +52,82 @@ private:
     CodeView* m_view;
 };
 
-QString shownText(const std::string& bytes) {
-    if (std::find(bytes.begin(), bytes.begin() + std::min<std::size_t>(bytes.size(), 8000), '\0') !=
-        bytes.begin() + std::min<std::size_t>(bytes.size(), 8000)) {
-        return QStringLiteral("Binary file, %1 bytes.").arg(bytes.size());
+/// A file as the viewer takes it: text with `\n` line ends, and whether it can be
+/// edited and written back unchanged in what the editor does not touch.
+struct LoadedFile {
+    QString text;
+    bool editable = false;
+    bool crlf = false;
+    qsizetype size = 0;
+};
+
+LoadedFile loadedFile(const std::string& bytes, bool workingTree) {
+    LoadedFile file;
+    file.size = static_cast<qsizetype>(bytes.size());
+    const auto probe = static_cast<std::ptrdiff_t>(std::min<std::size_t>(bytes.size(), 8000));
+    if (std::find(bytes.begin(), bytes.begin() + probe, '\0') != bytes.begin() + probe) {
+        file.text = QStringLiteral("Binary file, %1 bytes.").arg(bytes.size());
+        return file;
     }
-    QString text = QString::fromUtf8(bytes.data(),
-                                     static_cast<qsizetype>(std::min(bytes.size(), kShownBytes)));
+    const std::size_t shown = std::min(bytes.size(), kShownBytes);
+    QStringDecoder decoder(QStringDecoder::Utf8);
+    file.text = decoder(QByteArrayView(bytes.data(), static_cast<qsizetype>(shown)));
+    file.crlf = bytes.find("\r\n") != std::string::npos;
+    if (file.crlf) {
+        file.text.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+    }
+    // Only what can be written back as it was: the whole file, valid UTF-8.
+    file.editable = workingTree && shown == bytes.size() && !decoder.hasError();
     if (bytes.size() > kShownBytes) {
-        text += QStringLiteral("\n\n… the first %1 MB of %2 bytes are shown.")
-                    .arg(kShownBytes / (1024 * 1024))
-                    .arg(bytes.size());
+        file.text += QStringLiteral("\n\n… the first %1 MB of %2 bytes are shown.")
+                         .arg(kShownBytes / (1024 * 1024))
+                         .arg(bytes.size());
     }
-    return text;
+    return file;
+}
+
+QString timeText(std::int64_t unix) {
+    return QDateTime::fromSecsSinceEpoch(unix).toString(QStringLiteral("yyyy-MM-dd HH:mm"));
 }
 
 } // namespace
 
-/// Colours a change the way the diff view does: added and removed lines, hunk headers.
-class PatchHighlighter : public QSyntaxHighlighter {
+/// The diff view's colouring, line by line, for a whole document: the block state a
+/// line leaves (an open comment or string) travels in the block's user data.
+class CodeHighlighter : public QSyntaxHighlighter {
 public:
     using QSyntaxHighlighter::QSyntaxHighlighter;
-    bool active = false;
+    Language language = Language::None;
 
 protected:
+    struct State : QTextBlockUserData {
+        HighlightState state;
+    };
+
     void highlightBlock(const QString& text) override {
-        if (!active || text.isEmpty()) {
+        if (language == Language::None) {
             return;
         }
-        QTextCharFormat format;
-        if (text.startsWith(QLatin1String("+++")) || text.startsWith(QLatin1String("---")) ||
-            text.startsWith(QLatin1String("diff ")) || text.startsWith(QLatin1String("index "))) {
-            format.setForeground(theme::textDim());
-        } else if (text.startsWith(QLatin1Char('+'))) {
-            format.setForeground(theme::diffAddedFg());
-            format.setBackground(theme::diffAddedBg());
-        } else if (text.startsWith(QLatin1Char('-'))) {
-            format.setForeground(theme::diffRemovedFg());
-            format.setBackground(theme::diffRemovedBg());
-        } else if (text.startsWith(QLatin1String("@@"))) {
-            format.setForeground(theme::diffHeader());
-        } else {
-            return;
+        HighlightState state;
+        if (const QTextBlock previous = currentBlock().previous(); previous.isValid()) {
+            if (const auto* data = static_cast<const State*>(previous.userData())) {
+                state = data->state;
+            }
         }
-        setFormat(0, static_cast<int>(text.size()), format);
+        for (const SyntaxRun& run : highlightLine(text, language, state)) {
+            QTextCharFormat format;
+            format.setForeground(run.colour);
+            setFormat(run.begin, run.length, format);
+        }
+        auto* data = static_cast<State*>(currentBlockUserData());
+        if (!data) {
+            data = new State;
+            setCurrentBlockUserData(data);
+        }
+        data->state = state;
+        // A changed block state is what makes Qt colour the next line again.
+        setCurrentBlockState(static_cast<int>(state.block) * 2 + (state.tripleQuoted ? 1 : 0) +
+                             static_cast<int>(qHash(state.terminator) & 0xffff) * 8);
     }
 };
 
@@ -95,9 +135,8 @@ CodeView::CodeView(QWidget* parent) : QPlainTextEdit(parent) {
     setReadOnly(true);
     setLineWrapMode(QPlainTextEdit::NoWrap);
     setFont(theme::monoFont());
-    setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
     m_numbers = new LineNumbers(this);
-    m_highlighter = new PatchHighlighter(document());
+    m_highlighter = new CodeHighlighter(document());
     connect(this, &QPlainTextEdit::blockCountChanged, this,
             [this] { setViewportMargins(lineNumberWidth(), 0, 0, 0); });
     connect(this, &QPlainTextEdit::updateRequest, this, [this](const QRect& rect, int dy) {
@@ -110,9 +149,9 @@ CodeView::CodeView(QWidget* parent) : QPlainTextEdit(parent) {
     setViewportMargins(lineNumberWidth(), 0, 0, 0);
 }
 
-void CodeView::setPatchMode(bool patch) {
-    m_highlighter->active = patch;
-    m_highlighter->rehighlight();
+void CodeView::setHighlighting(const QString& path, qsizetype size) {
+    m_highlighter->language =
+        size > kHighlightedBytes || path.isEmpty() ? Language::None : languageForPath(path);
 }
 
 int CodeView::lineNumberWidth() const {
@@ -169,26 +208,53 @@ FileBrowser::FileBrowser(QWidget* parent) : QWidget(parent) {
     connect(m_tree, &QTreeView::activated, this, &FileBrowser::onActivated);
 
     auto* right = new QSplitter(Qt::Vertical, split);
-    auto* viewerPane = new QWidget(right);
-    auto* viewerLayout = new QVBoxLayout(viewerPane);
-    viewerLayout->setContentsMargins(0, 0, 0, 0);
-    viewerLayout->setSpacing(0);
-    auto* viewerBar = new QHBoxLayout;
-    viewerBar->setContentsMargins(8, 2, 8, 2);
-    m_viewerTitle = new ElidedLabel(viewerPane);
-    m_backToFile = new QToolButton(viewerPane);
-    m_backToFile->setText(QStringLiteral("Show file"));
-    m_backToFile->setVisible(false);
-    connect(m_backToFile, &QToolButton::clicked, this, &FileBrowser::showFileContent);
-    viewerBar->addWidget(m_viewerTitle, 1);
-    viewerBar->addWidget(m_backToFile);
-    viewerLayout->addLayout(viewerBar);
-    m_viewer = new CodeView(viewerPane);
+    m_viewerStack = new QStackedWidget(right);
+
+    auto* contentPane = new QWidget(m_viewerStack);
+    auto* contentLayout = new QVBoxLayout(contentPane);
+    contentLayout->setContentsMargins(0, 0, 0, 0);
+    contentLayout->setSpacing(0);
+    auto* contentBar = new QHBoxLayout;
+    contentBar->setContentsMargins(8, 2, 8, 2);
+    m_viewerTitle = new ElidedLabel(contentPane);
+    m_save = new QToolButton(contentPane);
+    m_save->setText(QStringLiteral("Save"));
+    m_save->setToolTip(QStringLiteral("Write the file to the working tree (Ctrl+S)"));
+    m_save->setVisible(false);
+    connect(m_save, &QToolButton::clicked, this, [this] { save(); });
+    contentBar->addWidget(m_viewerTitle, 1);
+    contentBar->addWidget(m_save);
+    contentLayout->addLayout(contentBar);
+    m_viewer = new CodeView(contentPane);
     m_viewer->setContextMenuPolicy(Qt::CustomContextMenu);
-    m_viewer->setToolTip(QStringLiteral(
-        "Select lines and right-click to see the commits that changed them."));
     connect(m_viewer, &QWidget::customContextMenuRequested, this, &FileBrowser::showViewerMenu);
-    viewerLayout->addWidget(m_viewer, 1);
+    connect(m_viewer->document(), &QTextDocument::modificationChanged, this,
+            [this] { updateSaveState(); });
+    contentLayout->addWidget(m_viewer, 1);
+    m_viewerStack->addWidget(contentPane);
+
+    m_changes = new DiffView(m_viewerStack);
+    connect(m_changes, &DiffView::closeRequested, this,
+            [this] { m_viewerStack->setCurrentIndex(0); });
+    connect(m_changes, &DiffView::commitActivated, this, &FileBrowser::commitActivated);
+    connect(m_changes, &DiffView::blameRequested, this, [this](const QString& path) {
+        if (!m_session) {
+            return;
+        }
+        const QString revision = m_changes->document().contentLabel;
+        track(true);
+        m_session->readAsync<std::vector<BlameLine>>(
+            this, [path, revision](RepoSession& session) { return session.blame(path, revision); },
+            [this](std::vector<BlameLine> lines) {
+                track(false);
+                m_changes->setBlame(lines);
+            });
+    });
+    m_viewerStack->addWidget(m_changes);
+
+    auto* saveKey = new QShortcut(QKeySequence::Save, this);
+    saveKey->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(saveKey, &QShortcut::activated, this, [this] { save(); });
 
     auto* historyPane = new QWidget(right);
     auto* historyLayout = new QVBoxLayout(historyPane);
@@ -224,8 +290,9 @@ FileBrowser::FileBrowser(QWidget* parent) : QWidget(parent) {
     right->setStretchFactor(1, 2);
     split->setStretchFactor(0, 1);
     split->setStretchFactor(1, 3);
+    split->setSizes({260, 780});
     layout->addWidget(split, 1);
-    setViewer(QStringLiteral("Choose a file"), QString(), false);
+    setContent(QStringLiteral("Choose a file"), QString(), false);
 }
 
 void FileBrowser::track(bool started) {
@@ -238,31 +305,134 @@ void FileBrowser::setSession(RepoSession* session) {
     }
     m_session = session;
     m_revision.clear();
+    m_workingTree = false;
     ++m_generation;
     m_model->clear();
     m_history->clear();
     m_entries.clear();
     m_openPath.clear();
-    setViewer(QStringLiteral("Choose a file"), QString(), false);
+    setContent(QStringLiteral("Choose a file"), QString(), false);
 }
 
 void FileBrowser::setRevision(const QString& revision, const QString& label) {
-    if (revision == m_revision && m_model->rowCount() > 0) {
+    if (!m_workingTree && revision == m_revision && m_model->rowCount() > 0) {
         return;
     }
+    if (!confirmLeave()) {
+        return;
+    }
+    m_workingTree = false;
     m_revision = revision;
     m_revisionLabel = label;
+    m_title->setFullText(QStringLiteral("Files at %1 · read-only").arg(label));
+    reload();
+}
+
+void FileBrowser::setWorkingTree(const QString& label) {
+    // The working tree changes under the browser, so it is read again each time it is
+    // asked for, unless that would throw away an edit.
+    if (m_workingTree && modified()) {
+        return;
+    }
+    m_workingTree = true;
+    m_revision.clear();
+    m_revisionLabel = label;
+    m_title->setFullText(QStringLiteral("Working tree — %1 · files can be edited").arg(label));
+    reload();
+}
+
+void FileBrowser::reload() {
     ++m_generation;
-    m_title->setFullText(QStringLiteral("Files at %1").arg(label));
     m_model->clear();
-    loadDirectory(m_model->invisibleRootItem(), QString());
+    m_workingFolders.clear();
+    m_workingFoldersRead = false;
+    if (!m_session) {
+        return;
+    }
+    if (!m_workingTree) {
+        loadDirectory(m_model->invisibleRootItem(), QString());
+    } else {
+        const quint64 generation = m_generation;
+        track(true);
+        m_session->readAsync<std::map<QString, std::vector<TreeEntry>>>(
+            this,
+            [](RepoSession& session) {
+                // Every folder's entries from the one flat list: folders first, then by
+                // name, as a commit's tree is shown.
+                std::map<QString, std::map<QString, bool>> folders;
+                for (const std::string& file : session.workingTreeFiles()) {
+                    const QStringList parts = QString::fromStdString(file).split(QLatin1Char('/'));
+                    QString parent;
+                    for (qsizetype i = 0; i < parts.size(); ++i) {
+                        bool& directory = folders[parent][parts[i]];
+                        directory = directory || i + 1 < parts.size();
+                        parent = parent.isEmpty() ? parts[i] : parent + QLatin1Char('/') + parts[i];
+                    }
+                }
+                std::map<QString, std::vector<TreeEntry>> out;
+                for (const auto& [folder, names] : folders) {
+                    std::vector<TreeEntry>& entries = out[folder];
+                    for (const auto& [name, directory] : names) {
+                        TreeEntry entry;
+                        entry.name = name.toStdString();
+                        entry.directory = directory;
+                        entries.push_back(std::move(entry));
+                    }
+                    std::stable_sort(entries.begin(), entries.end(),
+                                     [](const TreeEntry& a, const TreeEntry& b) {
+                                         return a.directory > b.directory;
+                                     });
+                }
+                return out;
+            },
+            [this, generation](std::map<QString, std::vector<TreeEntry>> folders) {
+                track(false);
+                if (generation != m_generation) {
+                    return;
+                }
+                m_workingFolders = std::move(folders);
+                m_workingFoldersRead = true;
+                fillDirectory(m_model->invisibleRootItem(), QString(),
+                              m_workingFolders[QString()]);
+            });
+    }
     if (!m_openPath.isEmpty()) {
-        openFile(m_openPath);
+        showFileContent();
+        showFileHistory();
+    }
+}
+
+void FileBrowser::fillDirectory(QStandardItem* parent, const QString& directory,
+                                const std::vector<TreeEntry>& entries) {
+    parent->removeRows(0, parent->rowCount());
+    parent->setData(true, kLoadedRole);
+    for (const TreeEntry& entry : entries) {
+        const QString name = QString::fromStdString(entry.name);
+        auto* item =
+            new QStandardItem(name + (entry.directory ? QStringLiteral("/") : QString()));
+        item->setData(directory.isEmpty() ? name : directory + QLatin1Char('/') + name,
+                      kPathRole);
+        item->setData(entry.directory, kDirectoryRole);
+        if (entry.submodule) {
+            item->setForeground(theme::textDim());
+            item->setToolTip(QStringLiteral("Submodule"));
+        }
+        if (entry.directory) {
+            // A placeholder makes the folder expandable before it is read.
+            item->appendRow(new QStandardItem(QStringLiteral("…")));
+        }
+        parent->appendRow(item);
     }
 }
 
 void FileBrowser::loadDirectory(QStandardItem* parent, const QString& directory) {
     if (!m_session) {
+        return;
+    }
+    if (m_workingTree) {
+        if (m_workingFoldersRead) {
+            fillDirectory(parent, directory, m_workingFolders[directory]);
+        }
         return;
     }
     const quint64 generation = m_generation;
@@ -280,27 +450,8 @@ void FileBrowser::loadDirectory(QStandardItem* parent, const QString& directory)
             if (generation != m_generation || (!top && !anchor.isValid())) {
                 return;
             }
-            QStandardItem* parent = top ? m_model->invisibleRootItem()
-                                        : m_model->itemFromIndex(anchor);
-            parent->removeRows(0, parent->rowCount());
-            parent->setData(true, kLoadedRole);
-            for (const TreeEntry& entry : entries) {
-                const QString name = QString::fromStdString(entry.name);
-                auto* item = new QStandardItem(name + (entry.directory ? QStringLiteral("/")
-                                                                       : QString()));
-                item->setData(directory.isEmpty() ? name : directory + QLatin1Char('/') + name,
-                              kPathRole);
-                item->setData(entry.directory, kDirectoryRole);
-                if (entry.submodule) {
-                    item->setForeground(theme::textDim());
-                    item->setToolTip(QStringLiteral("Submodule"));
-                }
-                if (entry.directory) {
-                    // A placeholder makes the folder expandable before it is read.
-                    item->appendRow(new QStandardItem(QStringLiteral("…")));
-                }
-                parent->appendRow(item);
-            }
+            fillDirectory(top ? m_model->invisibleRootItem() : m_model->itemFromIndex(anchor),
+                          directory, entries);
         });
 }
 
@@ -317,8 +468,32 @@ void FileBrowser::onActivated(const QModelIndex& index) {
     }
 }
 
+bool FileBrowser::confirmLeave() {
+    if (!modified()) {
+        return true;
+    }
+    if (m_headless) {
+        return save();
+    }
+    const auto answer = QMessageBox::question(
+        this, QStringLiteral("Unsaved changes"),
+        QStringLiteral("Save the changes to %1?").arg(m_openPath),
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+    if (answer == QMessageBox::Save) {
+        return save();
+    }
+    if (answer == QMessageBox::Discard) {
+        m_viewer->document()->setModified(false);
+        return true;
+    }
+    return false;
+}
+
 void FileBrowser::openFile(const QString& path) {
-    if (!m_session) {
+    if (!m_session || path.isEmpty()) {
+        return;
+    }
+    if (path != m_openPath && !confirmLeave()) {
         return;
     }
     m_openPath = path;
@@ -327,31 +502,93 @@ void FileBrowser::openFile(const QString& path) {
 }
 
 void FileBrowser::showFileContent() {
+    m_viewerStack->setCurrentIndex(0);
     if (!m_session || m_openPath.isEmpty()) {
         return;
     }
     const quint64 generation = m_generation;
     const QString revision = m_revision;
+    const bool workingTree = m_workingTree;
     const QString path = m_openPath;
-    setViewer(QStringLiteral("%1 at %2").arg(path, m_revisionLabel), QStringLiteral("Loading…"),
-              false);
+    const QString title = workingTree ? QStringLiteral("%1 — working tree").arg(path)
+                                      : QStringLiteral("%1 at %2").arg(path, m_revisionLabel);
+    setContent(title, QStringLiteral("Loading…"), false);
     track(true);
-    m_session->readAsync<QString>(
+    m_session->readAsync<LoadedFile>(
         this,
-        [revision, path](RepoSession& session) {
+        [revision, path, workingTree](RepoSession& session) {
             std::string bytes;
             QString error;
-            if (!session.fileAtRevision(revision, path, &bytes, &error)) {
-                return QStringLiteral("Cannot read %1: %2").arg(path, error);
+            const bool read = workingTree ? session.workingFileContent(path, &bytes, &error)
+                                          : session.fileAtRevision(revision, path, &bytes, &error);
+            if (!read) {
+                LoadedFile missing;
+                missing.text = QStringLiteral("Cannot read %1: %2").arg(path, error);
+                return missing;
             }
-            return shownText(bytes);
+            return loadedFile(bytes, workingTree);
         },
-        [this, generation, path](QString text) {
+        [this, generation, path, title](LoadedFile file) {
             track(false);
-            if (generation == m_generation && path == m_openPath) {
-                setViewer(QStringLiteral("%1 at %2").arg(path, m_revisionLabel), text, false);
+            if (generation != m_generation || path != m_openPath) {
+                return;
             }
+            m_crlf = file.crlf;
+            m_viewer->setHighlighting(path, file.size);
+            setContent(file.editable ? title : title + QStringLiteral(" · read-only"), file.text,
+                       file.editable);
         });
+}
+
+void FileBrowser::setContent(const QString& title, const QString& text, bool editable) {
+    m_contentTitle = title;
+    m_editable = editable;
+    m_viewer->setPlainText(text);
+    m_viewer->setReadOnly(!editable);
+    m_viewer->setTextInteractionFlags(editable ? Qt::TextEditorInteraction
+                                               : Qt::TextSelectableByMouse |
+                                                     Qt::TextSelectableByKeyboard);
+    m_viewer->document()->setModified(false);
+    updateSaveState();
+}
+
+void FileBrowser::updateSaveState() {
+    const bool dirty = modified();
+    m_viewerTitle->setFullText(dirty ? m_contentTitle + QStringLiteral(" · modified")
+                                     : m_contentTitle);
+    m_save->setVisible(m_editable);
+    m_save->setEnabled(dirty);
+}
+
+bool FileBrowser::editable() const {
+    return m_editable;
+}
+
+bool FileBrowser::modified() const {
+    return m_editable && m_viewer->document()->isModified();
+}
+
+bool FileBrowser::save() {
+    if (!m_session || !modified()) {
+        return false;
+    }
+    QString text = m_viewer->toPlainText();
+    if (m_crlf) {
+        text.replace(QLatin1Char('\n'), QStringLiteral("\r\n"));
+    }
+    const QByteArray bytes = text.toUtf8();
+    QString error;
+    if (!m_session->writeWorkingFile(
+            m_openPath, std::string(bytes.constData(), static_cast<std::size_t>(bytes.size())),
+            &error)) {
+        if (!m_headless) {
+            QMessageBox::warning(this, QStringLiteral("Cannot save"), error);
+        }
+        return false;
+    }
+    m_viewer->document()->setModified(false);
+    emit fileSaved(m_openPath);
+    return true;
 }
 
 void FileBrowser::showFileHistory() {
@@ -379,14 +616,17 @@ void FileBrowser::showLineHistory(int first, int last) {
         return;
     }
     const quint64 generation = m_generation;
-    const QString revision = m_revision;
+    // The working tree's lines are asked of HEAD: `git log -L` reads committed text.
+    const QString revision = m_workingTree ? QStringLiteral("HEAD") : m_revision;
     const QString path = m_openPath;
-    const QString title = first == last
-                              ? QStringLiteral("History of line %1 of %2").arg(first).arg(path)
-                              : QStringLiteral("History of lines %1–%2 of %3")
-                                    .arg(first)
-                                    .arg(last)
-                                    .arg(path);
+    QString title = first == last ? QStringLiteral("History of line %1 of %2").arg(first).arg(path)
+                                  : QStringLiteral("History of lines %1–%2 of %3")
+                                        .arg(first)
+                                        .arg(last)
+                                        .arg(path);
+    if (m_workingTree) {
+        title += QStringLiteral(" (as committed in HEAD)");
+    }
     m_historyTitle->setFullText(title + QStringLiteral(" — reading…"));
     track(true);
     m_session->readAsync<std::vector<FileHistoryEntry>>(
@@ -410,8 +650,7 @@ void FileBrowser::fillHistory(const std::vector<FileHistoryEntry>& entries, cons
         item->setText(0, QString::fromStdString(entry.id).left(8));
         item->setText(1, QString::fromStdString(entry.summary));
         item->setText(2, QString::fromStdString(entry.author));
-        item->setText(3, QDateTime::fromSecsSinceEpoch(entry.whenUnix)
-                             .toString(QStringLiteral("yyyy-MM-dd HH:mm")));
+        item->setText(3, timeText(entry.whenUnix));
         item->setToolTip(1, QString::fromStdString(entry.summary));
         item->setFont(0, theme::monoFont());
     }
@@ -425,38 +664,42 @@ void FileBrowser::showHistoryEntry(int row) {
         return;
     }
     const FileHistoryEntry entry = m_entries[static_cast<std::size_t>(row)];
-    const QString title = QStringLiteral("%1 in %2 — %3")
-                              .arg(QString::fromStdString(entry.path),
-                                   QString::fromStdString(entry.id).left(8),
-                                   QString::fromStdString(entry.summary));
-    if (!entry.patch.empty()) {
-        setViewer(title, QString::fromStdString(entry.patch), true);
-        return;
-    }
     const quint64 generation = m_generation;
     const QString path = m_openPath;
-    setViewer(title, QStringLiteral("Loading…"), true);
+    m_viewerStack->setCurrentIndex(1);
+    m_changes->setLoading(true);
     track(true);
-    m_session->readAsync<QString>(
+    m_session->readAsync<DiffView::Document>(
         this,
         [entry](RepoSession& session) {
-            return session.commitFilePatch(QString::fromStdString(entry.id),
-                                           QString::fromStdString(entry.path));
+            const QString commit = QString::fromStdString(entry.id);
+            const QString atPath = QString::fromStdString(entry.path);
+            DiffView::Document document;
+            document.path = atPath;
+            if (!entry.patch.empty()) {
+                // A line range's history carries its own change, to those lines only.
+                const std::vector<FileDiff> parsed = parseUnifiedDiff(entry.patch);
+                if (!parsed.empty()) {
+                    document.diff = parsed.front();
+                }
+            } else {
+                document.diff = session.commitFileDiff(commit, atPath);
+            }
+            std::string bytes;
+            if (session.fileAtRevision(commit, atPath, &bytes, nullptr)) {
+                document.revisionContent = std::move(bytes);
+                document.hasRevision = true;
+            }
+            document.contentLabel = commit.left(7);
+            return document;
         },
-        [this, generation, path, title](QString patch) {
+        [this, generation, path](DiffView::Document document) {
             track(false);
             if (generation == m_generation && path == m_openPath) {
-                setViewer(title, patch.isEmpty() ? QStringLiteral("No change to show.") : patch,
-                          true);
+                m_changes->show(document);
+                m_changes->setLoading(false);
             }
         });
-}
-
-void FileBrowser::setViewer(const QString& title, const QString& text, bool patch) {
-    m_viewerTitle->setFullText(title);
-    m_viewer->setPatchMode(patch);
-    m_viewer->setPlainText(text);
-    m_backToFile->setVisible(patch && !m_openPath.isEmpty());
 }
 
 void FileBrowser::showViewerMenu(const QPoint& pos) {
@@ -472,16 +715,20 @@ void FileBrowser::showViewerMenu(const QPoint& pos) {
     if (cursor.hasSelection() && endCursor.positionInBlock() == 0 && last > first) {
         --last;
     }
-    const bool content = !m_backToFile->isVisible() && !m_openPath.isEmpty();
     QAction* lines = menu.addAction(
         first == last ? QStringLiteral("History of line %1").arg(first)
                       : QStringLiteral("History of lines %1–%2").arg(first).arg(last));
-    lines->setEnabled(content);
+    lines->setEnabled(!m_openPath.isEmpty());
     QAction* whole = menu.addAction(QStringLiteral("History of the whole file"));
     whole->setEnabled(!m_openPath.isEmpty());
     menu.addSeparator();
     QAction* copy = menu.addAction(QStringLiteral("Copy"));
     copy->setEnabled(cursor.hasSelection());
+    QAction* saveAction = nullptr;
+    if (m_editable) {
+        saveAction = menu.addAction(QStringLiteral("Save"));
+        saveAction->setEnabled(modified());
+    }
     QAction* chosen = menu.exec(m_viewer->viewport()->mapToGlobal(pos));
     if (chosen == lines) {
         showLineHistory(first, last);
@@ -489,6 +736,8 @@ void FileBrowser::showViewerMenu(const QPoint& pos) {
         showFileHistory();
     } else if (chosen == copy) {
         m_viewer->copy();
+    } else if (chosen && chosen == saveAction) {
+        save();
     }
 }
 
@@ -522,6 +771,10 @@ QString FileBrowser::viewerTitle() const {
 
 QString FileBrowser::viewerText() const {
     return m_viewer->toPlainText();
+}
+
+bool FileBrowser::showingChanges() const {
+    return m_viewerStack->currentIndex() == 1;
 }
 
 void FileBrowser::expandForDiagnostics(const QString& directory) {

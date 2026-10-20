@@ -212,6 +212,8 @@ public:
                                               const QString& revision = QString()) const;
     std::vector<TreeEntry> treeEntries(const QString& revision, const QString& directory) const;
     QString commitFilePatch(const QString& commit, const QString& path) const;
+    std::vector<std::string> workingTreeFiles() const;
+    bool writeWorkingFile(const QString& path, const std::string& bytes, QString* errorOut);
     std::vector<FileHistoryEntry> lineHistory(const QString& revision, const QString& path,
                                               int first, int last) const;
 
