@@ -101,7 +101,19 @@ public:
 
     /// The commits that touched `path`, newest first, following renames
     /// (`git log --follow`); libgit2's revwalk has no equivalent.
-    std::vector<FileHistoryEntry> fileHistory(const std::string& path) const;
+    std::vector<FileHistoryEntry> fileHistory(const std::string& path,
+                                              const std::string& revision = {}) const;
+    /// The entries of `directory` (empty for the top) in `revision`'s tree: folders
+    /// first, then by name.
+    std::vector<TreeEntry> treeEntries(const std::string& revision,
+                                       const std::string& directory) const;
+    /// The change `commit` made to `path`, as git prints it (`git show`).
+    std::string commitFilePatch(const Oid& commit, const std::string& path) const;
+    /// The commits that changed lines `first`..`last` (1-based) of `path` as it is in
+    /// `revision`, newest first, each with the change to those lines (`git log -L`).
+    std::vector<FileHistoryEntry> lineHistory(const std::string& revision,
+                                              const std::string& path, int first,
+                                              int last) const;
 
     std::vector<ReflogEntry> reflog(std::size_t limit) const;
 

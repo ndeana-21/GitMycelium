@@ -4,6 +4,7 @@
 
 #include "ui/badge_flight.h"
 #include "ui/drop_point.h"
+#include "ui/file_browser.h"
 
 #include "model/commit_model.h"
 #include "model/date_format.h"
@@ -480,6 +481,9 @@ void MainWindow::bindViews() {
     updateGraphSkeleton();
     if (m_conflictView) {
         m_conflictView->setSession(m_session);
+    }
+    if (m_fileBrowser) {
+        m_fileBrowser->setSession(m_session);
     }
     // The selection model is replaced when the *model* changes, but it survives a
     // rebind to the same model — and bindViews runs on every activation. The
@@ -1345,12 +1349,38 @@ void MainWindow::buildUi() {
     m_centerStack = new QStackedWidget(this);
     m_centerStack->addWidget(m_commitView);
     m_centerStack->addWidget(m_diffView);
+    m_fileBrowser = new FileBrowser(this);
+    m_fileBrowser->setSession(m_session);
+    connect(m_fileBrowser, &FileBrowser::commitActivated, this, &MainWindow::revealCommit);
+    m_centerStack->addWidget(m_fileBrowser);
     sizeToCurrentPage(m_centerStack);
+
+    // History and Files share the centre: the graph (with a file's diff over it), or the
+    // tree of one commit to read and trace files in.
+    auto* center = new QWidget(this);
+    auto* centerLayout = new QVBoxLayout(center);
+    centerLayout->setContentsMargins(0, 0, 0, 0);
+    centerLayout->setSpacing(0);
+    m_centerTabs = new QTabBar(center);
+    m_centerTabs->setObjectName(QStringLiteral("centerTabs"));
+    m_centerTabs->addTab(QStringLiteral("History"));
+    m_centerTabs->addTab(QStringLiteral("Files"));
+    m_centerTabs->setDrawBase(false);
+    m_centerTabs->setExpanding(false);
+    connect(m_centerTabs, &QTabBar::currentChanged, this, [this](int index) {
+        if (index == 1) {
+            showFilesPage();
+        } else {
+            showGraphPage();
+        }
+    });
+    centerLayout->addWidget(m_centerTabs);
+    centerLayout->addWidget(m_centerStack, 1);
 
     auto* history = new PanelSplitter(this);
     m_history = history;
     history->addWidget(m_refPanel);
-    history->addWidget(m_centerStack);
+    history->addWidget(center);
     history->addWidget(m_details);
     history->setCollapsible(1, false);
     connect(history, &PanelSplitter::panelCollapsedChanged, this, [this](int index, bool collapsed) {
@@ -3322,6 +3352,10 @@ void MainWindow::showDiffPage() {
     if (!m_centerStack || m_centerStack->currentWidget() == m_diffView) {
         return;
     }
+    if (m_centerTabs) {
+        const QSignalBlocker block(m_centerTabs);
+        m_centerTabs->setCurrentIndex(0);
+    }
     m_centerStack->setCurrentWidget(m_diffView);
     if (m_refsVisible && m_history && !m_history->isPanelCollapsed(0)) {
         m_foldingPanel = true;
@@ -3331,9 +3365,46 @@ void MainWindow::showDiffPage() {
     }
 }
 
+void MainWindow::showFilesPage() {
+    if (!m_centerStack || !m_fileBrowser) {
+        return;
+    }
+    if (m_centerTabs) {
+        const QSignalBlocker block(m_centerTabs);
+        m_centerTabs->setCurrentIndex(1);
+    }
+    m_centerStack->setCurrentWidget(m_fileBrowser);
+    if (!m_session || !m_session->isOpen()) {
+        return;
+    }
+    QString revision = m_selectedCommitId;
+    QString label;
+    if (revision.isEmpty()) {
+        const RepoInfo info = m_session->info();
+        revision = QString::fromStdString(info.headId);
+        label = info.headBranch.empty()
+                    ? QStringLiteral("HEAD %1").arg(revision.left(8))
+                    : QStringLiteral("%1 (%2)").arg(QString::fromStdString(info.headBranch),
+                                                    revision.left(8));
+    } else {
+        const int row = m_commitModel->rowForCommit(revision);
+        const CommitInfo* commit = row >= 0 ? m_commitModel->commitAt(row) : nullptr;
+        label = commit ? QStringLiteral("%1 %2").arg(revision.left(8),
+                                                     QString::fromStdString(commit->summary))
+                       : revision.left(8);
+    }
+    if (!revision.isEmpty()) {
+        m_fileBrowser->setRevision(revision, label);
+    }
+}
+
 void MainWindow::showGraphPage() {
     if (!m_centerStack) {
         return;
+    }
+    if (m_centerTabs) {
+        const QSignalBlocker block(m_centerTabs);
+        m_centerTabs->setCurrentIndex(0);
     }
     m_centerStack->setCurrentWidget(m_commitView);
     if (m_refsHiddenForDiff) {

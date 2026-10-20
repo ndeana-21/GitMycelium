@@ -194,6 +194,8 @@ repositories is sent. Turn it off in **Preferences → Appearance → Updates**.
 - One search window (`Ctrl+P`, `Ctrl+F`): commands, branches and commits, matched by
   message, author, hash or branch name, optionally within a date range, with results
   streaming in as git finds them.
+- A Files tab: any commit's tree, a file's history across renames, and the history of
+  selected lines (`git log -L`).
 - Hide any branch, folder or section from the graph with the eye in the branch panel;
   fold merged branches into their merge commits.
 - Command palette with every action, and a rebindable keymap.

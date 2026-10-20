@@ -60,6 +60,7 @@ class CommitGraphView;
 class ConflictView;
 class RefModel;
 class RefTreeView;
+class FileBrowser;
 class RepoSession;
 class RepoWatcher;
 class StartPage;
@@ -439,6 +440,13 @@ private:
     /// After a local operation: the graph re-reads what is on screen in place
     /// (`CommitModel::refresh`); a fetch or pull, a new filter or a new tab resets.
     void refreshHistory();
+    /// The Files tab: the tree of the selected commit (HEAD when none), on the graph's
+    /// place.
+    void showFilesPage();
+public:
+    FileBrowser* fileBrowserForDiagnostics() const { return m_fileBrowser; }
+    void showFilesPageForDiagnostics() { showFilesPage(); }
+private:
     /// True when the refs or HEAD moved since the last refresh (or nothing was known).
     bool syncHistoryWithRefs(const RepoInfo& info, const std::vector<RefInfo>& refs);
     QWidget* buildReferencePanel();
@@ -838,6 +846,8 @@ private:
     StartPage* m_startPage = nullptr;
     bool m_headless = false;
     QStackedWidget* m_centerStack = nullptr;
+    QTabBar* m_centerTabs = nullptr;
+    FileBrowser* m_fileBrowser = nullptr;
     QAction* m_refsAction = nullptr;
     QAction* m_detailsAction = nullptr;
     QAction* m_mergedRemotesAction = nullptr;

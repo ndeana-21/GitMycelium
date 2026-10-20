@@ -208,7 +208,12 @@ public:
     FileDiff workdirFileDiffAgainst(const QString& revision, const QString& path) const;
 
     std::vector<BlameLine> blame(const QString& path, const QString& revision = {}) const;
-    std::vector<FileHistoryEntry> fileHistory(const QString& path) const;
+    std::vector<FileHistoryEntry> fileHistory(const QString& path,
+                                              const QString& revision = QString()) const;
+    std::vector<TreeEntry> treeEntries(const QString& revision, const QString& directory) const;
+    QString commitFilePatch(const QString& commit, const QString& path) const;
+    std::vector<FileHistoryEntry> lineHistory(const QString& revision, const QString& path,
+                                              int first, int last) const;
 
     /// Puts `path` back the way `revision` has it: into the working tree, or into the
     /// index when `staged`. This is `git restore`.

@@ -8,6 +8,10 @@ All notable changes to GitMycelium are recorded here. The format follows
 
 ### Added
 
+- **A Files tab beside the graph.** It shows the selected commit's files as a tree.
+  Open a file to read it, see every commit that changed it (renames followed) and the
+  change each one made. Select lines and right-click "History of lines" to see only
+  the commits that changed those lines, like JetBrains' "Show History for Selection".
 - **Cherry-pick by dragging.** Drag a commit (or the selected commits) from the graph
   onto a local branch's label, or onto the branch in the branch panel. A branch that
   is not checked out gets the commits without a checkout: your working tree and

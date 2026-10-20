@@ -348,9 +348,30 @@ std::vector<BlameLine> RepoSession::blame(const QString& path, const QString& re
     });
 }
 
-std::vector<FileHistoryEntry> RepoSession::fileHistory(const QString& path) const {
+std::vector<FileHistoryEntry> RepoSession::fileHistory(const QString& path,
+                                                      const QString& revision) const {
     return readOr(std::vector<FileHistoryEntry>{}, [&](Repository& repo) {
-        return repo.fileHistory(path.toStdString());
+        return repo.fileHistory(path.toStdString(), revision.toStdString());
+    });
+}
+
+std::vector<TreeEntry> RepoSession::treeEntries(const QString& revision,
+                                                const QString& directory) const {
+    return readOr(std::vector<TreeEntry>{}, [&](Repository& repo) {
+        return repo.treeEntries(revision.toStdString(), directory.toStdString());
+    });
+}
+
+QString RepoSession::commitFilePatch(const QString& commit, const QString& path) const {
+    return readOr(QString(), [&](Repository& repo) {
+        return QString::fromStdString(repo.commitFilePatch(commit.toStdString(), path.toStdString()));
+    });
+}
+
+std::vector<FileHistoryEntry> RepoSession::lineHistory(const QString& revision, const QString& path,
+                                                      int first, int last) const {
+    return readOr(std::vector<FileHistoryEntry>{}, [&](Repository& repo) {
+        return repo.lineHistory(revision.toStdString(), path.toStdString(), first, last);
     });
 }
 

@@ -3180,37 +3180,160 @@ std::vector<BlameLine> Repository::blame(const std::string& path, const Oid& rev
     return out;
 }
 
-std::vector<FileHistoryEntry> Repository::fileHistory(const std::string& path) const {
+std::vector<FileHistoryEntry> Repository::fileHistory(const std::string& path,
+                                                     const std::string& revision) const {
     const std::string workDir = workDirOf(m_repo).string();
     if (workDir.empty()) {
         fail("cannot read file history in a bare repository");
     }
-    // A tab between fields, not a space: a subject holds spaces, and a path can too.
-    const ProcessResult run =
-        runGit({"log", "--follow", "--format=%H%x09%at%x09%an%x09%s", "--", path}, workDir);
+    // A record separator before each commit, a tab between fields (a subject holds
+    // spaces), and the path the file had in that commit after the header.
+    std::vector<std::string> args = {"-c", "core.quotepath=false", "log", "--follow",
+                                     "--name-only", "--format=%x1e%H%x09%at%x09%an%x09%s"};
+    if (!revision.empty()) {
+        args.push_back(revision);
+    }
+    args.push_back("--");
+    args.push_back(path);
+    const ProcessResult run = runGit(args, workDir);
     if (run.exitCode != 0) {
-        fail("cannot read the history of " + path + ": " +
-             failureText(run));
+        fail("cannot read the history of " + path + ": " + failureText(run));
     }
 
     std::vector<FileHistoryEntry> out;
-    std::istringstream stream(run.out);
-    std::string line;
-    while (std::getline(stream, line)) {
-        if (line.empty()) {
-            continue;
-        }
-        const std::size_t t1 = line.find('\t');
-        const std::size_t t2 = t1 == std::string::npos ? std::string::npos : line.find('\t', t1 + 1);
-        const std::size_t t3 = t2 == std::string::npos ? std::string::npos : line.find('\t', t2 + 1);
-        if (t1 == std::string::npos || t2 == std::string::npos || t3 == std::string::npos) {
+    std::size_t start = run.out.find('\x1e');
+    while (start != std::string::npos) {
+        const std::size_t end = run.out.find('\x1e', start + 1);
+        const std::string record = run.out.substr(start + 1, end == std::string::npos
+                                                                  ? std::string::npos
+                                                                  : end - start - 1);
+        start = end;
+        const std::size_t eol = record.find('\n');
+        const std::string header = record.substr(0, eol);
+        const std::size_t t1 = header.find('\t');
+        const std::size_t t2 = t1 == std::string::npos ? std::string::npos : header.find('\t', t1 + 1);
+        const std::size_t t3 = t2 == std::string::npos ? std::string::npos : header.find('\t', t2 + 1);
+        if (t3 == std::string::npos) {
             continue;
         }
         FileHistoryEntry entry;
-        entry.id = line.substr(0, t1);
-        entry.whenUnix = std::stoll(line.substr(t1 + 1, t2 - t1 - 1));
-        entry.author = line.substr(t2 + 1, t3 - t2 - 1);
-        entry.summary = line.substr(t3 + 1);
+        entry.id = header.substr(0, t1);
+        entry.whenUnix = std::stoll(header.substr(t1 + 1, t2 - t1 - 1));
+        entry.author = header.substr(t2 + 1, t3 - t2 - 1);
+        entry.summary = header.substr(t3 + 1);
+        std::istringstream names(eol == std::string::npos ? std::string() : record.substr(eol + 1));
+        for (std::string line; std::getline(names, line);) {
+            if (!line.empty()) {
+                entry.path = line;
+                break;
+            }
+        }
+        if (entry.path.empty()) {
+            entry.path = path;
+        }
+        out.push_back(std::move(entry));
+    }
+    return out;
+}
+
+std::vector<TreeEntry> Repository::treeEntries(const std::string& revision,
+                                               const std::string& directory) const {
+    git_object* object = nullptr;
+    const std::string spec = (revision.empty() ? std::string("HEAD") : revision) + "^{tree}";
+    check(git_revparse_single(&object, m_repo, spec.c_str()), "cannot read the tree of " + spec);
+    git_tree* tree = reinterpret_cast<git_tree*>(object);
+    if (!directory.empty()) {
+        git_tree_entry* entry = nullptr;
+        const int found = git_tree_entry_bypath(&entry, tree, directory.c_str());
+        git_tree* sub = nullptr;
+        const int opened = found == 0 && git_tree_entry_type(entry) == GIT_OBJECT_TREE
+                               ? git_tree_lookup(&sub, m_repo, git_tree_entry_id(entry))
+                               : -1;
+        if (entry) {
+            git_tree_entry_free(entry);
+        }
+        git_tree_free(tree);
+        check(opened, "no folder " + directory + " in " + spec);
+        tree = sub;
+    }
+    std::vector<TreeEntry> out;
+    const std::size_t count = git_tree_entrycount(tree);
+    out.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        const git_tree_entry* entry = git_tree_entry_byindex(tree, i);
+        TreeEntry item;
+        item.name = git_tree_entry_name(entry);
+        item.directory = git_tree_entry_type(entry) == GIT_OBJECT_TREE;
+        item.submodule = git_tree_entry_type(entry) == GIT_OBJECT_COMMIT;
+        out.push_back(std::move(item));
+    }
+    git_tree_free(tree);
+    std::stable_sort(out.begin(), out.end(), [](const TreeEntry& a, const TreeEntry& b) {
+        return a.directory > b.directory;
+    });
+    return out;
+}
+
+std::string Repository::commitFilePatch(const Oid& commit, const std::string& path) const {
+    const ProcessResult run =
+        runGit({"-c", "core.quotepath=false", "show", "--format=", "--no-color", "--no-ext-diff",
+                "-M", commit, "--", path},
+               workDirOf(m_repo).string());
+    if (run.exitCode != 0) {
+        fail("cannot show " + path + " in " + commit.substr(0, 7) + ": " + failureText(run));
+    }
+    return run.out;
+}
+
+std::vector<FileHistoryEntry> Repository::lineHistory(const std::string& revision,
+                                                      const std::string& path, int first,
+                                                      int last) const {
+    const std::string range = "-L" + std::to_string(first) + "," + std::to_string(last) + ":" + path;
+    const ProcessResult run =
+        runGit({"-c", "core.quotepath=false", "log", "--no-color", "--no-ext-diff",
+                "--format=%x1e%H%x1f%at%x1f%an%x1f%s", range,
+                revision.empty() ? std::string("HEAD") : revision},
+               workDirOf(m_repo).string());
+    if (run.exitCode != 0) {
+        fail("cannot read the history of lines " + std::to_string(first) + "-" +
+             std::to_string(last) + " of " + path + ": " + failureText(run));
+    }
+    std::vector<FileHistoryEntry> out;
+    std::size_t start = run.out.find('\x1e');
+    while (start != std::string::npos) {
+        const std::size_t end = run.out.find('\x1e', start + 1);
+        const std::string record = run.out.substr(start + 1, end == std::string::npos
+                                                                  ? std::string::npos
+                                                                  : end - start - 1);
+        start = end;
+        const std::size_t eol = record.find('\n');
+        const std::string header = record.substr(0, eol);
+        std::array<std::string, 4> fields;
+        std::size_t from = 0;
+        for (std::size_t i = 0; i < fields.size(); ++i) {
+            const std::size_t cut = i + 1 < fields.size() ? header.find('\x1f', from) : header.size();
+            if (cut == std::string::npos) {
+                break;
+            }
+            fields[i] = header.substr(from, cut - from);
+            from = cut + 1;
+        }
+        if (fields[0].empty()) {
+            continue;
+        }
+        FileHistoryEntry entry;
+        entry.id = fields[0];
+        entry.whenUnix = std::strtoll(fields[1].c_str(), nullptr, 10);
+        entry.author = fields[2];
+        entry.summary = fields[3];
+        entry.path = path;
+        if (eol != std::string::npos) {
+            std::string patch = record.substr(eol + 1);
+            while (!patch.empty() && patch.front() == '\n') {
+                patch.erase(0, 1);
+            }
+            entry.patch = std::move(patch);
+        }
         out.push_back(std::move(entry));
     }
     return out;

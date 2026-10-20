@@ -100,6 +100,18 @@ struct FileHistoryEntry {
     std::string summary;
     std::string author;
     std::int64_t whenUnix = 0;
+    /// The file's path in this commit: `--follow` crosses renames, and the change a
+    /// commit made is asked for under the name the file had then.
+    std::string path;
+    /// For a line range's history (`git log -L`): the change to those lines alone.
+    std::string patch;
+};
+
+/// One entry of a directory in a commit's tree.
+struct TreeEntry {
+    std::string name;
+    bool directory = false;
+    bool submodule = false;
 };
 
 enum class ChangeKind {

@@ -208,6 +208,8 @@ add_library(gmc_ui STATIC
     ui/skeleton.cpp
     ui/skeleton.h
     ui/elided_label.cpp
+    ui/file_browser.cpp
+    ui/file_browser.h
     ui/elided_label.h
     ui/flow_layout.cpp
     ui/flow_layout.h
