@@ -398,6 +398,19 @@ struct PickOntoResult {
     std::vector<std::string> conflicts;
 };
 
+/// What applying a commit's change to the working tree did, path by path. The index is
+/// never touched: everything lands as an unstaged change.
+struct ApplyChangesResult {
+    std::vector<std::string> applied;
+    /// Merged with local edits that overlap the change: the file carries conflict
+    /// markers, or (a binary file, a deletion over an edit) was left as it was.
+    std::vector<std::string> conflicted;
+    /// Already as the commit has it.
+    std::vector<std::string> unchanged;
+    /// Not files: a submodule pointer, a symbolic link.
+    std::vector<std::string> skipped;
+};
+
 struct RebaseCandidate {
     Oid id;
     std::string subject;

@@ -139,6 +139,9 @@ signals:
     void refDroppedOnCommit(gk::RefModel::DraggedRef source, QString commitId);
     /// Commits dropped on a local branch's label, newest first: pick them onto it.
     void commitsDroppedOnBranch(QStringList commitIds, QString branch);
+    /// Commits dropped on this checkout's working-tree row, newest first: their
+    /// changes go into the working tree, unstaged.
+    void commitsDroppedOnWorkingTree(QStringList commitIds);
     /// A label was left-clicked: focused, not checked out. Focus decides which
     /// branch gets the leftmost lane in the graph.
     void refFocused(QString shortName);
@@ -161,6 +164,9 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
     void startDrag(Qt::DropActions supportedActions) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
+    /// Where a drop of commits on this checkout's working-tree row is shown; null
+    /// when `pos` is not over that row.
+    QRect workingTreeDropRect(const QPoint& pos) const;
     /// Pixels per tick to scroll for a drag at `y` in the viewport: negative near or
     /// above the top, positive near or below the bottom, 0 elsewhere.
     int dragScrollStepAt(int y) const;

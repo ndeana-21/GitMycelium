@@ -19,7 +19,9 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <sstream>
 #include <unordered_set>
@@ -4524,6 +4526,189 @@ Oid Repository::cherryPick(const std::vector<Oid>& commits) {
         fail("cannot cherry-pick: " + failureText(run));
     }
     return resolveRevision("HEAD");
+}
+
+namespace {
+
+/// A blob as the working tree would have it: through libgit2's own filters (line
+/// endings, `ident`), so it compares with the file on disk byte for byte.
+std::optional<std::string> checkoutBytes(git_repository* repo, const git_oid& id,
+                                         const std::string& path) {
+    if (git_oid_is_zero(&id)) {
+        return std::nullopt;
+    }
+    git_blob* blob = nullptr;
+    if (git_blob_lookup(&blob, repo, &id) != 0) {
+        return std::nullopt;
+    }
+    const std::unique_ptr<git_blob, decltype(&git_blob_free)> blobGuard(blob, git_blob_free);
+    git_buf out = GIT_BUF_INIT;
+    git_blob_filter_options options = GIT_BLOB_FILTER_OPTIONS_INIT;
+    if (git_blob_filter(&out, blob, path.c_str(), &options) != 0) {
+        return std::string(static_cast<const char*>(git_blob_rawcontent(blob)),
+                           static_cast<std::size_t>(git_blob_rawsize(blob)));
+    }
+    std::string bytes(out.ptr, out.size);
+    git_buf_dispose(&out);
+    return bytes;
+}
+
+std::optional<std::string> diskBytes(const std::filesystem::path& file) {
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(file, error)) {
+        return std::nullopt;
+    }
+    std::ifstream in(file, std::ios::binary);
+    if (!in) {
+        return std::nullopt;
+    }
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+void writeDiskBytes(const std::filesystem::path& file, const std::string& bytes, bool executable) {
+    std::filesystem::create_directories(file.parent_path());
+    {
+        std::ofstream out(file, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            fail("cannot write " + file.string());
+        }
+        out << bytes;
+    }
+    std::error_code ignored;
+    const auto exec = std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec |
+                      std::filesystem::perms::others_exec;
+    std::filesystem::permissions(file, exec,
+                                 executable ? std::filesystem::perm_options::add
+                                            : std::filesystem::perm_options::remove,
+                                 ignored);
+}
+
+bool looksBinary(const std::string& bytes) {
+    return bytes.find('\0', 0) < std::min<std::size_t>(bytes.size(), 8000);
+}
+
+/// diff3-style merge of one file's three versions. Empty when the merge cannot be
+/// made (a side is binary).
+std::optional<std::pair<std::string, bool>> mergeText(const std::string& base,
+                                                      const std::string& ours,
+                                                      const std::string& theirs,
+                                                      const std::string& path,
+                                                      const std::string& theirLabel) {
+    if (looksBinary(base) || looksBinary(ours) || looksBinary(theirs)) {
+        return std::nullopt;
+    }
+    git_merge_file_input ancestorIn = GIT_MERGE_FILE_INPUT_INIT;
+    ancestorIn.ptr = base.data();
+    ancestorIn.size = base.size();
+    ancestorIn.path = path.c_str();
+    git_merge_file_input oursIn = GIT_MERGE_FILE_INPUT_INIT;
+    oursIn.ptr = ours.data();
+    oursIn.size = ours.size();
+    oursIn.path = path.c_str();
+    git_merge_file_input theirsIn = GIT_MERGE_FILE_INPUT_INIT;
+    theirsIn.ptr = theirs.data();
+    theirsIn.size = theirs.size();
+    theirsIn.path = path.c_str();
+    git_merge_file_options options = GIT_MERGE_FILE_OPTIONS_INIT;
+    options.our_label = "working tree";
+    options.their_label = theirLabel.c_str();
+    git_merge_file_result merged{};
+    if (git_merge_file(&merged, &ancestorIn, &oursIn, &theirsIn, &options) != 0) {
+        return std::nullopt;
+    }
+    std::pair<std::string, bool> out(std::string(merged.ptr, merged.len), merged.automergeable != 0);
+    git_merge_file_result_free(&merged);
+    return out;
+}
+
+} // namespace
+
+ApplyChangesResult Repository::applyCommitToWorkdir(const std::string& revision) {
+    const std::filesystem::path workDir = workDirOf(m_repo);
+    if (workDir.empty()) {
+        fail("a bare repository has no working tree to apply to");
+    }
+    const git_oid id = resolveRevisionToCommit(m_repo, revision);
+    git_commit* commit = nullptr;
+    check(git_commit_lookup(&commit, m_repo, &id), "cannot read commit " + revision);
+    const std::unique_ptr<git_commit, decltype(&git_commit_free)> commitGuard(commit,
+                                                                               git_commit_free);
+    git_tree* after = nullptr;
+    check(git_commit_tree(&after, commit), "cannot read the commit's tree");
+    const std::unique_ptr<git_tree, decltype(&git_tree_free)> afterGuard(after, git_tree_free);
+    git_tree* before = nullptr;
+    if (git_commit_parentcount(commit) > 0) {
+        git_commit* parent = nullptr;
+        check(git_commit_parent(&parent, commit, 0), "cannot read the commit's parent");
+        const int rc = git_commit_tree(&before, parent);
+        git_commit_free(parent);
+        check(rc, "cannot read the parent's tree");
+    }
+    const std::unique_ptr<git_tree, decltype(&git_tree_free)> beforeGuard(before, git_tree_free);
+
+    git_diff* diff = nullptr;
+    git_diff_options options = GIT_DIFF_OPTIONS_INIT;
+    options.flags |= GIT_DIFF_INCLUDE_TYPECHANGE;
+    check(git_diff_tree_to_tree(&diff, m_repo, before, after, &options),
+          "cannot read the commit's change");
+    const std::unique_ptr<git_diff, decltype(&git_diff_free)> diffGuard(diff, git_diff_free);
+
+    char shortId[8] = {};
+    git_oid_tostr(shortId, sizeof shortId, &id);
+    const std::string label = std::string(shortId) + " " + git_commit_summary(commit);
+
+    ApplyChangesResult result;
+    const std::size_t count = git_diff_num_deltas(diff);
+    for (std::size_t i = 0; i < count; ++i) {
+        const git_diff_delta* delta = git_diff_get_delta(diff, i);
+        const std::string path = delta->new_file.path ? delta->new_file.path : delta->old_file.path;
+        const auto notAFile = [](git_filemode_t mode) {
+            return mode == GIT_FILEMODE_COMMIT || mode == GIT_FILEMODE_LINK;
+        };
+        if (notAFile(static_cast<git_filemode_t>(delta->old_file.mode)) ||
+            notAFile(static_cast<git_filemode_t>(delta->new_file.mode))) {
+            result.skipped.push_back(path);
+            continue;
+        }
+        const std::filesystem::path file = workDir / path;
+        const std::optional<std::string> base = checkoutBytes(m_repo, delta->old_file.id, path);
+        const std::optional<std::string> theirs = checkoutBytes(m_repo, delta->new_file.id, path);
+        const std::optional<std::string> ours = diskBytes(file);
+        const bool executable = delta->new_file.mode == GIT_FILEMODE_BLOB_EXECUTABLE;
+
+        if (ours == theirs) {
+            result.unchanged.push_back(path);
+            continue;
+        }
+        if (ours == base) {
+            // Untouched since the parent: the commit's version (or its deletion) as is.
+            if (theirs) {
+                writeDiskBytes(file, *theirs, executable);
+            } else {
+                std::filesystem::remove(file);
+            }
+            result.applied.push_back(path);
+            continue;
+        }
+        if (!ours || !theirs) {
+            // Deleted on one side and edited on the other: nothing to merge into.
+            result.conflicted.push_back(path);
+            continue;
+        }
+        const auto merged = mergeText(base.value_or(std::string()), *ours, *theirs, path, label);
+        if (!merged) {
+            result.conflicted.push_back(path);
+            continue;
+        }
+        if (merged->second && merged->first == *ours) {
+            // The local edits already hold the change.
+            result.unchanged.push_back(path);
+            continue;
+        }
+        writeDiskBytes(file, merged->first, executable);
+        (merged->second ? result.applied : result.conflicted).push_back(path);
+    }
+    return result;
 }
 
 PickOntoResult Repository::cherryPickOnto(const std::string& branch,

@@ -273,6 +273,9 @@ public:
     /// What dropping commits on a local branch's label does: pick them onto it, in
     /// memory when it is not checked out. `newestFirst` is the graph's order.
     void pickCommitsOntoBranch(const QStringList& newestFirst, const QString& branch);
+    /// The commits' changes into the working tree, unstaged, oldest first; no commit
+    /// is made and the index is left alone.
+    void applyCommitsToWorkingTree(const QStringList& newestFirst);
 
     /// One line per command the palette offers: `enabled/disabled id  title`. With
     /// `runFirst`, the best match is run and its id reported.

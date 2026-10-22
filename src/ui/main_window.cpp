@@ -1807,6 +1807,8 @@ void MainWindow::buildCommitPanel() {
             [this](const QString& target) { checkoutBranchFromGraph(target, RefKind::LocalBranch); });
     connect(m_commitView, &CommitGraphView::commitsDroppedOnBranch, this,
             &MainWindow::pickCommitsOntoBranch);
+    connect(m_commitView, &CommitGraphView::commitsDroppedOnWorkingTree, this,
+            &MainWindow::applyCommitsToWorkingTree);
     connect(m_commitView, &CommitGraphView::refDroppedOnCommit, this,
             &MainWindow::onRefDroppedOnCommit);
 
@@ -5808,6 +5810,11 @@ void MainWindow::buildCommitMenu(QMenu& menu, const QString& commitId) const {
         }
     }
 
+    add(many ? QStringLiteral("Apply changes of %1 commits to working tree").arg(selectedCount)
+             : QStringLiteral("Apply changes to working tree"),
+        QStringLiteral("apply-to-worktree"))
+        ->setEnabled(!m_session->info().workDir.empty());
+
     QMenu* reset = menu.addMenu(QStringLiteral("Reset %1 to this commit")
                                     .arg(onBranch ? current : QStringLiteral("HEAD")));
     reset->setEnabled(onBranch);
@@ -5987,6 +5994,14 @@ void MainWindow::dispatchCommitMenuAction(const QString& key, const QString& com
         checkoutLocalBranch(target);
     } else if (key == QLatin1String("create-branch")) {
         createBranchAtCommit(commitId);
+    } else if (key == QLatin1String("apply-to-worktree")) {
+        QStringList ids;
+        if (m_commitView->selectedRows().size() > 1) {
+            for (const Oid& id : m_commitView->selectedCommitIds()) {
+                ids << QString::fromStdString(id);
+            }
+        }
+        applyCommitsToWorkingTree(ids.isEmpty() ? QStringList{commitId} : ids);
     } else if (key == QLatin1String("cherry-pick") && m_commitView->selectedRows().size() > 1) {
         runSelectionOperation(SelectionOperation::CherryPick);
     } else if (key == QLatin1String("cherry-pick")) {
@@ -6286,6 +6301,51 @@ void MainWindow::cherryPickOntoHead(const std::vector<QString>& oldestFirst) {
     setStatus(QStringLiteral("Cherry-picked %1 commit(s), newest is %2.")
                   .arg(oldestFirst.size())
                   .arg(created.left(7)));
+}
+
+void MainWindow::applyCommitsToWorkingTree(const QStringList& newestFirst) {
+    if (!m_session || !m_session->isOpen() || newestFirst.isEmpty()) {
+        return;
+    }
+    const QStringList oldestFirst(newestFirst.crbegin(), newestFirst.crend());
+    auto result = std::make_shared<ApplyChangesResult>();
+    auto applied = std::make_shared<int>(0);
+    setStatus(QStringLiteral("Applying changes…"));
+    queueWrite(
+        QStringLiteral("Cannot apply the changes"),
+        [oldestFirst, result, applied](RepoSession& session, QString* error) {
+            return session.applyCommitsToWorkdir(oldestFirst, result.get(), applied.get(), error);
+        },
+        [this, oldestFirst, result, applied](bool ok) {
+            if (!ok) {
+                return;
+            }
+            const auto list = [](const std::vector<std::string>& paths) {
+                QStringList out;
+                for (const std::string& path : paths) {
+                    out << QString::fromStdString(path);
+                }
+                return out.join(QLatin1Char('\n'));
+            };
+            const QString what = oldestFirst.size() == 1
+                                     ? oldestFirst.front().left(7)
+                                     : QStringLiteral("%1 commits").arg(oldestFirst.size());
+            if (result->conflicted.empty()) {
+                setStatus(QStringLiteral("Applied the changes of %1 to the working tree, "
+                                         "unstaged: %2 file(s).")
+                              .arg(what)
+                              .arg(result->applied.size()));
+                return;
+            }
+            QString text = QStringLiteral("These files overlap local edits; they carry conflict "
+                                          "markers to resolve, or were left as they were:\n\n%1")
+                               .arg(list(result->conflicted));
+            if (*applied < oldestFirst.size()) {
+                text += QStringLiteral("\n\nStopped there: %1 of the commits were not applied.")
+                            .arg(oldestFirst.size() - *applied);
+            }
+            reportFailure(QStringLiteral("Changes applied with conflicts"), text);
+        });
 }
 
 void MainWindow::pickCommitsOntoBranch(const QStringList& newestFirst, const QString& branch) {
@@ -8150,6 +8210,8 @@ QStringList MainWindow::runCommitMenuEntry(const QString& key, const QString& re
             refreshPanels();
             maybeAutoUpdateSubmodules();
         }
+    } else if (key == QLatin1String("apply-to-worktree")) {
+        applyCommitsToWorkingTree({commitId});
     } else if (key == QLatin1String("cherry-pick")) {
         cherryPickCommit(commitId);
     } else if (key == QLatin1String("reset-soft")) {

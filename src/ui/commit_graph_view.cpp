@@ -1659,6 +1659,19 @@ void CommitGraphView::startCommitDrag() {
     stopDragScroll();
 }
 
+QRect CommitGraphView::workingTreeDropRect(const QPoint& pos) const {
+    const auto* model = qobject_cast<const CommitModel*>(this->model());
+    const QModelIndex row = indexAt(pos);
+    // This checkout's own row: another worktree's changes are not where a drop lands.
+    if (!model || !row.isValid() || row.row() != model->wipRow()) {
+        return QRect();
+    }
+    const QRect message = visualRect(model->index(row.row(), CommitModel::Message));
+    const QRect cell = message.isValid() ? message : visualRect(row);
+    const int width = std::min(cell.width(), theme::scaledPixels(160));
+    return QRect(cell.left() + 2, cell.top() + 2, width, cell.height() - 4);
+}
+
 QString CommitGraphView::localBranchAt(const QPoint& pos, QRect* pill) const {
     QString name;
     const RefInfo* ref = refAt(pos, &name);
@@ -1699,12 +1712,22 @@ void CommitGraphView::dragMoveEvent(QDragMoveEvent* event) {
         !commits.isEmpty()) {
         QRect pill;
         const QString branch = localBranchAt(event->position().toPoint(), &pill);
+        const int count = static_cast<int>(commits.count('\n')) + 1;
         if (branch.isEmpty()) {
-            setDropTarget(QString(), QRect());
-            event->ignore();
+            const QRect wip = workingTreeDropRect(event->position().toPoint());
+            if (wip.isNull()) {
+                setDropTarget(QString(), QRect());
+                event->ignore();
+                return;
+            }
+            setDropTarget(QStringLiteral("//wip"), wip,
+                          count == 1 ? QStringLiteral("Release: apply its changes here, unstaged")
+                                     : QStringLiteral("Release: apply %1 commits' changes here, "
+                                                      "unstaged")
+                                           .arg(count));
+            event->acceptProposedAction();
             return;
         }
-        const int count = static_cast<int>(commits.count('\n')) + 1;
         setDropTarget(branch, pill,
                       count == 1 ? QStringLiteral("Release: cherry-pick onto %1").arg(branch)
                                  : QStringLiteral("Release: cherry-pick %1 commits onto %2")
@@ -1921,14 +1944,20 @@ void CommitGraphView::dropEvent(QDropEvent* event) {
     if (const QByteArray commits =
             event->mimeData()->data(QString::fromLatin1(kCommitsMimeType));
         !commits.isEmpty()) {
+        const QStringList ids =
+            QString::fromUtf8(commits).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
         const QString branch = localBranchAt(event->position().toPoint(), nullptr);
         if (branch.isEmpty()) {
-            event->ignore();
+            if (workingTreeDropRect(event->position().toPoint()).isNull()) {
+                event->ignore();
+                return;
+            }
+            event->acceptProposedAction();
+            emit commitsDroppedOnWorkingTree(ids);
             return;
         }
         event->acceptProposedAction();
-        emit commitsDroppedOnBranch(
-            QString::fromUtf8(commits).split(QLatin1Char('\n'), Qt::SkipEmptyParts), branch);
+        emit commitsDroppedOnBranch(ids, branch);
         return;
     }
 

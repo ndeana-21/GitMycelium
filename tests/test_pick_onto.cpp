@@ -78,6 +78,9 @@ private slots:
     void dragOntoALabelPicks();
     void dragOntoTheRailPicks();
     void theWindowChecksOutToResolveAConflict();
+    void aCommitsChangeLandsUnstaged();
+    void anOverlappingEditGetsMarkers();
+    void dropOnTheWorkingTreeAppliesTheChanges();
 
 private:
     bool commit(const QString& file, const QString& content, const QString& message,
@@ -262,6 +265,96 @@ void PickOntoTest::theWindowChecksOutToResolveAConflict() {
     QVERIFY(gitOut(m_path, {"diff", "--name-only", "--diff-filter=U"})
                 .contains(QStringLiteral("shared.txt")));
     QVERIFY(git(m_path, {"cherry-pick", "--abort"}));
+}
+
+void PickOntoTest::aCommitsChangeLandsUnstaged() {
+    QVERIFY(commit(QStringLiteral("lines.txt"), QStringLiteral("1\n2\n3\n4\n5\n6\n"),
+                   QStringLiteral("lines")));
+    QVERIFY(git(m_path, {"checkout", "-q", "-b", "donor"}));
+    QVERIFY(writeFile(m_path + QStringLiteral("/lines.txt"), QStringLiteral("1\n2\n3\n4\n5\nsix\n")));
+    QVERIFY(writeFile(m_path + QStringLiteral("/new.txt"), QStringLiteral("new\n")));
+    QVERIFY(QFile::remove(m_path + QStringLiteral("/main.txt")));
+    QVERIFY(git(m_path, {"add", "-A"}));
+    QVERIFY(git(m_path, {"commit", "-qm", "donor change"}));
+    QVERIFY(git(m_path, {"checkout", "-q", "main"}));
+    // A local edit the commit does not touch is merged with it, not overwritten.
+    QVERIFY(writeFile(m_path + QStringLiteral("/lines.txt"), QStringLiteral("one\n2\n3\n4\n5\n6\n")));
+    const QString head = gitOut(m_path, {"rev-parse", "HEAD"});
+
+    const auto repo = Repository::open(m_path.toStdString());
+    const ApplyChangesResult result = repo->applyCommitToWorkdir("donor");
+    QVERIFY(result.conflicted.empty());
+    QCOMPARE(result.applied.size(), std::size_t{3});
+    QCOMPARE(gitOut(m_path, {"rev-parse", "HEAD"}), head);
+    QVERIFY(gitOut(m_path, {"diff", "--cached", "--name-only"}).isEmpty());
+    QCOMPARE(gitOut(m_path, {"status", "--porcelain"}),
+             QStringLiteral("M lines.txt\n D main.txt\n?? new.txt"));
+    QFile lines(m_path + QStringLiteral("/lines.txt"));
+    QVERIFY(lines.open(QIODevice::ReadOnly));
+    QCOMPARE(lines.readAll(), QByteArray("one\n2\n3\n4\n5\nsix\n"));
+
+    // Again: everything is already as the commit has it.
+    const ApplyChangesResult again = repo->applyCommitToWorkdir("donor");
+    QVERIFY(again.applied.empty() && again.conflicted.empty());
+    QCOMPARE(again.unchanged.size(), std::size_t{3});
+}
+
+void PickOntoTest::anOverlappingEditGetsMarkers() {
+    // feature turned "one" into "feature"; main has "main" there.
+    const auto repo = Repository::open(m_path.toStdString());
+    const ApplyChangesResult result = repo->applyCommitToWorkdir("feature");
+    QCOMPARE(result.conflicted, std::vector<std::string>{"shared.txt"});
+    QFile shared(m_path + QStringLiteral("/shared.txt"));
+    QVERIFY(shared.open(QIODevice::ReadOnly));
+    const QByteArray text = shared.readAll();
+    QVERIFY2(text.contains("<<<<<<< working tree") && text.contains("feature") &&
+                 text.contains("main"),
+             text.constData());
+    QVERIFY(gitOut(m_path, {"diff", "--cached", "--name-only"}).isEmpty());
+    QVERIFY(gitOut(m_path, {"ls-files", "-u"}).isEmpty());
+}
+
+void PickOntoTest::dropOnTheWorkingTreeAppliesTheChanges() {
+    const QString pick = gitOut(m_path, {"rev-parse", "main~1"});
+    QVERIFY(git(m_path, {"checkout", "-q", "feature"}));
+    QVERIFY(writeFile(m_path + QStringLiteral("/dirty.txt"), QStringLiteral("dirty\n")));
+
+    // The working-tree row takes a drop of commits, and says what it will do.
+    RepoSession session;
+    QVERIFY(session.open(m_path));
+    CommitModel model(&session);
+    model.reset();
+    QTRY_VERIFY(model.realRowCount() >= 2 && !model.isLoading());
+    model.setWorktreeWip(session.worktreeWip(session.status()));
+    QCOMPARE(model.wipRow(), 0);
+    DropProbeView view;
+    view.setModel(&model);
+    view.resize(900, 400);
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    QMimeData mime;
+    mime.setData(QString::fromLatin1(kCommitsMimeType), pick.toUtf8());
+    const QPoint onWip = view.visualRect(model.index(0, CommitModel::Message)).center();
+    QDragMoveEvent over(onWip, Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+    view.move(&over);
+    QVERIFY(over.isAccepted());
+    QCOMPARE(view.dropTargetForDiagnostics(), QStringLiteral("//wip"));
+    QSignalSpy dropped(&view, &CommitGraphView::commitsDroppedOnWorkingTree);
+    QDropEvent drop(QPointF(onWip), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+    view.drop(&drop);
+    QCOMPARE(dropped.count(), 1);
+    QCOMPARE(dropped.front().at(0).toStringList(), QStringList{pick});
+
+    // The window puts the change in the working tree; feature does not move.
+    MainWindow window;
+    window.setHeadless(true);
+    QVERIFY(window.openRepository(m_path));
+    auto* graph = window.findChild<CommitGraphView*>();
+    QVERIFY(graph);
+    emit graph->commitsDroppedOnWorkingTree({pick});
+    QTRY_VERIFY(QFile::exists(m_path + QStringLiteral("/main.txt")));
+    QVERIFY(gitOut(m_path, {"diff", "--cached", "--name-only"}).isEmpty());
+    QCOMPARE(gitOut(m_path, {"log", "-1", "--format=%s"}), QStringLiteral("feature edits shared"));
 }
 
 QTEST_MAIN(PickOntoTest)

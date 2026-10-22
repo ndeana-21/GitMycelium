@@ -1742,6 +1742,28 @@ bool RepoSession::cherryPick(const std::vector<QString>& commitIds, QString* new
                     });
 }
 
+bool RepoSession::applyCommitsToWorkdir(const QStringList& commitIds, ApplyChangesResult* result,
+                                        int* applied, QString* errorOut) {
+    *applied = 0;
+    return guarded(&m_mutex, &m_snapshotEpoch, m_repo, errorOut, [&](Repository& repo) {
+        for (const QString& id : commitIds) {
+            const ApplyChangesResult one = repo.applyCommitToWorkdir(id.toStdString());
+            const auto append = [](std::vector<std::string>& to,
+                                   const std::vector<std::string>& from) {
+                to.insert(to.end(), from.begin(), from.end());
+            };
+            append(result->applied, one.applied);
+            append(result->conflicted, one.conflicted);
+            append(result->unchanged, one.unchanged);
+            append(result->skipped, one.skipped);
+            ++*applied;
+            if (!one.conflicted.empty()) {
+                return;
+            }
+        }
+    });
+}
+
 bool RepoSession::cherryPickOnto(const QString& branch, const std::vector<QString>& commitIds,
                                  PickOntoResult* result, QString* errorOut) {
     return recorded(&m_mutex, &m_snapshotEpoch, m_repo, &m_oplog,

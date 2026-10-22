@@ -391,6 +391,11 @@ public:
     /// once at the end. Nothing moves when a pick conflicts or the commits must be
     /// signed; the result says so and the caller checks the branch out instead.
     PickOntoResult cherryPickOnto(const std::string& branch, const std::vector<Oid>& commits);
+    /// Puts `revision`'s change (against its first parent) into the working tree as
+    /// unstaged edits, not a commit: a file still as the parent had it takes the
+    /// commit's version, one edited since is merged three ways in place, conflict
+    /// markers and all. The index and HEAD stay where they are.
+    ApplyChangesResult applyCommitToWorkdir(const std::string& revision);
 
     /// True when the stretch `onto..tip` is a single line of first parents, with no merge
     /// and no commit reachable by a second path inside it. `onto` may be `kRebaseRoot`.

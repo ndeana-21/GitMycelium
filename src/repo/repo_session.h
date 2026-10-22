@@ -477,6 +477,11 @@ public:
     /// On success `newCommitOut` (when not null) receives the created commit id.
     /// Copies the given commits onto the checked-out branch, oldest first.
     bool cherryPick(const std::vector<QString>& commitIds, QString* newCommitOut, QString* errorOut);
+    /// `Repository::applyCommitToWorkdir` for each commit in turn, oldest first,
+    /// stopping after one that conflicts; `applied` counts the commits that went in.
+    /// The working tree only, so nothing is recorded for undo.
+    bool applyCommitsToWorkdir(const QStringList& commitIds, ApplyChangesResult* result,
+                               int* applied, QString* errorOut);
     /// `Repository::cherryPickOnto`, recorded so one undo moves the branch back.
     bool cherryPickOnto(const QString& branch, const std::vector<QString>& commitIds,
                         PickOntoResult* result, QString* errorOut);
