@@ -10,6 +10,7 @@
 #include "theme/theme.h"
 
 #include <QApplication>
+#include <QCursor>
 #include <QDateTime>
 #include <QDrag>
 #include <QDragMoveEvent>
@@ -1612,7 +1613,9 @@ void CommitGraphView::startDrag(Qt::DropActions supportedActions) {
     drag->setHotSpot(QPoint(static_cast<int>(logical.width() / 2.0),
                             static_cast<int>(logical.height() / 2.0)));
 
+    m_dragInFlight = drag;
     drag->exec(Qt::MoveAction);
+    stopDragScroll();
 }
 
 void CommitGraphView::startCommitDrag() {
@@ -1651,7 +1654,9 @@ void CommitGraphView::startCommitDrag() {
     const QSizeF logical = chip.deviceIndependentSize();
     drag->setHotSpot(QPoint(static_cast<int>(logical.width() / 2.0),
                             static_cast<int>(logical.height() / 2.0)));
+    m_dragInFlight = drag;
     drag->exec(Qt::CopyAction);
+    stopDragScroll();
 }
 
 QString CommitGraphView::localBranchAt(const QPoint& pos, QRect* pill) const {
@@ -1671,6 +1676,15 @@ QString CommitGraphView::localBranchAt(const QPoint& pos, QRect* pill) const {
 }
 
 void CommitGraphView::dragEnterEvent(QDragEnterEvent* event) {
+    m_dragScrollOutside = false;
+    if (!m_dragInFlight && event->source()) {
+        // A drag from another widget (the branch rail) ends where it began; holding its
+        // QDrag tells the scroll past the edge when it is over.
+        const QList<QDrag*> drags = event->source()->findChildren<QDrag*>();
+        if (!drags.isEmpty()) {
+            m_dragInFlight = drags.back();
+        }
+    }
     if (event->mimeData()->hasFormat(QString::fromLatin1(kCommitsMimeType))) {
         event->acceptProposedAction();
         return;
@@ -1679,6 +1693,7 @@ void CommitGraphView::dragEnterEvent(QDragEnterEvent* event) {
 }
 
 void CommitGraphView::dragMoveEvent(QDragMoveEvent* event) {
+    updateDragScroll(event->position().toPoint().y());
     if (const QByteArray commits =
             event->mimeData()->data(QString::fromLatin1(kCommitsMimeType));
         !commits.isEmpty()) {
@@ -1744,7 +1759,87 @@ void CommitGraphView::dragMoveEvent(QDragMoveEvent* event) {
 
 void CommitGraphView::dragLeaveEvent(QDragLeaveEvent* event) {
     setDropTarget(QString(), QRect());
+    // Left through the top or the bottom: the history goes on that way, so the graph
+    // keeps scrolling while the drag stays out there.
+    m_dragScrollOutside = m_dragScrollStep != 0 && m_dragInFlight;
+    if (!m_dragScrollOutside) {
+        stopDragScroll();
+    }
     QTreeView::dragLeaveEvent(event);
+}
+
+int CommitGraphView::dragScrollStepAt(int y) const {
+    const int zone = std::max(theme::scaledPixels(28), theme::rowHeight() * 3 / 2);
+    const int height = viewport()->height();
+    // Faster the deeper into the band, and faster still past the edge, capped so the
+    // reader can still stop on a row.
+    const auto step = [zone](int depth) {
+        return std::min(theme::rowHeight() * 2, 2 + depth * depth / std::max(1, zone));
+    };
+    if (y < zone) {
+        return -step(zone - y);
+    }
+    if (y > height - zone) {
+        return step(y - (height - zone));
+    }
+    return 0;
+}
+
+void CommitGraphView::updateDragScroll(int y) {
+    m_dragScrollOutside = false;
+    m_dragScrollStep = dragScrollStepAt(y);
+    if (m_dragScrollStep == 0) {
+        stopDragScroll();
+        return;
+    }
+    if (!m_dragScroll) {
+        m_dragScroll = new QTimer(this);
+        m_dragScroll->setInterval(16);
+        connect(m_dragScroll, &QTimer::timeout, this, &CommitGraphView::onDragScrollTick);
+    }
+    if (!m_dragScroll->isActive()) {
+        m_dragScroll->start();
+    }
+}
+
+void CommitGraphView::stopDragScroll() {
+    m_dragScrollStep = 0;
+    m_dragScrollCarry = 0;
+    m_dragScrollOutside = false;
+    if (m_dragScroll) {
+        m_dragScroll->stop();
+    }
+}
+
+void CommitGraphView::onDragScrollTick() {
+    if (m_dragScrollOutside) {
+        // No drag events reach a widget the drag has left; the cursor is read instead,
+        // and only while the drag is alive and the pointer is above or below the graph.
+        const QPoint at = viewport()->mapFromGlobal(QCursor::pos());
+        const bool besideIt = at.x() >= 0 && at.x() < viewport()->width();
+        const bool pastAnEdge = at.y() < 0 || at.y() >= viewport()->height();
+        if (!m_dragInFlight || !besideIt || !pastAnEdge) {
+            stopDragScroll();
+            return;
+        }
+        m_dragScrollStep = dragScrollStepAt(at.y());
+    }
+    QScrollBar* bar = verticalScrollBar();
+    const int before = bar->value();
+    if (verticalScrollMode() == QAbstractItemView::ScrollPerPixel) {
+        bar->setValue(before + m_dragScrollStep);
+    } else {
+        // The bar counts rows: the pixels add up until they make one.
+        m_dragScrollCarry += m_dragScrollStep;
+        const int rows = m_dragScrollCarry / std::max(1, theme::rowHeight());
+        m_dragScrollCarry -= rows * std::max(1, theme::rowHeight());
+        bar->setValue(before + rows);
+    }
+    if (bar->value() != before) {
+        // The rows moved under a pointer that did not: the label it was over is gone
+        // until the next move says what is there now.
+        setDropTarget(QString(), QRect());
+    }
 }
 
 void CommitGraphView::setDropTarget(const QString& name, const QRect& pill,
@@ -1818,6 +1913,7 @@ void CommitGraphView::paintDropTarget(QPainter& painter) {
 
 void CommitGraphView::dropEvent(QDropEvent* event) {
     setDropTarget(QString(), QRect());
+    stopDragScroll();
     // The menu for this drop opens where the drop is. The cursor position is not a
     // reliable answer while a drag is in flight.
     rememberDropPoint(viewport()->mapToGlobal(event->position().toPoint()));

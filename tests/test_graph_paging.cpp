@@ -12,7 +12,9 @@
 #include "ui/commit_graph_view.h"
 #include "ui/main_window.h"
 
+#include <QDragMoveEvent>
 #include <QFile>
+#include <QMimeData>
 #include <QScrollBar>
 
 #include <QProcess>
@@ -56,6 +58,15 @@ bool buildHistory(const QString& dir, int count) {
 
 } // namespace
 
+/// Reaches the protected drag handlers, as a drag over the view would.
+class DragProbeView : public CommitGraphView {
+public:
+    using CommitGraphView::CommitGraphView;
+    void move(QDragMoveEvent* event) { dragMoveEvent(event); }
+    void leave(QDragLeaveEvent* event) { dragLeaveEvent(event); }
+    int stepAt(int y) const { return dragScrollStepAt(y); }
+};
+
 class GraphPagingTest : public QObject {
     Q_OBJECT
 
@@ -65,6 +76,7 @@ private slots:
 
     void anIdleViewHoldsOnePageAndScrollingLoadsTheRest();
     void aCommitRefreshesTheGraphInPlace();
+    void aDragAtTheEdgeScrollsTheGraph();
 
 private:
     std::unique_ptr<QTemporaryDir> m_dir;
@@ -119,6 +131,53 @@ void GraphPagingTest::aCommitRefreshesTheGraphInPlace() {
     // The commit sends the panel back to the working tree, so nothing stays selected,
     // but the row the reader looked at is where it was.
     QCOMPARE(QString::fromStdString(model->commitAt(target + 1)->id), selected);
+}
+
+void GraphPagingTest::aDragAtTheEdgeScrollsTheGraph() {
+    RepoSession session;
+    QVERIFY(session.open(m_dir->path()));
+    CommitModel model(&session);
+    DragProbeView view;
+    view.resize(900, 500);
+    view.setModel(&model);
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    model.reset();
+    QTRY_VERIFY(model.rowCount() > 0 && !model.isLoading());
+
+    const int height = view.viewport()->height();
+    QCOMPARE(view.stepAt(height / 2), 0);
+    QVERIFY(view.stepAt(2) < 0);
+    QVERIFY(view.stepAt(height - 2) > 0);
+    // Deeper into the band is faster.
+    QVERIFY(view.stepAt(height - 2) > view.stepAt(height - 20));
+
+    QMimeData mime;
+    mime.setData(QStringLiteral("application/x-gitmycelium-commits"), "0000000");
+    QDragMoveEvent nearBottom(QPoint(view.viewport()->width() / 2, height - 3), Qt::CopyAction,
+                              &mime, Qt::LeftButton, Qt::NoModifier);
+    view.move(&nearBottom);
+    QScrollBar* bar = view.verticalScrollBar();
+    QTRY_VERIFY(bar->value() > 0);
+
+    // Back in the middle the graph stays where it got to.
+    QDragMoveEvent middle(QPoint(view.viewport()->width() / 2, height / 2), Qt::CopyAction,
+                          &mime, Qt::LeftButton, Qt::NoModifier);
+    view.move(&middle);
+    const int stopped = bar->value();
+    QTest::qWait(100);
+    QCOMPARE(bar->value(), stopped);
+
+    // Up near the top it goes back; leaving with no drag alive stops it.
+    QDragMoveEvent nearTop(QPoint(view.viewport()->width() / 2, 2), Qt::CopyAction, &mime,
+                           Qt::LeftButton, Qt::NoModifier);
+    view.move(&nearTop);
+    QTRY_VERIFY(bar->value() < stopped);
+    QDragLeaveEvent leave;
+    view.leave(&leave);
+    const int left = bar->value();
+    QTest::qWait(100);
+    QCOMPARE(bar->value(), left);
 }
 
 void GraphPagingTest::anIdleViewHoldsOnePageAndScrollingLoadsTheRest() {

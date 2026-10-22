@@ -10,6 +10,7 @@
 
 #include <QPoint>
 #include <QPixmap>
+#include <QPointer>
 #include <QTreeView>
 #include <QVariantAnimation>
 #include <QVector>
@@ -25,6 +26,7 @@ class QMouseEvent;
 class QPaintEvent;
 class QPainter;
 class QResizeEvent;
+class QDrag;
 class QTimer;
 
 namespace gk {
@@ -159,6 +161,12 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
     void startDrag(Qt::DropActions supportedActions) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
+    /// Pixels per tick to scroll for a drag at `y` in the viewport: negative near or
+    /// above the top, positive near or below the bottom, 0 elsewhere.
+    int dragScrollStepAt(int y) const;
+    void updateDragScroll(int y);
+    void stopDragScroll();
+    void onDragScrollTick();
     void dragMoveEvent(QDragMoveEvent* event) override;
     void dragLeaveEvent(QDragLeaveEvent* event) override;
     void dropEvent(QDropEvent* event) override;
@@ -299,6 +307,12 @@ private:
     QString m_dropTarget;
     QRect m_dropTargetRect;
     QVariantAnimation* m_dropPulse = nullptr;
+    /// Scrolling while something is dragged near, or past, the top or bottom edge.
+    QTimer* m_dragScroll = nullptr;
+    int m_dragScrollStep = 0;
+    int m_dragScrollCarry = 0;
+    bool m_dragScrollOutside = false;
+    QPointer<QDrag> m_dragInFlight;
     QString m_dropHint;
     int m_scrollBeforeReset = 0;
 };
