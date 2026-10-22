@@ -3564,15 +3564,17 @@ void MainWindow::reloadHistory() {
 void MainWindow::refreshHistory() {
     m_restoreCommit = m_selectedCommitId;
     m_restoreWip = m_selectedCommitId.isEmpty() && m_details && m_details->showingWorkingTree();
+    m_commitModel->refresh(historyRowsOnScreen());
+}
+
+int MainWindow::historyRowsOnScreen() const {
     // The rows down to the bottom of the screen; with the graph not laid out (another
     // page on top) its last two pages are enough, not every row ever paged in.
     const QModelIndex bottom =
         m_commitView->indexAt(QPoint(1, m_commitView->viewport()->height() - 1));
-    const int visible = bottom.isValid()
-                            ? bottom.row() + 1
+    return bottom.isValid() ? bottom.row() + 1
                             : std::min(m_commitModel->rowCount(),
                                        2 * static_cast<int>(RepoSession::kPageSize));
-    m_commitModel->refresh(visible);
 }
 
 void MainWindow::restoreSelectionAfterReload() {
@@ -5060,7 +5062,15 @@ QString presetLabel(VisibilityPreset preset) {
 } // namespace
 
 void MainWindow::applyVisibility() {
-    m_commitModel->setHistoryFilter(historyFilter());
+    // Read again on a worker with the graph left on screen until the new one is laid
+    // out: hiding a branch changes nothing in the repository and must not stall it.
+    const bool loaded = m_commitModel->realRowCount() > 0;
+    if (m_commitModel->setHistoryFilter(historyFilter(), loaded ? historyRowsOnScreen() : -1) &&
+        loaded) {
+        m_restoreCommit = m_selectedCommitId;
+        m_restoreWip =
+            m_selectedCommitId.isEmpty() && m_details && m_details->showingWorkingTree();
+    }
 
     // The menu tick must agree with what the filter actually does, including after
     // a clear that turned it off. Silent: setChecked would otherwise re-enter.

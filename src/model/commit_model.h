@@ -128,9 +128,12 @@ public:
     void setCommitDateFormat(CommitDateFormat format);
     CommitDateFormat commitDateFormat() const { return m_dateFormat; }
 
-    /// The refs the history walk starts from, and which carries labels. Changing
-    /// it restarts the history: hiding a branch changes which commits exist.
-    void setHistoryFilter(const HistoryFilter& filter);
+    /// The refs the history walk starts from, and which carries labels. Hiding a
+    /// branch changes which commits exist, so the history is read again: in place,
+    /// the first `neededRows` on a worker with the old graph kept on screen until they
+    /// arrive, or from scratch when `neededRows` is negative or nothing is loaded.
+    /// False when the filter did not change.
+    bool setHistoryFilter(const HistoryFilter& filter, int neededRows = -1);
 
     void setPinnedBranches(const QStringList& names);
 
@@ -229,6 +232,9 @@ private:
     std::vector<CommitInfo> withSeparators(const QVector<CommitInfo>& commits,
                                            const CommitInfo* previous, int* separators) const;
     void replaceRows(const CommitPage& page);
+    /// Takes labels read for the current filter: colours, lane priority, node types.
+    /// Lays out only when `relayout` is set; a caller about to lay out passes false.
+    void installRefs(std::unordered_map<std::string, std::vector<RefInfo>> refs, bool relayout);
     bool rebuildTipColors(bool relayout = true);
     bool rebuildTipPriority(bool relayout = true);
     bool isTrunk(const RefInfo& ref) const;

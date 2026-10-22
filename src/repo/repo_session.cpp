@@ -3139,9 +3139,10 @@ std::unordered_map<std::string, std::vector<RefInfo>> RepoSession::refsByCommit(
 }
 
 void RepoSession::requestCommits(quint64 generation, quint64 skip, quint32 limit,
-                                 const HistoryFilter& filter) {
-    startWorker([this, generation, skip, limit, filter] {
+                                 const HistoryFilter& filter, bool withRefs) {
+    startWorker([this, generation, skip, limit, filter, withRefs] {
         QVector<CommitInfo> page;
+        std::unordered_map<std::string, std::vector<RefInfo>> refs;
         bool hasMore = false;
         QString error;
         std::size_t readOutsideGraph = 0;
@@ -3159,6 +3160,9 @@ void RepoSession::requestCommits(quint64 generation, quint64 skip, quint32 limit
                 page.reserve(static_cast<int>(rows.size()));
                 for (const auto& row : rows) {
                     page.push_back(row);
+                }
+                if (withRefs) {
+                    refs = m_repo->refsByCommit(filter);
                 }
                 if (m_autoCommitGraph.load() && m_repo->commitGraphEnabled()) {
                     readOutsideGraph = m_repo->walkReadOutsideGraph();
@@ -3179,6 +3183,8 @@ void RepoSession::requestCommits(quint64 generation, quint64 skip, quint32 limit
         result.commits = std::move(page);
         result.hasMore = hasMore;
         result.error = error;
+        result.hasRefs = withRefs && error.isEmpty();
+        result.refs = std::move(refs);
         emit commitsLoaded(result);
         indexHistoryIfWorthIt(readOutsideGraph, dir);
     });

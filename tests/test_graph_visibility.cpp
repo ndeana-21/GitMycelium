@@ -465,8 +465,16 @@ void GraphVisibilityTest::theEyeHidesASectionAndShowsItAgain() {
     hover(tree->visualRect(local).center());
     QVERIFY(tree->eyeVisible(local));
 
-    // The current branch stays: the eye hides the two others under the section.
+    // The current branch stays: the eye hides the two others under the section. The
+    // graph is read again on a worker and stays on screen until the new one is laid out.
+    auto* graph = qobject_cast<CommitModel*>(window.findChild<CommitGraphView*>()->model());
+    QVERIFY(graph);
+    QTRY_VERIFY(!graph->isLoading() && graph->realRowCount() > 1);
+    const int shownBefore = graph->realRowCount();
     click(local);
+    QCOMPARE(graph->realRowCount(), shownBefore);
+    QVERIFY(graph->isLoading());
+    QTRY_VERIFY(!graph->isLoading() && graph->realRowCount() < shownBefore);
     QString text = window.visibilityForDiagnostics(QStringLiteral("report"), {}).join('\n');
     QVERIFY2(text.contains(QStringLiteral("hidden: 2")), qPrintable(text));
     QVERIFY(text.contains(QStringLiteral("rows: 1")));

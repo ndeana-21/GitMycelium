@@ -9,6 +9,8 @@
 #include "ui/diff_view.h"
 #include "ui/working_tree_panel.h"
 #include "ui/main_window.h"
+#include "model/commit_model.h"
+#include "graph/graph_layout.h"
 
 #include <QDir>
 #include <QFile>
@@ -324,6 +326,15 @@ void AsyncReadsTest::aStashMadeInTheWindowReloadsTheGraph() {
     const QString stash = revParse(m_repo, QStringLiteral("refs/stash"));
     QVERIFY(!stash.isEmpty());
     QTRY_VERIFY_WITH_TIMEOUT(model->rowForCommit(stash) >= 0, 5000);
+    // Drawn as a stash, not as a commit: its node and its label.
+    QTRY_VERIFY_WITH_TIMEOUT(!model->isLoading(), 5000);
+    const int row = model->rowForCommit(stash);
+    QVERIFY(row >= 0);
+    const GraphNode* node = model->graphNodeAt(row);
+    QVERIFY(node);
+    QVERIFY(!model->refsAt(row).empty());
+    QCOMPARE(int(node->type), int(GraphNodeType::Stash));
+    QVERIFY(model->refsAt(row).front().fullName.rfind("refs/stash", 0) == 0);
 }
 
 void AsyncReadsTest::aTabSwitchDoesNotKeepTheOtherTabsFile() {

@@ -649,22 +649,28 @@ CommitModel::RefPillData CommitModel::refPillData(int row) const {
 }
 
 void CommitModel::refreshRefs() {
-    m_refColors.clear();
-    m_colorUse.assign(static_cast<std::size_t>(theme::branchColorCount()), 0);
-    m_refsByCommit.clear();
-
     if (!m_session || !m_session->isOpen()) {
+        m_refColors.clear();
+        m_colorUse.assign(static_cast<std::size_t>(theme::branchColorCount()), 0);
+        m_refsByCommit.clear();
         m_graph.setTipColors({});
         m_pathDirty = true;
         m_shownDirty = true;
         applyGraphNodeTypes();
         return;
     }
+    installRefs(m_session->refsByCommit(m_historyFilter), true);
+}
+
+void CommitModel::installRefs(std::unordered_map<std::string, std::vector<RefInfo>> refs,
+                              bool relayout) {
+    m_refColors.clear();
+    m_colorUse.assign(static_cast<std::size_t>(theme::branchColorCount()), 0);
+    m_refsByCommit = std::move(refs);
 
     const RepoInfo info = m_session->info();
     m_headBranch = QString::fromStdString(info.headBranch);
     m_trunkBranch = QString::fromStdString(info.trunkBranch);
-    m_refsByCommit = m_session->refsByCommit(m_historyFilter);
     m_shownDirty = true;
     // Ahead/behind is not something the ref walk answers, and `for-each-ref` over
     // every branch must not run here: this is the GUI thread. The labels show the
@@ -695,14 +701,16 @@ void CommitModel::refreshRefs() {
     }
 
     const bool colorsMoved = rebuildTipColors(false);
-    if (rebuildTipPriority(false) || colorsMoved) {
+    const bool priorityMoved = rebuildTipPriority(false);
+    m_graph.setNodeTypeHints(nodeTypeHints());
+    if (!relayout) {
+        return;
+    }
+    if (priorityMoved || colorsMoved) {
         m_graph.relayout();
     }
-    applyGraphNodeTypes();
-
     if (!m_rows.isEmpty()) {
-        emit dataChanged(index(0, Refs), index(m_rows.size() - 1, Refs),
-                         {RefsLabelsRole, RefsColorsRole, RefsKindsRole, RefsNamesRole});
+        emit dataChanged(index(0, Refs), index(m_rows.size() - 1, Graph));
     }
 }
 
@@ -836,15 +844,20 @@ void CommitModel::setTimelinePeriod(TimelinePeriod period) {
     reset();
 }
 
-void CommitModel::setHistoryFilter(const HistoryFilter& filter) {
+bool CommitModel::setHistoryFilter(const HistoryFilter& filter, int neededRows) {
     if (m_historyFilter.scope == filter.scope &&
         m_historyFilter.visibleRefs == filter.visibleRefs &&
         m_historyFilter.firstParentHistory == filter.firstParentHistory &&
         m_historyFilter.foldInto == filter.foldInto) {
-        return;
+        return false;
     }
     m_historyFilter = filter;
-    reset();
+    if (neededRows < 0) {
+        reset();
+    } else {
+        refresh(neededRows);
+    }
+    return true;
 }
 
 void CommitModel::setPinnedBranches(const QStringList& names) {
@@ -1154,8 +1167,7 @@ void CommitModel::fetchMore(const QModelIndex& parent) {
     m_loading = true;
     emit loadingChanged();
     m_session->requestCommits(m_generation, static_cast<quint64>(realRowCount()),
-                              RepoSession::kPageSize,
-                              m_historyFilter);
+                              RepoSession::kPageSize, m_historyFilter, realRowCount() == 0);
 }
 
 void CommitModel::onPage(CommitPage page) {
@@ -1182,6 +1194,9 @@ void CommitModel::onPage(CommitPage page) {
     }
     if (page.commits.isEmpty()) {
         m_hasMore = false;
+        if (page.hasRefs) {
+            installRefs(page.refs, true);
+        }
         return;
     }
 
@@ -1197,8 +1212,15 @@ void CommitModel::onPage(CommitPage page) {
     m_timelineCount += separators;
     // The separators are in `m_rows` now, so the hints name them before the walk
     // sees them; the walk needs that to skip a lane for a row that is not a commit.
-    m_graph.setNodeTypeHints(nodeTypeHints());
-    m_graph.append(block);
+    if (page.hasRefs) {
+        // The first page after a reset: the labels arrive with it, and the working-tree
+        // rows already above it take their colours from them, so all is laid out.
+        installRefs(page.refs, false);
+        m_graph.setCommits(asVector(m_rows));
+    } else {
+        m_graph.setNodeTypeHints(nodeTypeHints());
+        m_graph.append(block);
+    }
     m_pathDirty = true;
     m_shownDirty = true;
     endInsertRows();
@@ -1273,9 +1295,10 @@ std::vector<CommitInfo> CommitModel::withSeparators(const QVector<CommitInfo>& c
 void CommitModel::replaceRows(const CommitPage& page) {
     int separators = 0;
     const std::vector<CommitInfo> block = withSeparators(page.commits, nullptr, &separators);
-    // The labels are already current: the refresh that noticed the refs move re-read
-    // them (`refreshRefs`) before or after this page, and either way lays out once.
     beginResetModel();
+    if (page.hasRefs) {
+        installRefs(page.refs, false);
+    }
     m_rows.resize(m_wipCount);
     for (const CommitInfo& row : block) {
         m_rows.push_back(row);
@@ -1309,7 +1332,7 @@ void CommitModel::refresh(int neededRows) {
     const auto page = static_cast<int>(RepoSession::kPageSize);
     const int pages = std::max(1, (std::max(neededRows, 1) + page - 1) / page);
     m_session->requestCommits(m_generation, 0, static_cast<quint32>(pages * page),
-                              m_historyFilter);
+                              m_historyFilter, true);
 }
 
 void CommitModel::reset() {
@@ -1331,7 +1354,14 @@ void CommitModel::reset() {
     // The branch stays remembered and `onPage` rebuilds it.
     m_highlightSet.clear();
     m_highlightActive = false;
-    refreshRefs();
+    if (m_session && m_session->isOpen()) {
+        // The labels come with the first page, read on the worker that walks it.
+        const RepoInfo info = m_session->info();
+        m_headBranch = QString::fromStdString(info.headBranch);
+        m_trunkBranch = QString::fromStdString(info.trunkBranch);
+    } else {
+        refreshRefs();
+    }
     endResetModel();
     if (canLoadMore()) {
         fetchMore(QModelIndex());

@@ -38,6 +38,10 @@ struct CommitPage {
     QVector<CommitInfo> commits;
     bool hasMore = false;
     QString error;
+    /// The labels by commit for the same filter, read with the page when it was asked
+    /// for them: a page that replaces the graph brings the labels it is drawn with.
+    bool hasRefs = false;
+    std::unordered_map<std::string, std::vector<RefInfo>> refs;
 };
 
 /// Commits a running search has found so far, tagged with the search they belong to
@@ -719,9 +723,10 @@ public:
 
     /// Asynchronously loads a history page. Emits commitsLoaded() on the receiver's
     /// thread, with `error` set when the read failed. The graph view wants every ref,
-    /// which is the default here.
+    /// which is the default here. `withRefs` reads the labels for the filter as well.
     void requestCommits(quint64 generation, quint64 skip, quint32 limit,
-                        const HistoryFilter& filter = HistoryFilter{HistoryScope::AllRefs, {}});
+                        const HistoryFilter& filter = HistoryFilter{HistoryScope::AllRefs, {}},
+                        bool withRefs = false);
 
     std::vector<CommitInfo> commitsBlocking(quint64 skip, quint32 limit, bool* hasMore,
                                             const HistoryFilter& filter = HistoryFilter{}) const;

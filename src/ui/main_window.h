@@ -440,6 +440,8 @@ private:
     /// After a local operation: the graph re-reads what is on screen in place
     /// (`CommitModel::refresh`); a fetch or pull, a new filter or a new tab resets.
     void refreshHistory();
+    /// The graph rows down to the bottom of the screen: what an in-place re-read walks.
+    int historyRowsOnScreen() const;
     /// The Files tab: the tree of the selected commit (HEAD when none), on the graph's
     /// place.
     void showFilesPage();
