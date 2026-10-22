@@ -18,6 +18,11 @@ struct StashEntry {
     std::string message; ///< reflog subject, e.g. "WIP on main: ..."
 };
 
+/// What a stash takes: everything; the unstaged changes, the staged ones left in place
+/// (`--keep-index`; the stash records them too, as git's does); or the staged ones
+/// alone (`--staged`).
+enum class StashScope { Everything, KeepIndex, StagedOnly };
+
 class StashOps {
 public:
     explicit StashOps(std::string workDir);
@@ -25,7 +30,8 @@ public:
     std::vector<StashEntry> list() const;
 
     SyncResult push(const std::string& message, bool includeUntracked,
-                    const std::vector<std::string>& paths) const;
+                    const std::vector<std::string>& paths,
+                    StashScope scope = StashScope::Everything) const;
 
     /// An empty `stash` means the top of the list (`stash@{0}`). A non-empty value
     /// is an oid from `list()`; it is resolved to the entry's *current* index at

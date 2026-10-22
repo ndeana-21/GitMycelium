@@ -448,6 +448,12 @@ void CommitDetailsPanel::moveWorkingTreeFiles(const QStringList& paths, bool toS
     }
 }
 
+void CommitDetailsPanel::dropWorkingTreeSide(bool staged) {
+    if (m_workingTree) {
+        m_wip->dropSide(staged);
+    }
+}
+
 void CommitDetailsPanel::setWorkingTreeBranch(const QString& name, const QColor& color) {
     m_wip->setBranch(name, color);
 }

@@ -88,10 +88,16 @@ std::vector<StashEntry> StashOps::list() const {
 }
 
 SyncResult StashOps::push(const std::string& message, bool includeUntracked,
-                          const std::vector<std::string>& paths) const {
+                          const std::vector<std::string>& paths, StashScope scope) const {
     std::vector<std::string> args{"stash", "push"};
-    if (includeUntracked) {
+    if (scope == StashScope::StagedOnly) {
+        // git refuses `--staged` together with untracked files: they are never staged.
+        args.push_back("--staged");
+    } else if (includeUntracked) {
         args.push_back("--include-untracked");
+    }
+    if (scope == StashScope::KeepIndex) {
+        args.push_back("--keep-index");
     }
     if (!message.empty()) {
         args.push_back("-m");

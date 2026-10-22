@@ -364,7 +364,8 @@ void PanelsTest::theStashFormWaitsForATitle() {
     title->setText(QStringLiteral("WIP login"));
     description->setPlainText(QStringLiteral("half done"));
     QVERIFY(stash->isEnabled());
-    QCOMPARE(stash->text(), QStringLiteral("Stash Changes to 2 Files"));
+    // The unstaged changes go; the staged stay for the commit.
+    QCOMPARE(stash->text(), QStringLiteral("Stash 2 Unstaged Files"));
 
     QSignalSpy requested(&panel, &CommitDetailsPanel::stashAllRequested);
     stash->click();
@@ -372,6 +373,10 @@ void PanelsTest::theStashFormWaitsForATitle() {
     QCOMPARE(requested.first().first().toString(), QStringLiteral("WIP login\n\nhalf done"));
     panel.clearStashMessage();
     QVERIFY(title->text().isEmpty());
+
+    title->setText(QStringLiteral("only staged"));
+    panel.showWorkingTree({workingChange(QStringLiteral("a.txt"), ChangeKind::Modified, true)});
+    QCOMPARE(stash->text(), QStringLiteral("Stash 1 Staged File"));
 }
 
 void PanelsTest::discardAllAsks() {

@@ -41,6 +41,7 @@ public:
     void showWorkingTree(const std::vector<FileChange>& changes);
     /// The Commit Panel shows `paths` staged (or unstaged) before the index is written.
     void moveWorkingTreeFiles(const QStringList& paths, bool toStaged);
+    void dropWorkingTreeSide(bool staged);
     void setFilesLoading(bool loading);
     bool filesLoading() const;
     void setWorkingTreeLoading(bool loading);

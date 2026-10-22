@@ -446,6 +446,8 @@ private:
                         std::function<bool(RepoSession&, QString*)> action,
                         std::function<void(bool)> done = {});
     void runNextTreeWrite();
+    void pushStash(const QString& message, bool includeUntracked, const QStringList& paths,
+                   const QString& failureTitle);
     /// Stages, unstages or discards one hunk (or lines of it) as the reader saw it.
     static bool applyHunkTo(RepoSession& session, const QString& path, int hunkIndex,
                             const QVector<int>& lines, RepoSession::HunkApply what,

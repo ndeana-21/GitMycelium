@@ -588,7 +588,8 @@ public:
     /// it is deliberately *not* recorded in the operation log: the log restores
     /// pointers, and restoring those would not bring the stashed content back.
     bool stashPush(const QString& message, bool includeUntracked, const QStringList& paths,
-                   QString* errorOut);
+                   QString* errorOut,
+                   StashScope scope = StashScope::Everything);
     /// `stash` is an oid from `stashList()`, not `stash@{n}` — an index goes
     /// stale as soon as an earlier entry is dropped.
     bool stashApply(const QString& stash, QString* errorOut);

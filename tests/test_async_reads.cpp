@@ -81,6 +81,7 @@ private slots:
     void aStashMadeInTheWindowReloadsTheGraph();
     void aTabSwitchDoesNotKeepTheOtherTabsFile();
     void stagingMovesTheFileAtOnce();
+    void thePanelStashesTheUnstagedFirst();
 };
 
 void AsyncReadsTest::initTestCase() {
@@ -392,6 +393,38 @@ void AsyncReadsTest::stagingMovesTheFileAtOnce() {
     QTRY_VERIFY_WITH_TIMEOUT(allReady(window.loadingStateForDiagnostics()), 5000);
     QCOMPARE(panel->stagedCount(), 1);
     QCOMPARE(panel->unstagedCount(), 1);
+}
+
+void AsyncReadsTest::thePanelStashesTheUnstagedFirst() {
+    // f.txt is staged, g.txt has an unstaged change and new.txt is untracked.
+    QVERIFY(writeFile(QDir(m_repo).filePath(QStringLiteral("g.txt")), QStringLiteral("g\n")));
+    QVERIFY(git(m_repo, {"add", "g.txt"}));
+    QVERIFY(git(m_repo, {"commit", "-qm", "g", "--", "g.txt"}));
+    QVERIFY(git(m_repo, {"add", "f.txt"}));
+    QVERIFY(writeFile(QDir(m_repo).filePath(QStringLiteral("g.txt")), QStringLiteral("g2\n")));
+    QVERIFY(writeFile(QDir(m_repo).filePath(QStringLiteral("new.txt")), QStringLiteral("n\n")));
+    const auto porcelain = [this] {
+        return QString::fromStdString(
+                   runGit({"status", "--porcelain", "--untracked-files=all"}, m_repo.toStdString()).out)
+            .trimmed();
+    };
+
+    MainWindow window;
+    window.setHeadless(true);
+    QVERIFY(window.openRepository(m_repo));
+    auto* panel = window.findChild<WorkingTreePanel*>();
+    QVERIFY(panel);
+    emit panel->stashAllRequested(QStringLiteral("unstaged"));
+    QCOMPARE(porcelain(), QStringLiteral("M  f.txt"));
+    QCOMPARE(panel->unstagedCount(), 0);
+    QCOMPARE(panel->stagedCount(), 1);
+
+    // Nothing unstaged left: the staged change is what goes.
+    emit panel->stashAllRequested(QStringLiteral("staged"));
+    QCOMPARE(porcelain(), QString());
+    QCOMPARE(QString::fromStdString(runGit({"stash", "list", "--format=%s"}, m_repo.toStdString()).out)
+                 .trimmed(),
+             QStringLiteral("On main: staged\nOn main: unstaged"));
 }
 
 QTEST_MAIN(AsyncReadsTest)

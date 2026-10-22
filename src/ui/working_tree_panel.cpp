@@ -745,9 +745,25 @@ void WorkingTreePanel::refreshStashButton() {
         m_stash->setText(QStringLiteral("Nothing to Stash"));
         m_stash->setEnabled(false);
     } else {
-        m_stash->setText(QStringLiteral("Stash Changes to %1").arg(filesText(files)));
+        // The unstaged changes go, the staged stay for the commit; only with nothing
+        // unstaged left does the stash take the staged ones.
+        const int unstaged = unstagedCount();
+        const int count = unstaged > 0 ? unstaged : stagedCount();
+        const QString side = unstaged > 0 ? QStringLiteral("Unstaged") : QStringLiteral("Staged");
+        m_stash->setText(count == 1 ? QStringLiteral("Stash 1 %1 File").arg(side)
+                                    : QStringLiteral("Stash %1 %2 Files").arg(count).arg(side));
         m_stash->setEnabled(true);
     }
+}
+
+void WorkingTreePanel::dropSide(bool staged) {
+    std::vector<FileChange> kept;
+    for (const FileChange& change : m_changes) {
+        if (change.staged != staged) {
+            kept.push_back(change);
+        }
+    }
+    setChanges(kept);
 }
 
 void WorkingTreePanel::refreshTheme() {

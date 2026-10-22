@@ -2253,7 +2253,7 @@ bool runStash(std::unique_ptr<Repository>& repo, QMutex* mutex,
 } // namespace
 
 bool RepoSession::stashPush(const QString& message, bool includeUntracked, const QStringList& paths,
-                            QString* errorOut) {
+                            QString* errorOut, StashScope scope) {
     std::vector<std::string> target;
     target.reserve(static_cast<std::size_t>(paths.size()));
     for (const QString& path : paths) {
@@ -2261,7 +2261,7 @@ bool RepoSession::stashPush(const QString& message, bool includeUntracked, const
     }
     const std::string text = message.toStdString();
     return runStash(m_repo, &m_mutex, &m_snapshotEpoch, errorOut, "git stash push failed",
-                    [&](const StashOps& ops) { return ops.push(text, includeUntracked, target); });
+                    [&](const StashOps& ops) { return ops.push(text, includeUntracked, target, scope); });
 }
 
 bool RepoSession::stashApply(const QString& stash, QString* errorOut) {

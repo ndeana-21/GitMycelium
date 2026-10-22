@@ -35,6 +35,8 @@ public:
     /// Shows `paths` on the other side at once, before git has written the index: the
     /// next status read replaces this guess with what the index holds.
     void moveFiles(const QStringList& paths, bool toStaged);
+    /// Takes one side off the screen at once, as a stash of it will.
+    void dropSide(bool staged);
     void setLoading(bool loading);
     bool loading() const;
     void setBranch(const QString& name, const QColor& color);

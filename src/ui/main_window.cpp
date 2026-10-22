@@ -3950,17 +3950,24 @@ void MainWindow::stashAllChanges(const QString& message) {
     if (!m_session || !m_session->isOpen()) {
         return;
     }
-    const std::size_t before = m_stashes.size();
-    QString error;
-    // Untracked files too: the form counts them among the files it stashes.
-    if (!m_session->stashPush(message, true, {}, &error)) {
-        reportFailure(QStringLiteral("Cannot stash"), error);
-        return;
-    }
-    m_details->clearStashMessage();
-    refreshPanels();
-    setStatus(m_stashes.size() > before ? QStringLiteral("Stashed the working changes.")
-                                        : QStringLiteral("Nothing to stash."));
+    // The unstaged changes, untracked files among them, with the staged left for the
+    // commit; the staged ones only when nothing else is left.
+    const bool unstaged = !m_details->unstagedPaths().isEmpty();
+    const StashScope scope = unstaged ? StashScope::KeepIndex : StashScope::StagedOnly;
+    m_details->dropWorkingTreeSide(!unstaged);
+    setStatus(QStringLiteral("Stashing…"));
+    queueTreeWrite(
+        QStringLiteral("Cannot stash"),
+        [message, scope](RepoSession& session, QString* error) {
+            return session.stashPush(message, true, {}, error, scope);
+        },
+        [this, unstaged](bool ok) {
+            if (ok) {
+                m_details->clearStashMessage();
+                setStatus(unstaged ? QStringLiteral("Stashed the unstaged changes.")
+                                   : QStringLiteral("Stashed the staged changes."));
+            }
+        });
 }
 
 void MainWindow::onCoauthorsRequested() {
@@ -10573,15 +10580,7 @@ void MainWindow::stashWorkingTree() {
     if (dialog.exec() != QDialog::Accepted) {
         return;
     }
-    const std::size_t before = m_stashes.size();
-    QString error;
-    if (!m_session->stashPush(dialog.message(), dialog.includeUntracked(), {}, &error)) {
-        reportFailure(QStringLiteral("Cannot stash"), error);
-        return;
-    }
-    refreshPanels();
-    setStatus(m_stashes.size() > before ? QStringLiteral("Stashed the working changes.")
-                                        : QStringLiteral("Nothing to stash."));
+    pushStash(dialog.message(), dialog.includeUntracked(), {}, QStringLiteral("Cannot stash"));
 }
 
 void MainWindow::stashFiles(const QStringList& paths) {
@@ -10593,13 +10592,31 @@ void MainWindow::stashFiles(const QStringList& paths) {
     if (dialog.exec() != QDialog::Accepted) {
         return;
     }
-    QString error;
-    if (!m_session->stashPush(dialog.message(), dialog.includeUntracked(), paths, &error)) {
-        reportFailure(QStringLiteral("Cannot stash the selected files"), error);
-        return;
-    }
-    refreshPanels();
-    setStatus(QStringLiteral("Stashed %1 file(s).").arg(paths.size()));
+    pushStash(dialog.message(), dialog.includeUntracked(), paths,
+              QStringLiteral("Cannot stash the selected files"));
+}
+
+void MainWindow::pushStash(const QString& message, bool includeUntracked,
+                           const QStringList& paths, const QString& failureTitle) {
+    setStatus(QStringLiteral("Stashing…"));
+    // git says nothing was stashed by succeeding without a new entry.
+    auto made = std::make_shared<bool>(false);
+    queueTreeWrite(
+        failureTitle,
+        [message, includeUntracked, paths, made](RepoSession& session, QString* error) {
+            const std::size_t before = session.stashList().size();
+            const bool ok = session.stashPush(message, includeUntracked, paths, error);
+            *made = ok && session.stashList().size() > before;
+            return ok;
+        },
+        [this, made, paths](bool ok) {
+            if (!ok) {
+                return;
+            }
+            setStatus(!*made          ? QStringLiteral("Nothing to stash.")
+                      : paths.isEmpty() ? QStringLiteral("Stashed the working changes.")
+                                        : QStringLiteral("Stashed %1 file(s).").arg(paths.size()));
+        });
 }
 
 void MainWindow::popTopStash() {
@@ -10615,22 +10632,24 @@ void MainWindow::restoreStash(const QString& oid, bool drop, const QString& labe
     if (!m_session || !m_session->isOpen() || oid.isEmpty()) {
         return;
     }
-    QString error;
-    const bool ok = drop ? m_session->stashPop(oid, &error) : m_session->stashApply(oid, &error);
-    refreshPanels();
-    if (!ok) {
-        reportFailure(drop ? QStringLiteral("Cannot pop the stash")
-                           : QStringLiteral("Cannot apply the stash"),
-                      error);
-        // A conflicting pop or apply leaves unmerged entries with no MERGE_HEAD or
-        // REBASE_HEAD, so the conflict page is opened by looking at the conflicts
-        // themselves — the operation-state check would find nothing to show.
-        if (!m_session->conflicts().empty()) {
-            showConflictsPage();
-        }
-        return;
-    }
-    setStatus(QStringLiteral("Restored %1.").arg(label));
+    setStatus(QStringLiteral("Restoring %1…").arg(label));
+    queueTreeWrite(
+        drop ? QStringLiteral("Cannot pop the stash") : QStringLiteral("Cannot apply the stash"),
+        [oid, drop](RepoSession& session, QString* error) {
+            return drop ? session.stashPop(oid, error) : session.stashApply(oid, error);
+        },
+        [this, label](bool ok) {
+            if (ok) {
+                setStatus(QStringLiteral("Restored %1.").arg(label));
+                return;
+            }
+            // A conflicting pop or apply leaves unmerged entries with no MERGE_HEAD or
+            // REBASE_HEAD, so the conflict page is opened by looking at the conflicts
+            // themselves — the operation-state check would find nothing to show.
+            if (!m_session->conflicts().empty()) {
+                showConflictsPage();
+            }
+        });
 }
 
 void MainWindow::dropStash(const QString& oid, const QString& label) {
@@ -10641,13 +10660,14 @@ void MainWindow::dropStash(const QString& oid, const QString& label) {
                 QStringLiteral("Drop %1?\nThis cannot be undone.").arg(label))) {
         return;
     }
-    QString error;
-    if (!m_session->stashDrop(oid, &error)) {
-        reportFailure(QStringLiteral("Cannot drop the stash"), error);
-        return;
-    }
-    refreshPanels();
-    setStatus(QStringLiteral("Dropped %1.").arg(label));
+    queueTreeWrite(
+        QStringLiteral("Cannot drop the stash"),
+        [oid](RepoSession& session, QString* error) { return session.stashDrop(oid, error); },
+        [this, label](bool ok) {
+            if (ok) {
+                setStatus(QStringLiteral("Dropped %1.").arg(label));
+            }
+        });
 }
 
 void MainWindow::branchFromStash(const QString& oid, const QString& label) {
