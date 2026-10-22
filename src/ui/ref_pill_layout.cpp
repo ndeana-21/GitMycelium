@@ -35,6 +35,11 @@ int headRoom(bool isHead) {
     return isHead ? kHeadSide + 3 : 0;
 }
 
+/// A tag is a luggage tag, its left end a point: the text starts past it.
+int tagPointRoom(RefKind kind, int pillH) {
+    return kind == RefKind::Tag ? RefPillLayout::tagPointDepth(pillH) + 2 : 0;
+}
+
 bool isBranchKind(RefKind kind) {
     return kind == RefKind::LocalBranch || kind == RefKind::RemoteBranch;
 }
@@ -231,7 +236,7 @@ std::vector<RefPill> RefPillLayout::arrange(const QStringList& labels, const QVa
         pill.trackingText = RefPillLayout::trackingText(shownTrackings.at(i).toInt());
 
         const int room = showIcon ? iconRoom(pill.kind, pill.hasRemote) : 0;
-        const int lead = showIcon ? headRoom(pill.isHead) : 0;
+        const int lead = (showIcon ? headRoom(pill.isHead) : 0) + tagPointRoom(pill.kind, pillH);
         const int badgeW =
             pill.trackingText.isEmpty() ? 0 : metrics.horizontalAdvance(pill.trackingText);
         const int badgeRoom = badgeW > 0 ? badgeW + kTrackGap : 0;
@@ -298,6 +303,10 @@ const RefPill* RefPillLayout::hitTest(const std::vector<RefPill>& pills, const Q
         }
     }
     return nullptr;
+}
+
+int RefPillLayout::tagPointDepth(int pillH) {
+    return std::max(5, pillH / 2);
 }
 
 } // namespace gk

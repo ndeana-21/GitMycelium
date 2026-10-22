@@ -43,6 +43,23 @@ void drawHeadCheck(QPainter* painter, const QRectF& box, const QColor& color) {
 
 constexpr qreal kDimmedRowOpacity = 0.32;
 
+/// Five sides: square on the right, a point on the left where the string would go.
+QPainterPath tagOutline(const QRect& rect) {
+    const QRectF box = QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5);
+    const qreal point = RefPillLayout::tagPointDepth(rect.height());
+    const qreal radius = 2.5;
+    QPainterPath path;
+    path.moveTo(box.left(), box.center().y());
+    path.lineTo(box.left() + point, box.top());
+    path.lineTo(box.right() - radius, box.top());
+    path.quadTo(box.right(), box.top(), box.right(), box.top() + radius);
+    path.lineTo(box.right(), box.bottom() - radius);
+    path.quadTo(box.right(), box.bottom(), box.right() - radius, box.bottom());
+    path.lineTo(box.left() + point, box.bottom());
+    path.closeSubpath();
+    return path;
+}
+
 } // namespace
 
 void paintRefPill(QPainter* painter, const RefPill& pill, const QFont& font) {
@@ -50,25 +67,36 @@ void paintRefPill(QPainter* painter, const RefPill& pill, const QFont& font) {
     painter->setFont(font);
 
     const QColor branch = theme::branchColor(pill.colorIndex);
-    painter->setPen(Qt::NoPen);
-    painter->setBrush(theme::branchLabelFill(branch));
-    painter->drawRoundedRect(pill.rect, 3, 3);
-
+    const QColor text = theme::branchLabelText(branch);
     QPen border(theme::branchLabelBorder(branch));
     border.setWidth(1);
-    // Shape carries the kind as well as colour: a remote-tracking branch is
-    // dashed, a tag dotted. Colour alone would be ambiguous for the colour
-    // blind and when the palette wraps.
-    switch (pill.kind) {
-    case RefKind::RemoteBranch: border.setStyle(Qt::DashLine); break;
-    case RefKind::Tag: border.setStyle(Qt::DotLine); break;
-    default: break;
+    // Shape carries the kind as well as colour: a tag is a luggage tag, a
+    // remote-tracking branch has a dashed edge. Colour alone would be ambiguous for
+    // the colour blind and when the palette wraps.
+    if (pill.kind == RefKind::Tag) {
+        const QPainterPath outline = tagOutline(pill.rect);
+        painter->setRenderHint(QPainter::Antialiasing, true);
+        painter->fillPath(outline, theme::branchLabelFill(branch));
+        border.setJoinStyle(Qt::RoundJoin);
+        painter->strokePath(outline, border);
+        const qreal hole = std::max(1.2, pill.rect.height() / 9.0);
+        const QPointF centre(pill.rect.left() + RefPillLayout::tagPointDepth(pill.rect.height()) + 1.5,
+                             pill.rect.top() + pill.rect.height() / 2.0);
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(text);
+        painter->drawEllipse(centre, hole, hole);
+    } else {
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(theme::branchLabelFill(branch));
+        painter->drawRoundedRect(pill.rect, 3, 3);
+        if (pill.kind == RefKind::RemoteBranch) {
+            border.setStyle(Qt::DashLine);
+        }
+        painter->setPen(border);
+        painter->setBrush(Qt::NoBrush);
+        painter->drawRoundedRect(pill.rect.adjusted(0, 0, -1, -1), 3, 3);
     }
-    painter->setPen(border);
-    painter->setBrush(Qt::NoBrush);
-    painter->drawRoundedRect(pill.rect.adjusted(0, 0, -1, -1), 3, 3);
 
-    const QColor text = theme::branchLabelText(branch);
     painter->setPen(text);
     painter->drawText(pill.textRect, Qt::AlignVCenter | Qt::AlignLeft, pill.text);
     if (!pill.trackingText.isEmpty() && pill.badgeRect.isValid()) {

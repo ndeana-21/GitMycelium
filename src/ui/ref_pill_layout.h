@@ -49,6 +49,8 @@ struct RefPill {
 /// that twice is how drag-and-drop ends up off by one row.
 class RefPillLayout {
 public:
+    /// How far a tag's point reaches into its pill, for a pill `pillH` tall.
+    static int tagPointDepth(int pillH);
     /// Lays out up to `maxVisible` labels stacked in the cell, plus a "+N" badge when
     /// more references point at the same commit. Branches at the same commit collapse
     /// into one pill — named after `headBranch`, else `focusedBranch`, else a local

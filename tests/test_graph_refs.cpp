@@ -46,6 +46,7 @@ class GraphAndRefsTest : public QObject {
 
 private slots:
     void everyBranchTipGetsItsOwnLaneAndColour();
+    void aTagLeavesRoomForItsPoint();
     void importantBranchGetsTheLeftmostLane();
     void tipColourIsCarriedDownTheBranchLine();
     void consecutiveRowsAgreeOnLiveLanes();
@@ -208,6 +209,22 @@ void GraphAndRefsTest::anIconlessArrangementGivesTheWidthBackToTheName() {
     QVERIFY(!withIcons.front().iconRect.isNull());
     QVERIFY(withoutIcons.front().iconRect.isNull());
     QVERIFY(withoutIcons.front().textRect.width() > withIcons.front().textRect.width());
+}
+
+void GraphAndRefsTest::aTagLeavesRoomForItsPoint() {
+    // A tag is drawn as a luggage tag; its name starts past the point, which the
+    // layout reserves, so painting and hit-testing agree on where the text is.
+    const QRect cell(0, 0, 220, 30);
+    const auto branch = RefPillLayout::arrange({QStringLiteral("v1.0")}, {0},
+                                               {int(RefKind::LocalBranch)}, {}, cell, QString(),
+                                               QString(), /*showIcon=*/false);
+    const auto tag = RefPillLayout::arrange({QStringLiteral("v1.0")}, {0}, {int(RefKind::Tag)},
+                                            {}, cell, QString(), QString(), /*showIcon=*/false);
+    QCOMPARE(tag.size(), std::size_t{1});
+    const int point = RefPillLayout::tagPointDepth(tag.front().rect.height());
+    QVERIFY(tag.front().textRect.left() >= tag.front().rect.left() + point);
+    QCOMPARE(tag.front().textRect.width(), branch.front().textRect.width());
+    QVERIFY(tag.front().rect.width() > branch.front().rect.width());
 }
 
 void GraphAndRefsTest::branchesOnOneCommitCollapseIntoOnePill() {
