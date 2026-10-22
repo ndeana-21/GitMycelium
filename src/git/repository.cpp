@@ -389,6 +389,18 @@ bool trustsFileMode(git_repository* repo) {
     return value != 0;
 }
 
+// libgit2 keeps the index it read when the repository was opened, and the git
+// binary (a commit with a hook, a stash, a terminal) rewrites the file behind it.
+// A write that libgit2 makes from its own copy, a reset or an apply, puts that old
+// copy back: everything git did since is undone. Read the file first.
+void reloadIndex(git_repository* repo) {
+    git_index* index = nullptr;
+    if (git_repository_index(&index, repo) == 0) {
+        git_index_read(index, 1);
+        git_index_free(index);
+    }
+}
+
 bool pathUsesExternalFilter(git_repository* repo, const std::string& path) {
     const char* value = nullptr;
     if (git_attr_get(&value, repo, GIT_ATTR_CHECK_FILE_THEN_INDEX, path.c_str(), "filter") != 0 ||
@@ -1462,6 +1474,7 @@ void Repository::unstagePaths(const std::vector<std::string>& paths) {
         names.push_back(const_cast<char*>(path.c_str()));
     }
     git_strarray pathspec = {names.data(), names.size()};
+    reloadIndex(m_repo);
     const int rc = git_reset_default(m_repo, target, &pathspec);
     git_object_free(target);
     check(rc, paths.size() == 1 ? "cannot unstage " + paths.front()
@@ -2262,6 +2275,7 @@ void Repository::applyPatchToIndex(const std::string& patch) {
     git_diff* diff = nullptr;
     check(git_diff_from_buffer(&diff, patch.c_str(), patch.size()),
           "cannot parse the generated patch");
+    reloadIndex(m_repo);
     const int rc = git_apply(m_repo, diff, GIT_APPLY_LOCATION_INDEX, nullptr);
     git_diff_free(diff);
     check(rc, "the change could not be applied to the index");
@@ -4899,6 +4913,7 @@ void Repository::resetTo(const Oid& commitId, ResetMode mode) {
     case ResetMode::Hard: kind = GIT_RESET_HARD; break;
     }
 
+    reloadIndex(m_repo);
     const int rc = git_reset(m_repo, target, kind, nullptr);
     git_object_free(target);
     check(rc, "cannot reset to " + commitId);

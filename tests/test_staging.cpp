@@ -72,6 +72,7 @@ private slots:
 
     void stageAllTakesNewModifiedAndDeletedAtOnce();
     void manyPathsAreStagedAndUnstagedInOneGo();
+    void unstagingKeepsWhatTheBinaryWroteToTheIndex();
 
     void discardingRestoresTheIndexVersionOnDisk();
     void discardingAnUntrackedFileDeletesIt();
@@ -266,6 +267,25 @@ void StagingTest::manyPathsAreStagedAndUnstagedInOneGo() {
     QCOMPARE(gitOut(m_path, {"diff", "--cached", "--name-status"}).trimmed(),
              QStringLiteral("M\tkeep.txt"));
     QVERIFY(QFile::exists(QDir(m_path).filePath(QStringLiteral("added.txt"))));
+}
+
+void StagingTest::unstagingKeepsWhatTheBinaryWroteToTheIndex() {
+    QVERIFY(commitFile(QStringLiteral("a.txt"), QStringLiteral("a0\n"), QStringLiteral("base")));
+    QVERIFY(commitFile(QStringLiteral("b.txt"), QStringLiteral("b0\n"), QStringLiteral("second")));
+    QVERIFY(writeFile(m_path, QStringLiteral("a.txt"), QStringLiteral("a1\n")));
+    QVERIFY(writeFile(m_path, QStringLiteral("b.txt"), QStringLiteral("b1\n")));
+    QString error;
+    QVERIFY2(m_session->stageFiles({QStringLiteral("b.txt")}, &error), qPrintable(error));
+
+    // A commit made by the binary (a hook, signing, a terminal) rewrites the index
+    // behind libgit2's copy. Unstaging must not write that old copy back: a.txt
+    // would come out of the index as it was before the commit, a reverted change.
+    QVERIFY(git(m_path, {"add", "a.txt"}));
+    QVERIFY(git(m_path, {"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "a1",
+                         "--", "a.txt"}));
+    QVERIFY2(m_session->unstageFiles({QStringLiteral("b.txt")}, &error), qPrintable(error));
+    QCOMPARE(gitOut(m_path, {"diff", "--cached", "--name-status"}).trimmed(), QString());
+    QCOMPARE(gitOut(m_path, {"diff", "--name-status"}).trimmed(), QStringLiteral("M\tb.txt"));
 }
 
 void StagingTest::discardingRestoresTheIndexVersionOnDisk() {
