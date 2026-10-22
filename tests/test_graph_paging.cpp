@@ -14,7 +14,10 @@
 
 #include <QDragMoveEvent>
 #include <QFile>
+#include <QHeaderView>
 #include <QMimeData>
+#include <QSignalSpy>
+#include <QToolButton>
 #include <QScrollBar>
 
 #include <QProcess>
@@ -77,6 +80,7 @@ private slots:
     void anIdleViewHoldsOnePageAndScrollingLoadsTheRest();
     void aCommitRefreshesTheGraphInPlace();
     void aDragAtTheEdgeScrollsTheGraph();
+    void aGearAtTheEndOfTheHeadingsPicksTheColumns();
 
 private:
     std::unique_ptr<QTemporaryDir> m_dir;
@@ -178,6 +182,22 @@ void GraphPagingTest::aDragAtTheEdgeScrollsTheGraph() {
     const int left = bar->value();
     QTest::qWait(100);
     QCOMPARE(bar->value(), left);
+}
+
+void GraphPagingTest::aGearAtTheEndOfTheHeadingsPicksTheColumns() {
+    CommitGraphView view;
+    view.resize(900, 500);
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    auto* gear = view.findChild<QToolButton*>(QStringLiteral("graphColumnsButton"));
+    QVERIFY(gear);
+    QTRY_VERIFY(gear->isVisible());
+    QCOMPARE(gear->parentWidget(), static_cast<QWidget*>(view.header()));
+    QVERIFY(gear->geometry().right() <= view.header()->width());
+    QVERIFY(gear->geometry().right() >= view.header()->width() - 6);
+    QSignalSpy asked(&view, &CommitGraphView::columnsMenuRequested);
+    gear->click();
+    QCOMPARE(asked.count(), 1);
 }
 
 void GraphPagingTest::anIdleViewHoldsOnePageAndScrollingLoadsTheRest() {

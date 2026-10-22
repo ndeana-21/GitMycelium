@@ -6,6 +6,7 @@
 #include "ui/graph_delegate.h"
 #include "ui/ref_pill_layout.h"
 #include "ui/refs_delegate.h"
+#include "ui/themed_icons.h"
 
 #include "theme/theme.h"
 
@@ -16,6 +17,7 @@
 #include <QDragMoveEvent>
 #include <QDropEvent>
 #include <QFontMetrics>
+#include <QHeaderView>
 #include <QHideEvent>
 #include <QItemSelectionModel>
 #include <QMimeData>
@@ -28,6 +30,7 @@
 #include <QThread>
 #include <QScrollBar>
 #include <QTimer>
+#include <QToolButton>
 
 #include <algorithm>
 #include <cstdio>
@@ -47,6 +50,18 @@ CommitGraphView::CommitGraphView(QWidget* parent) : QTreeView(parent) {
     // The pointer has to be followed without a button held down: the hover badge has no
     // click to hang it off.
     setMouseTracking(true);
+
+    // Over the right end of the headings, where it does not move with the columns.
+    m_columnsButton = new QToolButton(header());
+    m_columnsButton->setObjectName(QStringLiteral("graphColumnsButton"));
+    m_columnsButton->setAutoRaise(true);
+    m_columnsButton->setCursor(Qt::ArrowCursor);
+    m_columnsButton->setToolTip(QStringLiteral("Columns"));
+    setThemedIcon(m_columnsButton, Icon::Gear, IconTint::Dim);
+    connect(m_columnsButton, &QToolButton::clicked, this, [this] {
+        emit columnsMenuRequested(
+            m_columnsButton->mapToGlobal(QPoint(0, m_columnsButton->height())));
+    });
 
     m_flightTimer = new QTimer(this);
     m_flightTimer->setInterval(16);
@@ -1657,6 +1672,19 @@ void CommitGraphView::startCommitDrag() {
     m_dragInFlight = drag;
     drag->exec(Qt::CopyAction);
     stopDragScroll();
+}
+
+void CommitGraphView::updateGeometries() {
+    QTreeView::updateGeometries();
+    if (!m_columnsButton) {
+        return;
+    }
+    const int side = std::max(12, header()->height() - 4);
+    m_columnsButton->setIconSize(QSize(side - 6, side - 6));
+    m_columnsButton->setGeometry(header()->width() - side - 2, (header()->height() - side) / 2,
+                                 side, side);
+    m_columnsButton->setVisible(!header()->isHidden());
+    m_columnsButton->raise();
 }
 
 QRect CommitGraphView::workingTreeDropRect(const QPoint& pos) const {

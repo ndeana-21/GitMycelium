@@ -1844,6 +1844,10 @@ void MainWindow::buildCommitPanel() {
     header->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(header, &QHeaderView::customContextMenuRequested, this,
             &MainWindow::showCommitColumnMenu);
+    connect(m_commitView, &CommitGraphView::columnsMenuRequested, this,
+            [this](const QPoint& globalPos) {
+                showCommitColumnMenu(m_commitView->header()->mapFromGlobal(globalPos));
+            });
 
     connect(m_commitView, &CommitGraphView::refFocused, this, [this](const QString& name) {
         m_commitModel->setFocusedBranch(name);

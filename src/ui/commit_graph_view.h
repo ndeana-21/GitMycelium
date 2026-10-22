@@ -28,6 +28,7 @@ class QPainter;
 class QResizeEvent;
 class QDrag;
 class QTimer;
+class QToolButton;
 
 namespace gk {
 
@@ -132,6 +133,8 @@ public:
     void setDropPreview(const QString& text, bool warns = false);
 
 signals:
+    /// The gear at the right end of the column headings: which columns to show.
+    void columnsMenuRequested(QPoint globalPos);
     void refDroppedOnRef(gk::RefModel::DraggedRef source, QString targetShortName);
     /// The window answers with setDropPreview, synchronously, so the list can carry the
     /// merge-tree prediction before it is measured.
@@ -158,6 +161,7 @@ signals:
     void checkoutTargetRequested(QString target);
 
 protected:
+    void updateGeometries() override;
     void contextMenuEvent(QContextMenuEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
@@ -313,6 +317,7 @@ private:
     QString m_dropTarget;
     QRect m_dropTargetRect;
     QVariantAnimation* m_dropPulse = nullptr;
+    QToolButton* m_columnsButton = nullptr;
     /// Scrolling while something is dragged near, or past, the top or bottom edge.
     QTimer* m_dragScroll = nullptr;
     int m_dragScrollStep = 0;
