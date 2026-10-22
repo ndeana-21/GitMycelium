@@ -30,6 +30,8 @@
 #include <QVBoxLayout>
 
 #include <functional>
+#include <map>
+#include <optional>
 #include <set>
 #include <utility>
 
@@ -556,6 +558,7 @@ QWidget* WorkingTreePanel::buildStashForm() {
 }
 
 void WorkingTreePanel::setChanges(const std::vector<FileChange>& changes) {
+    m_changes = changes;
     // The file the reader is on stays chosen across a refresh, and choosing it again
     // re-reads its diff: an edit saved in another program shows up where it is read.
     QString keptPath;
@@ -583,6 +586,72 @@ void WorkingTreePanel::setChanges(const std::vector<FileChange>& changes) {
         (!selectPath(keptPath, keptStaged) && !selectPath(keptPath, !keptStaged))) {
         selectFirstFile();
     }
+}
+
+namespace {
+
+/// What one side's entry becomes on the other side, and what is left once it meets
+/// the other side's own entry for the path. A guess for the moment before the index
+/// is written; the status read after it is the truth.
+std::optional<FileChange> movedChange(const FileChange& moving, const FileChange* other,
+                                      bool toStaged) {
+    FileChange out = moving;
+    out.staged = toStaged;
+    if (toStaged) {
+        if (moving.kind == ChangeKind::Untracked) {
+            out.kind = ChangeKind::Added;
+        }
+        if (other && moving.kind != ChangeKind::Deleted) {
+            out.kind = other->kind;
+        } else if (other && other->kind == ChangeKind::Added) {
+            return std::nullopt;
+        }
+        return out;
+    }
+    if (other) {
+        return *other;
+    }
+    if (moving.kind == ChangeKind::Added) {
+        out.kind = ChangeKind::Untracked;
+    }
+    return out;
+}
+
+} // namespace
+
+void WorkingTreePanel::moveFiles(const QStringList& paths, bool toStaged) {
+    const std::set<std::string> moving = [&] {
+        std::set<std::string> out;
+        for (const QString& path : paths) {
+            out.insert(path.toStdString());
+        }
+        return out;
+    }();
+    std::vector<FileChange> kept;
+    std::map<std::string, const FileChange*> from;
+    std::map<std::string, const FileChange*> to;
+    for (const FileChange& change : m_changes) {
+        if (moving.count(change.path) == 0 || change.submodule) {
+            kept.push_back(change);
+        } else if (change.staged == toStaged) {
+            to[change.path] = &change;
+        } else {
+            from[change.path] = &change;
+        }
+    }
+    for (const auto& [path, change] : to) {
+        if (from.count(path) == 0) {
+            kept.push_back(*change);
+        }
+    }
+    for (const auto& [path, change] : from) {
+        const auto existing = to.find(path);
+        if (const auto moved =
+                movedChange(*change, existing == to.end() ? nullptr : existing->second, toStaged)) {
+            kept.push_back(*moved);
+        }
+    }
+    setChanges(kept);
 }
 
 void WorkingTreePanel::setBranch(const QString& name, const QColor& color) {
@@ -849,6 +918,16 @@ bool WorkingTreePanel::pushAfterCommit() const {
 
 int WorkingTreePanel::stagedCount() const {
     return m_staged.model->fileCount();
+}
+
+QStringList WorkingTreePanel::unstagedPaths() const {
+    QStringList out;
+    for (const FileChange& change : m_changes) {
+        if (!change.staged) {
+            out.append(QString::fromStdString(change.path));
+        }
+    }
+    return out;
 }
 
 QStringList WorkingTreePanel::stagedPaths() const {

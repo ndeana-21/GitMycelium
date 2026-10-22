@@ -1369,6 +1369,13 @@ std::vector<std::string> Repository::ignoredPaths(const std::string& workDir) {
 }
 
 void Repository::stageFile(const std::string& path) {
+    stagePaths({path});
+}
+
+void Repository::stagePaths(const std::vector<std::string>& paths) {
+    if (paths.empty()) {
+        return;
+    }
     git_index* index = nullptr;
     check(git_repository_index(&index, m_repo), "cannot read the index");
     // The git binary writes the index too, and libgit2 keeps the copy it read
@@ -1376,50 +1383,61 @@ void Repository::stageFile(const std::string& path) {
     // staged by `git add` disappears the moment we touch the index.
     git_index_read(index, 1);
 
-    // A submodule is a gitlink, not a file: `git_index_add_bypath` cannot record a
-    // directory, so the binary records the checked-out commit (`git add <path>`).
-    // The registration is checked too, because an uninitialized submodule has a
-    // gitlink in the index and no nested repository to read.
-    const git_index_entry* existing = git_index_get_bypath(index, path.c_str(), 0);
-    const bool gitlink = existing && existing->mode == GIT_FILEMODE_COMMIT;
-    if (gitlink || isRegisteredSubmodule(m_repo, path.c_str())) {
-        git_index_free(index);
-        const RepoInfo repositoryInfo = info();
-        if (repositoryInfo.workDir.empty()) {
-            fail("cannot stage a submodule in a bare repository");
+    // One read and one write of the index for every path: on a large repository the
+    // index is tens of megabytes, and a write per file made staging a folder crawl.
+    std::vector<std::string> viaGit;
+    std::string failure;
+    bool touched = false;
+    for (const std::string& path : paths) {
+        // A submodule is a gitlink, not a file: `git_index_add_bypath` cannot record a
+        // directory, so the binary records the checked-out commit (`git add <path>`).
+        // The registration is checked too, because an uninitialized submodule has a
+        // gitlink in the index and no nested repository to read. A file a clean filter
+        // owns (git-lfs) is the binary's as well.
+        const git_index_entry* existing = git_index_get_bypath(index, path.c_str(), 0);
+        const bool gitlink = existing && existing->mode == GIT_FILEMODE_COMMIT;
+        const std::filesystem::path full = workDirOf(m_repo) / path;
+        const bool onDisk = std::filesystem::exists(full);
+        if (gitlink || isRegisteredSubmodule(m_repo, path.c_str()) ||
+            (onDisk && pathUsesExternalFilter(m_repo, path))) {
+            viaGit.push_back(path);
+            continue;
         }
-        const ProcessResult result = runGit({"add", "--", path}, repositoryInfo.workDir);
-        if (result.exitCode != 0) {
-            fail("cannot stage submodule '" + path + "': " +
-                 (result.err.empty() ? result.out : result.err));
+        const int rc = onDisk ? git_index_add_bypath(index, path.c_str())
+                              : git_index_remove_bypath(index, path.c_str());
+        // A path that is neither on disk nor in the index was never tracked: there is
+        // nothing to stage, and reporting a failure for it would be a lie.
+        if (rc == 0) {
+            touched = true;
+        } else if (rc != GIT_ENOTFOUND && failure.empty()) {
+            const git_error* error = git_error_last();
+            failure = "cannot stage " + path +
+                      (error && error->message ? std::string(": ") + error->message : std::string());
         }
-        return;
     }
-
-    const std::filesystem::path full = workDirOf(m_repo) / path;
-    if (std::filesystem::exists(full) && pathUsesExternalFilter(m_repo, path)) {
-        git_index_free(index);
-        stageWithGit(m_repo, {path});
-        return;
-    }
-    const int rc = std::filesystem::exists(full) ? git_index_add_bypath(index, path.c_str())
-                                                 : git_index_remove_bypath(index, path.c_str());
-    // A path that is neither on disk nor in the index was never tracked: there is
-    // nothing to stage, and reporting a failure for it would be a lie.
-    if (rc == GIT_ENOTFOUND) {
-        git_index_free(index);
-        return;
-    }
-    const int written = rc == 0 ? git_index_write(index) : rc;
+    const int written = touched ? git_index_write(index) : 0;
     git_index_free(index);
-    check(written, "cannot stage " + path);
+    check(written, "cannot write the index");
+    if (!viaGit.empty()) {
+        stageWithGit(m_repo, viaGit);
+    }
+    if (!failure.empty()) {
+        fail(failure);
+    }
 }
 
 void Repository::unstageFile(const std::string& path) {
-    // `git reset -- <path>`: the index entry goes back to HEAD's version, and for
-    // a path HEAD does not have (a newly added file) it leaves the index. The
-    // target is HEAD's commit; libgit2 takes a null target to mean "remove from
-    // the index", not "HEAD", which is the opposite of what unstage has to do.
+    unstagePaths({path});
+}
+
+void Repository::unstagePaths(const std::vector<std::string>& paths) {
+    if (paths.empty()) {
+        return;
+    }
+    // `git reset -- <paths>`: each index entry goes back to HEAD's version, and a
+    // path HEAD does not have (a newly added file) leaves the index. The target is
+    // HEAD's commit; libgit2 takes a null target to mean "remove from the index",
+    // not "HEAD", which is the opposite of what unstage has to do.
     git_object* target = nullptr; // the HEAD commit, owned; freed as a git_object
     git_reference* head = nullptr;
     const int headRc = git_repository_head(&head, m_repo);
@@ -1436,11 +1454,16 @@ void Repository::unstageFile(const std::string& path) {
         check(headRc, "cannot read HEAD");
     }
 
-    char* paths[1] = {const_cast<char*>(path.c_str())};
-    git_strarray pathspec = {paths, 1};
+    std::vector<char*> names;
+    names.reserve(paths.size());
+    for (const std::string& path : paths) {
+        names.push_back(const_cast<char*>(path.c_str()));
+    }
+    git_strarray pathspec = {names.data(), names.size()};
     const int rc = git_reset_default(m_repo, target, &pathspec);
     git_object_free(target);
-    check(rc, "cannot unstage " + path);
+    check(rc, paths.size() == 1 ? "cannot unstage " + paths.front()
+                                : "cannot unstage " + std::to_string(paths.size()) + " files");
 }
 
 void Repository::stageAll() {

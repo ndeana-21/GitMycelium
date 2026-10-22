@@ -80,6 +80,7 @@ private slots:
     void aStashMadeOutsideReloadsTheGraph();
     void aStashMadeInTheWindowReloadsTheGraph();
     void aTabSwitchDoesNotKeepTheOtherTabsFile();
+    void stagingMovesTheFileAtOnce();
 };
 
 void AsyncReadsTest::initTestCase() {
@@ -359,6 +360,38 @@ void AsyncReadsTest::aTabSwitchDoesNotKeepTheOtherTabsFile() {
     window.tabsForDiagnostics(QStringLiteral("activate"), {QStringLiteral("0")});
     QTRY_COMPARE_WITH_TIMEOUT(diff->document().path, QStringLiteral("f.txt"), 5000);
     QVERIFY(diffShows(diff, "dirty"));
+}
+
+void AsyncReadsTest::stagingMovesTheFileAtOnce() {
+    QVERIFY(writeFile(QDir(m_repo).filePath(QStringLiteral("new.txt")), QStringLiteral("new\n")));
+    MainWindow window;
+    window.setHeadless(true);
+    window.setAsyncReadsEnabled(true);
+    QVERIFY(window.openRepository(m_repo));
+    QTRY_VERIFY_WITH_TIMEOUT(allReady(window.loadingStateForDiagnostics()), 5000);
+    auto* panel = window.findChild<WorkingTreePanel*>();
+    QVERIFY(panel);
+    QTRY_COMPARE_WITH_TIMEOUT(panel->unstagedCount(), 2, 5000);
+
+    // On screen before git has written anything; the index catches up behind it.
+    emit panel->stageRequested({QStringLiteral("f.txt"), QStringLiteral("new.txt")});
+    QCOMPARE(panel->stagedCount(), 2);
+    QCOMPARE(panel->unstagedCount(), 0);
+    QTRY_COMPARE_WITH_TIMEOUT(
+        QString::fromStdString(runGit({"diff", "--cached", "--name-only"}, m_repo.toStdString()).out)
+            .trimmed(),
+        QStringLiteral("f.txt\nnew.txt"), 5000);
+
+    emit panel->unstageRequested({QStringLiteral("new.txt")});
+    QCOMPARE(panel->stagedCount(), 1);
+    QCOMPARE(panel->unstagedCount(), 1);
+    QTRY_COMPARE_WITH_TIMEOUT(
+        QString::fromStdString(runGit({"diff", "--cached", "--name-only"}, m_repo.toStdString()).out)
+            .trimmed(),
+        QStringLiteral("f.txt"), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(allReady(window.loadingStateForDiagnostics()), 5000);
+    QCOMPARE(panel->stagedCount(), 1);
+    QCOMPARE(panel->unstagedCount(), 1);
 }
 
 QTEST_MAIN(AsyncReadsTest)

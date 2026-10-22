@@ -442,6 +442,12 @@ void CommitDetailsPanel::showWorkingTree(const std::vector<FileChange>& changes)
     m_wip->setChanges(changes);
 }
 
+void CommitDetailsPanel::moveWorkingTreeFiles(const QStringList& paths, bool toStaged) {
+    if (m_workingTree) {
+        m_wip->moveFiles(paths, toStaged);
+    }
+}
+
 void CommitDetailsPanel::setWorkingTreeBranch(const QString& name, const QColor& color) {
     m_wip->setBranch(name, color);
 }
@@ -621,6 +627,10 @@ void CommitDetailsPanel::clearStashMessage() {
 
 QStringList CommitDetailsPanel::stagedPaths() const {
     return m_wip->stagedPaths();
+}
+
+QStringList CommitDetailsPanel::unstagedPaths() const {
+    return m_wip->unstagedPaths();
 }
 
 void CommitDetailsPanel::setMode(CommitFilesModel::Mode mode) {

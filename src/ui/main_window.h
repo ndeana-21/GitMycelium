@@ -19,10 +19,10 @@
 #include <QHash>
 #include <QMainWindow>
 
-#include <functional>
 #include <QString>
 
 #include <atomic>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -440,6 +440,17 @@ private:
     /// After a local operation: the graph re-reads what is on screen in place
     /// (`CommitModel::refresh`); a fetch or pull, a new filter or a new tab resets.
     void refreshHistory();
+    /// Queues a working-tree write: on a worker in async mode, else at once. The
+    /// panels are refreshed when the queue runs dry.
+    void queueTreeWrite(const QString& failureTitle,
+                        std::function<bool(RepoSession&, QString*)> action,
+                        std::function<void(bool)> done = {});
+    void runNextTreeWrite();
+    /// Stages, unstages or discards one hunk (or lines of it) as the reader saw it.
+    static bool applyHunkTo(RepoSession& session, const QString& path, int hunkIndex,
+                            const QVector<int>& lines, RepoSession::HunkApply what,
+                            QString* error);
+    bool treeWritesPending() const { return m_treeWriteRunning || !m_treeWrites.empty(); }
     /// The graph rows down to the bottom of the screen: what an in-place re-read walks.
     int historyRowsOnScreen() const;
     /// The Files tab: the tree of the selected commit (HEAD when none), on the graph's
@@ -918,6 +929,16 @@ private:
     QToolBar* m_toolBar = nullptr;
     bool m_syncRunning = false;
     bool m_checkoutRunning = false;
+    /// Index writes (stage, unstage, discard, stash) run one after another on a worker,
+    /// in the order the reader asked for them; the panel shows the result at once.
+    struct WorkingTreeWrite {
+        RepoSession* session = nullptr;
+        QString failureTitle;
+        std::function<bool(RepoSession&, QString*)> action;
+        std::function<void(bool)> done;
+    };
+    std::deque<WorkingTreeWrite> m_treeWrites;
+    bool m_treeWriteRunning = false;
     /// True while gc/fsck runs on its worker, so a second invocation is refused and the busy
     /// sweep has one owner.
     bool m_maintenanceRunning = false;

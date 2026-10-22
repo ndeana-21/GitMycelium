@@ -444,26 +444,35 @@ bool RepoSession::applyHunkSelection(const QString& path, int hunkIndex,
 }
 
 bool RepoSession::stageFile(const QString& path, QString* errorOut) {
-    QMutexLocker lock(&m_mutex);
-    ++m_snapshotEpoch;
-    if (!m_repo) {
-        if (errorOut) {
-            *errorOut = QStringLiteral("no repository is open");
-        }
-        return false;
-    }
-    try {
-        m_repo->stageFile(path.toStdString());
-        return true;
-    } catch (const std::exception& error) {
-        if (errorOut) {
-            *errorOut = QString::fromUtf8(error.what());
-        }
-        return false;
-    }
+    return stageFiles({path}, errorOut);
 }
 
 bool RepoSession::unstageFile(const QString& path, QString* errorOut) {
+    return unstageFiles({path}, errorOut);
+}
+
+namespace {
+
+std::vector<std::string> toStdPaths(const QStringList& paths) {
+    std::vector<std::string> out;
+    out.reserve(static_cast<std::size_t>(paths.size()));
+    for (const QString& path : paths) {
+        out.push_back(path.toStdString());
+    }
+    return out;
+}
+
+} // namespace
+
+bool RepoSession::stageFiles(const QStringList& paths, QString* errorOut) {
+    return writeIndex(errorOut, [&](Repository& repo) { repo.stagePaths(toStdPaths(paths)); });
+}
+
+bool RepoSession::unstageFiles(const QStringList& paths, QString* errorOut) {
+    return writeIndex(errorOut, [&](Repository& repo) { repo.unstagePaths(toStdPaths(paths)); });
+}
+
+bool RepoSession::writeIndex(QString* errorOut, const std::function<void(Repository&)>& write) {
     QMutexLocker lock(&m_mutex);
     ++m_snapshotEpoch;
     if (!m_repo) {
@@ -473,7 +482,7 @@ bool RepoSession::unstageFile(const QString& path, QString* errorOut) {
         return false;
     }
     try {
-        m_repo->unstageFile(path.toStdString());
+        write(*m_repo);
         return true;
     } catch (const std::exception& error) {
         if (errorOut) {

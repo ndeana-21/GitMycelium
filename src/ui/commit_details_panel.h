@@ -39,6 +39,8 @@ public:
     void showComparison(const QString& base, const QString& target,
                         const std::vector<ChangedFile>& files, const QString& label = {});
     void showWorkingTree(const std::vector<FileChange>& changes);
+    /// The Commit Panel shows `paths` staged (or unstaged) before the index is written.
+    void moveWorkingTreeFiles(const QStringList& paths, bool toStaged);
     void setFilesLoading(bool loading);
     bool filesLoading() const;
     void setWorkingTreeLoading(bool loading);
@@ -67,6 +69,7 @@ public:
     bool pushAfterCommit() const;
     void clearStashMessage();
     QStringList stagedPaths() const;
+    QStringList unstagedPaths() const;
     bool signCommit() const;
     void setSignCommit(bool on);
     void focusCommitMessage();

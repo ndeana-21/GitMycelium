@@ -32,6 +32,9 @@ public:
     explicit WorkingTreePanel(QWidget* parent = nullptr);
 
     void setChanges(const std::vector<FileChange>& changes);
+    /// Shows `paths` on the other side at once, before git has written the index: the
+    /// next status read replaces this guess with what the index holds.
+    void moveFiles(const QStringList& paths, bool toStaged);
     void setLoading(bool loading);
     bool loading() const;
     void setBranch(const QString& name, const QColor& color);
@@ -62,6 +65,7 @@ public:
 
     int stagedCount() const;
     QStringList stagedPaths() const;
+    QStringList unstagedPaths() const;
     int unstagedCount() const;
     int changedCount() const;
 
@@ -121,6 +125,7 @@ private:
     Skeleton* m_skeleton = nullptr;
     Section m_unstaged;
     Section m_staged;
+    std::vector<FileChange> m_changes;
     int m_changedPaths = 0;
 
     QPushButton* m_discardAll = nullptr;

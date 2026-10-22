@@ -71,6 +71,7 @@ private slots:
     void unstagingANewFileRemovesItFromTheIndexAndKeepsItOnDisk();
 
     void stageAllTakesNewModifiedAndDeletedAtOnce();
+    void manyPathsAreStagedAndUnstagedInOneGo();
 
     void discardingRestoresTheIndexVersionOnDisk();
     void discardingAnUntrackedFileDeletesIt();
@@ -237,6 +238,34 @@ void StagingTest::stageAllTakesNewModifiedAndDeletedAtOnce() {
     QVERIFY(staged.contains(QStringLiteral("keep.txt")));
     QVERIFY(staged.contains(QStringLiteral("gone.txt")));
     QVERIFY(hasStatus(QStringLiteral("gone.txt"), true, ChangeKind::Deleted));
+}
+
+void StagingTest::manyPathsAreStagedAndUnstagedInOneGo() {
+    QVERIFY(commitFile(QStringLiteral("keep.txt"), QStringLiteral("keep\n"),
+                       QStringLiteral("base")));
+    QVERIFY(commitFile(QStringLiteral("gone.txt"), QStringLiteral("gone\n"),
+                       QStringLiteral("second")));
+    QVERIFY(writeFile(m_path, QStringLiteral("keep.txt"), QStringLiteral("changed\n")));
+    QVERIFY(writeFile(m_path, QStringLiteral("added.txt"), QStringLiteral("added\n")));
+    QVERIFY(writeFile(m_path, QStringLiteral("left.txt"), QStringLiteral("left\n")));
+    QVERIFY(QFile::remove(QDir(m_path).filePath(QStringLiteral("gone.txt"))));
+
+    // A path that never existed is nothing to stage, not a failure for the rest.
+    QString error;
+    QVERIFY2(m_session->stageFiles({QStringLiteral("keep.txt"), QStringLiteral("added.txt"),
+                                    QStringLiteral("gone.txt"), QStringLiteral("never.txt")},
+                                   &error),
+             qPrintable(error));
+    QCOMPARE(gitOut(m_path, {"diff", "--cached", "--name-status"}).trimmed(),
+             QStringLiteral("A\tadded.txt\nD\tgone.txt\nM\tkeep.txt"));
+    QVERIFY(hasStatus(QStringLiteral("left.txt"), false, ChangeKind::Untracked));
+
+    QVERIFY2(m_session->unstageFiles({QStringLiteral("added.txt"), QStringLiteral("gone.txt")},
+                                     &error),
+             qPrintable(error));
+    QCOMPARE(gitOut(m_path, {"diff", "--cached", "--name-status"}).trimmed(),
+             QStringLiteral("M\tkeep.txt"));
+    QVERIFY(QFile::exists(QDir(m_path).filePath(QStringLiteral("added.txt"))));
 }
 
 void StagingTest::discardingRestoresTheIndexVersionOnDisk() {

@@ -238,6 +238,9 @@ public:
 
     bool stageFile(const QString& path, QString* errorOut);
     bool unstageFile(const QString& path, QString* errorOut);
+    /// Every path in one index write.
+    bool stageFiles(const QStringList& paths, QString* errorOut);
+    bool unstageFiles(const QStringList& paths, QString* errorOut);
     bool stageAll(QString* errorOut);
     bool discardFileChanges(const QString& path, QString* errorOut);
     /// Every uncommitted change, staged or not, untracked files included. Not
@@ -761,6 +764,8 @@ signals:
     void lfsFinished(bool ok, QString task, QString output);
 
 private:
+    /// Runs an index write under the lock, the epoch moved on, a failure as text.
+    bool writeIndex(QString* errorOut, const std::function<void(Repository&)>& write);
     /// RAII hold on the in-flight count a local worker keeps while it runs. The
     /// destructor drains the count, so a worker that returns early — or unwinds —
     /// must not leak it, or the next `~RepoSession` waits forever.

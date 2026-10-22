@@ -151,10 +151,13 @@ public:
     /// file that is gone is removed. A path that no longer exists and was never
     /// tracked has nothing to stage and is left alone.
     void stageFile(const std::string& path);
+    /// Stages every path with one read and one write of the index.
+    void stagePaths(const std::vector<std::string>& paths);
 
     /// Restores `path`'s index entry to HEAD's version; a newly added file leaves
     /// the index while the working-tree file stays. This is `git reset -- <path>`.
     void unstageFile(const std::string& path);
+    void unstagePaths(const std::vector<std::string>& paths);
 
     /// Stages every change in the working tree: new, modified, deleted and
     /// untracked (`git add -A`).

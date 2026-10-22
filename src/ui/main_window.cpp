@@ -2182,7 +2182,9 @@ void MainWindow::applyPanels() {
         m_stack->setCurrentIndex(kHistoryPage);
         // A refresh brings the working tree up to date, but does not take the reader
         // away from the commit or comparison they are reading.
-        if (m_selectedCommitId.isEmpty() && m_compareBase.isEmpty()) {
+        // While an index write is queued the panel already shows its outcome; a
+        // status read before the write would put the files back for a moment.
+        if (m_selectedCommitId.isEmpty() && m_compareBase.isEmpty() && !treeWritesPending()) {
             showWorkingTreeChanges(changes);
         }
         refreshStatusBar(changes);
@@ -3705,7 +3707,7 @@ void MainWindow::checkoutLocalBranch(const QString& name) {
 }
 
 void MainWindow::applyToFiles(const QStringList& paths, StageOp op) {
-    if (paths.isEmpty()) {
+    if (paths.isEmpty() || !m_session || !m_session->isOpen()) {
         return;
     }
     if (op == StageOp::Discard) {
@@ -3717,28 +3719,83 @@ void MainWindow::applyToFiles(const QStringList& paths, StageOp op) {
                         .arg(what))) {
             return;
         }
+        queueTreeWrite(QStringLiteral("The change could not be applied"),
+                       [paths](RepoSession& session, QString* error) {
+                           QStringList failures;
+                           for (const QString& path : paths) {
+                               QString failure;
+                               if (!session.discardFileChanges(path, &failure)) {
+                                   failures.append(QStringLiteral("%1: %2").arg(path, failure));
+                               }
+                           }
+                           *error = failures.join(QLatin1Char('\n'));
+                           return failures.isEmpty();
+                       });
+        return;
     }
+    // The files change sides on screen now; the index is written behind it.
+    const bool stage = op == StageOp::Stage;
+    m_details->moveWorkingTreeFiles(paths, stage);
+    queueTreeWrite(QStringLiteral("The change could not be applied"),
+                   [paths, stage](RepoSession& session, QString* error) {
+                       return stage ? session.stageFiles(paths, error)
+                                    : session.unstageFiles(paths, error);
+                   });
+}
 
-    QStringList failures;
-    for (const QString& path : paths) {
-        QString error;
-        bool ok = false;
-        switch (op) {
-        case StageOp::Stage: ok = m_session->stageFile(path, &error); break;
-        case StageOp::Unstage: ok = m_session->unstageFile(path, &error); break;
-        case StageOp::Discard: ok = m_session->discardFileChanges(path, &error); break;
-        }
+void MainWindow::queueTreeWrite(const QString& failureTitle,
+                                std::function<bool(RepoSession&, QString*)> action,
+                                std::function<void(bool)> done) {
+    m_treeWrites.push_back({m_session, failureTitle, std::move(action), std::move(done)});
+    runNextTreeWrite();
+}
+
+void MainWindow::runNextTreeWrite() {
+    if (m_treeWriteRunning) {
+        return;
+    }
+    while (!m_treeWrites.empty() && !contextOf(m_treeWrites.front().session)) {
+        m_treeWrites.pop_front();
+    }
+    if (m_treeWrites.empty()) {
+        return;
+    }
+    WorkingTreeWrite write = std::move(m_treeWrites.front());
+    m_treeWrites.pop_front();
+    const auto finish = [this, write](bool ok, const QString& error) {
+        m_treeWriteRunning = false;
         if (!ok) {
-            failures.append(QStringLiteral("%1: %2").arg(path, error));
+            reportFailure(write.failureTitle, error);
         }
+        // Refresh either way: some paths may have gone through before one failed,
+        // and the panel must show what the repository actually holds.
+        if (m_treeWrites.empty() && write.session == m_session) {
+            refreshPanels();
+        }
+        if (write.done && write.session == m_session) {
+            write.done(ok);
+        }
+        runNextTreeWrite();
+    };
+    m_treeWriteRunning = true;
+    if (!m_asyncReads) {
+        QString error;
+        const bool ok = write.action(*write.session, &error);
+        finish(ok, error);
+        return;
     }
-    if (!failures.isEmpty()) {
-        reportFailure(QStringLiteral("The change could not be applied"),
-                      failures.join(QLatin1Char('\n')));
-    }
-    // Refresh either way: some paths may have gone through before one failed, and
-    // the panel must show what the repository actually holds.
-    refreshPanels();
+    struct Outcome {
+        bool ok = false;
+        QString error;
+    };
+    write.session->readAsync<Outcome>(
+        this,
+        [action = write.action](RepoSession& session) {
+            Outcome outcome;
+            outcome.ok = action(session, &outcome.error);
+            return outcome;
+        },
+        [finish](Outcome outcome) { finish(outcome.ok, outcome.error); });
 }
 
 void MainWindow::applyStagingRequest(const QString& path, int hunkIndex, const QVector<int>& lines,
@@ -3746,29 +3803,39 @@ void MainWindow::applyStagingRequest(const QString& path, int hunkIndex, const Q
     if (!m_session->isOpen() || path.isEmpty()) {
         return;
     }
+    queueTreeWrite(
+        QStringLiteral("Cannot move the change"),
+        [path, hunkIndex, lines, toIndex](RepoSession& session, QString* error) {
+            return applyHunkTo(session, path, hunkIndex, lines,
+                               toIndex ? RepoSession::HunkApply::Stage
+                                       : RepoSession::HunkApply::Unstage,
+                               error);
+        },
+        // Stay on the file. After a stage it still belongs to Unstaged while it has
+        // anything left; after an unstage it belongs to Staged.
+        [this, path, toIndex](bool ok) {
+            if (ok) {
+                revealFileAfterRefresh(path, !toIndex);
+            }
+        });
+}
+
+bool MainWindow::applyHunkTo(RepoSession& session, const QString& path, int hunkIndex,
+                             const QVector<int>& lines, RepoSession::HunkApply what,
+                             QString* error) {
     // The anchor the reader saw. The session re-derives the diff and refuses when
     // this hunk is no longer the one on screen, so a click cannot stage the wrong
     // change after the file moved underneath it.
-    const FileDiff diff =
-        toIndex ? m_session->workdirFileDiff(path) : m_session->stagedFileDiff(path);
+    const FileDiff diff = what == RepoSession::HunkApply::Unstage
+                              ? session.stagedFileDiff(path)
+                              : session.workdirFileDiff(path);
     if (hunkIndex < 0 || static_cast<std::size_t>(hunkIndex) >= diff.hunks.size()) {
-        return;
+        return true;
     }
     const DiffHunk& hunk = diff.hunks[static_cast<std::size_t>(hunkIndex)];
     const RepoSession::HunkAnchor anchor{hunk.oldStart, hunk.oldLines, hunk.newStart,
                                          hunk.newLines};
-
-    QString error;
-    const RepoSession::HunkApply what = toIndex ? RepoSession::HunkApply::Stage
-                                                : RepoSession::HunkApply::Unstage;
-    if (!m_session->applyHunkSelection(path, hunkIndex, lines, what, anchor, &error)) {
-        reportFailure(QStringLiteral("Cannot move the change"), error);
-        return;
-    }
-    refreshPanels();
-    // Stay on the file. After a stage it still belongs to Unstaged while it has
-    // anything left; after an unstage it belongs to Staged.
-    revealFileAfterRefresh(path, !toIndex);
+    return session.applyHunkSelection(path, hunkIndex, lines, what, anchor, error);
 }
 
 void MainWindow::applyDiscardRequest(const QString& path, int hunkIndex,
@@ -3786,21 +3853,17 @@ void MainWindow::applyDiscardRequest(const QString& path, int hunkIndex,
         return;
     }
 
-    const FileDiff diff = m_session->workdirFileDiff(path);
-    if (hunkIndex < 0 || static_cast<std::size_t>(hunkIndex) >= diff.hunks.size()) {
-        return;
-    }
-    const DiffHunk& hunk = diff.hunks[static_cast<std::size_t>(hunkIndex)];
-    const RepoSession::HunkAnchor anchor{hunk.oldStart, hunk.oldLines, hunk.newStart,
-                                         hunk.newLines};
-    QString error;
-    if (!m_session->applyHunkSelection(path, hunkIndex, lines, RepoSession::HunkApply::Discard,
-                                       anchor, &error)) {
-        reportFailure(QStringLiteral("Cannot discard the change"), error);
-        return;
-    }
-    refreshPanels();
-    revealFileAfterRefresh(path, false);
+    queueTreeWrite(
+        QStringLiteral("Cannot discard the change"),
+        [path, hunkIndex, lines](RepoSession& session, QString* error) {
+            return applyHunkTo(session, path, hunkIndex, lines, RepoSession::HunkApply::Discard,
+                               error);
+        },
+        [this, path](bool ok) {
+            if (ok) {
+                revealFileAfterRefresh(path, false);
+            }
+        });
 }
 
 void MainWindow::revealFileAfterRefresh(const QString& path, bool staged) {
@@ -4041,12 +4104,12 @@ void MainWindow::onIgnoreRequested(const QStringList& paths, const QString& scop
 }
 
 void MainWindow::stageAllChanges() {
-    QString error;
-    if (!m_session->stageAll(&error)) {
-        reportFailure(QStringLiteral("Cannot stage the changes"), error);
+    if (!m_session || !m_session->isOpen()) {
         return;
     }
-    refreshPanels();
+    m_details->moveWorkingTreeFiles(m_details->unstagedPaths(), true);
+    queueTreeWrite(QStringLiteral("Cannot stage the changes"),
+                   [](RepoSession& session, QString* error) { return session.stageAll(error); });
 }
 
 void MainWindow::updateUndoRedoActions() {
