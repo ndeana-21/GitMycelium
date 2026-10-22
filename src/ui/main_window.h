@@ -440,19 +440,19 @@ private:
     /// After a local operation: the graph re-reads what is on screen in place
     /// (`CommitModel::refresh`); a fetch or pull, a new filter or a new tab resets.
     void refreshHistory();
-    /// Queues a working-tree write: on a worker in async mode, else at once. The
-    /// panels are refreshed when the queue runs dry.
-    void queueTreeWrite(const QString& failureTitle,
+    /// Queues a write: on a worker in async mode, else at once. The panels are
+    /// refreshed when the queue runs dry.
+    void queueWrite(const QString& failureTitle,
                         std::function<bool(RepoSession&, QString*)> action,
                         std::function<void(bool)> done = {});
-    void runNextTreeWrite();
+    void runNextWrite();
     void pushStash(const QString& message, bool includeUntracked, const QStringList& paths,
                    const QString& failureTitle);
     /// Stages, unstages or discards one hunk (or lines of it) as the reader saw it.
     static bool applyHunkTo(RepoSession& session, const QString& path, int hunkIndex,
                             const QVector<int>& lines, RepoSession::HunkApply what,
                             QString* error);
-    bool treeWritesPending() const { return m_treeWriteRunning || !m_treeWrites.empty(); }
+    bool writesPending() const { return m_writeRunning || !m_writes.empty(); }
     /// The graph rows down to the bottom of the screen: what an in-place re-read walks.
     int historyRowsOnScreen() const;
     /// The Files tab: the tree of the selected commit (HEAD when none), on the graph's
@@ -931,16 +931,17 @@ private:
     QToolBar* m_toolBar = nullptr;
     bool m_syncRunning = false;
     bool m_checkoutRunning = false;
-    /// Index writes (stage, unstage, discard, stash) run one after another on a worker,
-    /// in the order the reader asked for them; the panel shows the result at once.
-    struct WorkingTreeWrite {
+    /// Writes (stage, unstage, discard, stash, a batch of branches) run one after
+    /// another on a worker, in the order the reader asked for them; the panels show
+    /// what they can of the result at once.
+    struct QueuedWrite {
         RepoSession* session = nullptr;
         QString failureTitle;
         std::function<bool(RepoSession&, QString*)> action;
         std::function<void(bool)> done;
     };
-    std::deque<WorkingTreeWrite> m_treeWrites;
-    bool m_treeWriteRunning = false;
+    std::deque<QueuedWrite> m_writes;
+    bool m_writeRunning = false;
     /// True while gc/fsck runs on its worker, so a second invocation is refused and the busy
     /// sweep has one owner.
     bool m_maintenanceRunning = false;

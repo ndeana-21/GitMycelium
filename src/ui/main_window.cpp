@@ -1413,13 +1413,13 @@ void MainWindow::buildUi() {
         refreshPanels();
     });
     connect(m_conflictView, &ConflictView::mergeCompleted, this, [this] {
-        m_commitModel->reset();
+        refreshHistory();
         refreshPanels();
         showHistoryPage();
         setStatus(QStringLiteral("Merge committed."));
     });
     connect(m_conflictView, &ConflictView::mergeAborted, this, [this] {
-        m_commitModel->reset();
+        refreshHistory();
         refreshPanels();
         showHistoryPage();
         setStatus(QStringLiteral("Merge aborted."));
@@ -2184,7 +2184,7 @@ void MainWindow::applyPanels() {
         // away from the commit or comparison they are reading.
         // While an index write is queued the panel already shows its outcome; a
         // status read before the write would put the files back for a moment.
-        if (m_selectedCommitId.isEmpty() && m_compareBase.isEmpty() && !treeWritesPending()) {
+        if (m_selectedCommitId.isEmpty() && m_compareBase.isEmpty() && !writesPending()) {
             showWorkingTreeChanges(changes);
         }
         refreshStatusBar(changes);
@@ -3719,7 +3719,7 @@ void MainWindow::applyToFiles(const QStringList& paths, StageOp op) {
                         .arg(what))) {
             return;
         }
-        queueTreeWrite(QStringLiteral("The change could not be applied"),
+        queueWrite(QStringLiteral("The change could not be applied"),
                        [paths](RepoSession& session, QString* error) {
                            QStringList failures;
                            for (const QString& path : paths) {
@@ -3736,48 +3736,48 @@ void MainWindow::applyToFiles(const QStringList& paths, StageOp op) {
     // The files change sides on screen now; the index is written behind it.
     const bool stage = op == StageOp::Stage;
     m_details->moveWorkingTreeFiles(paths, stage);
-    queueTreeWrite(QStringLiteral("The change could not be applied"),
+    queueWrite(QStringLiteral("The change could not be applied"),
                    [paths, stage](RepoSession& session, QString* error) {
                        return stage ? session.stageFiles(paths, error)
                                     : session.unstageFiles(paths, error);
                    });
 }
 
-void MainWindow::queueTreeWrite(const QString& failureTitle,
+void MainWindow::queueWrite(const QString& failureTitle,
                                 std::function<bool(RepoSession&, QString*)> action,
                                 std::function<void(bool)> done) {
-    m_treeWrites.push_back({m_session, failureTitle, std::move(action), std::move(done)});
-    runNextTreeWrite();
+    m_writes.push_back({m_session, failureTitle, std::move(action), std::move(done)});
+    runNextWrite();
 }
 
-void MainWindow::runNextTreeWrite() {
-    if (m_treeWriteRunning) {
+void MainWindow::runNextWrite() {
+    if (m_writeRunning) {
         return;
     }
-    while (!m_treeWrites.empty() && !contextOf(m_treeWrites.front().session)) {
-        m_treeWrites.pop_front();
+    while (!m_writes.empty() && !contextOf(m_writes.front().session)) {
+        m_writes.pop_front();
     }
-    if (m_treeWrites.empty()) {
+    if (m_writes.empty()) {
         return;
     }
-    WorkingTreeWrite write = std::move(m_treeWrites.front());
-    m_treeWrites.pop_front();
+    QueuedWrite write = std::move(m_writes.front());
+    m_writes.pop_front();
     const auto finish = [this, write](bool ok, const QString& error) {
-        m_treeWriteRunning = false;
+        m_writeRunning = false;
         if (!ok) {
             reportFailure(write.failureTitle, error);
         }
         // Refresh either way: some paths may have gone through before one failed,
         // and the panel must show what the repository actually holds.
-        if (m_treeWrites.empty() && write.session == m_session) {
+        if (m_writes.empty() && write.session == m_session) {
             refreshPanels();
         }
         if (write.done && write.session == m_session) {
             write.done(ok);
         }
-        runNextTreeWrite();
+        runNextWrite();
     };
-    m_treeWriteRunning = true;
+    m_writeRunning = true;
     if (!m_asyncReads) {
         QString error;
         const bool ok = write.action(*write.session, &error);
@@ -3803,7 +3803,7 @@ void MainWindow::applyStagingRequest(const QString& path, int hunkIndex, const Q
     if (!m_session->isOpen() || path.isEmpty()) {
         return;
     }
-    queueTreeWrite(
+    queueWrite(
         QStringLiteral("Cannot move the change"),
         [path, hunkIndex, lines, toIndex](RepoSession& session, QString* error) {
             return applyHunkTo(session, path, hunkIndex, lines,
@@ -3853,7 +3853,7 @@ void MainWindow::applyDiscardRequest(const QString& path, int hunkIndex,
         return;
     }
 
-    queueTreeWrite(
+    queueWrite(
         QStringLiteral("Cannot discard the change"),
         [path, hunkIndex, lines](RepoSession& session, QString* error) {
             return applyHunkTo(session, path, hunkIndex, lines, RepoSession::HunkApply::Discard,
@@ -3956,7 +3956,7 @@ void MainWindow::stashAllChanges(const QString& message) {
     const StashScope scope = unstaged ? StashScope::KeepIndex : StashScope::StagedOnly;
     m_details->dropWorkingTreeSide(!unstaged);
     setStatus(QStringLiteral("Stashing…"));
-    queueTreeWrite(
+    queueWrite(
         QStringLiteral("Cannot stash"),
         [message, scope](RepoSession& session, QString* error) {
             return session.stashPush(message, true, {}, error, scope);
@@ -4115,7 +4115,7 @@ void MainWindow::stageAllChanges() {
         return;
     }
     m_details->moveWorkingTreeFiles(m_details->unstagedPaths(), true);
-    queueTreeWrite(QStringLiteral("Cannot stage the changes"),
+    queueWrite(QStringLiteral("Cannot stage the changes"),
                    [](RepoSession& session, QString* error) { return session.stageAll(error); });
 }
 
@@ -7307,14 +7307,19 @@ void MainWindow::deleteBranchesWithConsent(const QStringList& names, const QStri
     // The question above was the consent, including for the branches that lose
     // commits. The session still applies force branch by branch, and only to the
     // ones that are actually unreachable — never as a retry after any failure.
-    RepoSession::BranchBatchResult result;
-    QString error;
-    if (!m_session->deleteBranches(names, base, /*forceUnmerged=*/!unmerged.isEmpty(), &result,
-                                   &error)) {
-        QMessageBox::warning(this, what, error);
-        return;
-    }
-    reportBranchBatch(what, result);
+    const bool force = !unmerged.isEmpty();
+    auto result = std::make_shared<RepoSession::BranchBatchResult>();
+    setStatus(QStringLiteral("%1…").arg(what));
+    queueWrite(
+        what,
+        [names, base, force, result](RepoSession& session, QString* error) {
+            return session.deleteBranches(names, base, force, result.get(), error);
+        },
+        [this, what, result](bool ok) {
+            if (ok) {
+                reportBranchBatch(what, *result);
+            }
+        });
 }
 
 void MainWindow::reportBranchBatch(const QString& what,
@@ -7327,8 +7332,6 @@ void MainWindow::reportBranchBatch(const QString& what,
     } else {
         setStatus(QStringLiteral("%1: %2 done.").arg(what).arg(result.done.size()));
     }
-    refreshRefs();
-    refreshPanels();
 }
 
 void MainWindow::setUpstreamsForSelected() {
@@ -7357,13 +7360,17 @@ void MainWindow::setUpstreamsForSelected() {
     if (!ok || remote.isEmpty()) {
         return;
     }
-    RepoSession::BranchBatchResult result;
-    QString error;
-    if (!m_session->setUpstreams(names, remote, &result, &error)) {
-        QMessageBox::warning(this, QStringLiteral("Cannot set upstream"), error);
-        return;
-    }
-    reportBranchBatch(QStringLiteral("Set upstream"), result);
+    auto result = std::make_shared<RepoSession::BranchBatchResult>();
+    queueWrite(
+        QStringLiteral("Cannot set upstream"),
+        [names, remote, result](RepoSession& session, QString* error) {
+            return session.setUpstreams(names, remote, result.get(), error);
+        },
+        [this, result](bool ok) {
+            if (ok) {
+                reportBranchBatch(QStringLiteral("Set upstream"), *result);
+            }
+        });
 }
 
 void MainWindow::hideSelectedBranches(bool hidden) {
@@ -10601,7 +10608,7 @@ void MainWindow::pushStash(const QString& message, bool includeUntracked,
     setStatus(QStringLiteral("Stashing…"));
     // git says nothing was stashed by succeeding without a new entry.
     auto made = std::make_shared<bool>(false);
-    queueTreeWrite(
+    queueWrite(
         failureTitle,
         [message, includeUntracked, paths, made](RepoSession& session, QString* error) {
             const std::size_t before = session.stashList().size();
@@ -10633,7 +10640,7 @@ void MainWindow::restoreStash(const QString& oid, bool drop, const QString& labe
         return;
     }
     setStatus(QStringLiteral("Restoring %1…").arg(label));
-    queueTreeWrite(
+    queueWrite(
         drop ? QStringLiteral("Cannot pop the stash") : QStringLiteral("Cannot apply the stash"),
         [oid, drop](RepoSession& session, QString* error) {
             return drop ? session.stashPop(oid, error) : session.stashApply(oid, error);
@@ -10660,7 +10667,7 @@ void MainWindow::dropStash(const QString& oid, const QString& label) {
                 QStringLiteral("Drop %1?\nThis cannot be undone.").arg(label))) {
         return;
     }
-    queueTreeWrite(
+    queueWrite(
         QStringLiteral("Cannot drop the stash"),
         [oid](RepoSession& session, QString* error) { return session.stashDrop(oid, error); },
         [this, label](bool ok) {
