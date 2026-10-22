@@ -2,6 +2,7 @@
 #include "ui/local_ignore_dialog.h"
 #include "ui/panel_splitter.h"
 
+#include "ui/avatar_store.h"
 #include "ui/badge_flight.h"
 #include "ui/drop_point.h"
 #include "ui/file_browser.h"
@@ -288,6 +289,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     loadGraphAnimation();
     setWindowTitle(QStringLiteral("GitMycelium"));
     resize(1500, 900);
+}
+
+void MainWindow::setAvatarsAllowed(bool on) {
+    m_avatarsAllowed = on;
+    loadGraphViewOptions();
 }
 
 void MainWindow::setUpdateChecksEnabled(bool on) {
@@ -11326,6 +11332,15 @@ void MainWindow::loadGraphViewOptions() {
           store.boolValue(SettingsStore::globalKey(QStringLiteral("showMergedCommits")), true));
     apply(m_mergedRemotesAction,
           store.boolValue(SettingsStore::globalKey(QStringLiteral("showMergedRemotes")), false));
+    const bool avatars =
+        m_avatarsAllowed &&
+        store.boolValue(SettingsStore::globalKey(QStringLiteral("avatars")), true);
+    if (AvatarStore::instance().enabled() != avatars) {
+        AvatarStore::instance().setEnabled(avatars);
+        if (m_commitView) {
+            m_commitView->viewport()->update();
+        }
+    }
 }
 
 void MainWindow::loadGraphAnimation() {

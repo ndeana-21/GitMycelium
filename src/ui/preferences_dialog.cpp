@@ -163,6 +163,15 @@ QWidget* PreferencesDialog::buildGraphPage() {
     m_mergedRemoteLabelsBox->setChecked(SettingsStore().boolValue(
         SettingsStore::globalKey(QStringLiteral("showMergedRemotes")), false));
     layout->addWidget(m_mergedRemoteLabelsBox);
+
+    m_avatarsBox = new QCheckBox(QStringLiteral("Show authors' pictures"), page);
+    m_avatarsBox->setObjectName(QStringLiteral("avatars"));
+    m_avatarsBox->setToolTip(QStringLiteral(
+        "From GitHub for a GitHub no-reply address, otherwise from Gravatar, which is sent "
+        "a SHA-256 hash of the author's email. Off: initials."));
+    m_avatarsBox->setChecked(
+        SettingsStore().boolValue(SettingsStore::globalKey(QStringLiteral("avatars")), true));
+    layout->addWidget(m_avatarsBox);
     layout->addStretch(1);
     return page;
 }
@@ -474,6 +483,7 @@ void PreferencesDialog::save() {
                   !m_foldMergedBox->isChecked());
     store.setBool(SettingsStore::globalKey(QStringLiteral("showMergedRemotes")),
                   m_mergedRemoteLabelsBox->isChecked());
+    store.setBool(SettingsStore::globalKey(QStringLiteral("avatars")), m_avatarsBox->isChecked());
     store.setString(SettingsStore::globalKey(QStringLiteral("theme")),
                     m_themeBox->currentData().toString());
     store.setInt(SettingsStore::globalKey(QStringLiteral("zoom")), m_zoomBox->value());

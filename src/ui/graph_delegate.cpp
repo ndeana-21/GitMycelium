@@ -2,6 +2,7 @@
 
 #include "model/commit_model.h"
 #include "theme/theme.h"
+#include "ui/avatar_store.h"
 
 #include <QApplication>
 #include <QFont>
@@ -395,22 +396,30 @@ void GraphDelegate::paint(QPainter* painter, const QStyleOptionViewItem& option,
         break;
     }
 
-    // There are no avatar pictures, so the disc is the author's own colour and the
-    // ring around it is the branch's: who wrote it and which line it is on, at once.
-    const QColor authorFill =
-        theme::authorColor(model->data(index, CommitModel::AuthorIdentityRole).toString());
+    // The author's picture, or the author's own colour with their initials, inside a
+    // ring of the branch's: who wrote it and which line it is on, at once.
+    const QString author = model->data(index, CommitModel::AuthorIdentityRole).toString();
+    const QColor authorFill = theme::authorColor(author);
     const qreal ring = std::max<qreal>(2.0, radius * 0.22);
     painter->setPen(Qt::NoPen);
     painter->setBrush(color);
     painter->drawEllipse(center, radius, radius);
+    const qreal inner = radius - ring;
+    const QPixmap picture = AvatarStore::instance().avatar(
+        author, qRound(inner * 2), painter->device() ? painter->device()->devicePixelRatioF() : 1.0);
+    if (!picture.isNull()) {
+        painter->drawPixmap(QRectF(center.x() - inner, center.y() - inner, inner * 2, inner * 2),
+                            picture, QRectF(QPointF(0, 0), QSizeF(picture.size())));
+        painter->restore();
+        return;
+    }
     painter->setBrush(authorFill);
-    painter->drawEllipse(center, radius - ring, radius - ring);
+    painter->drawEllipse(center, inner, inner);
 
     const QString initials = model->data(index, Qt::UserRole).toString();
     if (!initials.isEmpty()) {
         // Sized to the disc, not to the row's font: the application font is set in
         // pixels (its point size is -1), and a font that ignored the disc ran past it.
-        const qreal inner = radius - ring;
         QFont font = option.font;
         font.setBold(true);
         font.setPixelSize(std::max(6, qRound(inner * 1.05)));

@@ -1,5 +1,6 @@
 #include "ui/commit_graph_view.h"
 
+#include "ui/avatar_store.h"
 #include "ui/drop_point.h"
 
 #include "model/commit_model.h"
@@ -62,6 +63,10 @@ CommitGraphView::CommitGraphView(QWidget* parent) : QTreeView(parent) {
         emit columnsMenuRequested(
             m_columnsButton->mapToGlobal(QPoint(0, m_columnsButton->height())));
     });
+
+    // A picture that arrives repaints the nodes; one update covers a burst of them.
+    connect(&AvatarStore::instance(), &AvatarStore::avatarReady, this,
+            [this] { viewport()->update(); });
 
     m_flightTimer = new QTimer(this);
     m_flightTimer->setInterval(16);

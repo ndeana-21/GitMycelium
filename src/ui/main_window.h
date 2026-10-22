@@ -132,6 +132,9 @@ public:
     /// Off by default: only an interactive launch asks the release page for a newer
     /// build (at most once a day, and only while the preference allows it).
     void setUpdateChecksEnabled(bool on);
+    /// Authors' pictures may be fetched (the interactive launch); Preferences still
+    /// decides whether they are.
+    void setAvatarsAllowed(bool on);
     /// Off by default, so a test or a headless check reads synchronously and sees the
     /// result of what it just did. The interactive launch turns it on: refreshes read
     /// on a worker, and what is not read yet shows as skeleton rows.
@@ -934,6 +937,7 @@ private:
     QToolBar* m_toolBar = nullptr;
     bool m_syncRunning = false;
     bool m_checkoutRunning = false;
+    bool m_avatarsAllowed = false;
     /// Writes (stage, unstage, discard, stash, a batch of branches) run one after
     /// another on a worker, in the order the reader asked for them; the panels show
     /// what they can of the result at once.

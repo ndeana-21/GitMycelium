@@ -5,6 +5,7 @@
 #include "theme/glyphs.h"
 #include "theme/icons.h"
 #include "theme/theme.h"
+#include "ui/avatar_store.h"
 #include "ui/grip_splitter.h"
 #include "ui/settings_store.h"
 #include "ui/skeleton.h"
@@ -79,8 +80,13 @@ QString formatWhen(const Signature& who) {
 }
 
 QPixmap avatarFor(const Signature& who) {
-    // No network here, so no gravatar: a disc with the initials, in the same
-    // author colour the graph's node carries.
+    // The author's picture when there is one; else a disc with the initials, in the
+    // same author colour the graph's node carries.
+    const QPixmap picture = AvatarStore::instance().avatar(QString::fromStdString(who.email),
+                                                           avatarSide(), 2.0);
+    if (!picture.isNull()) {
+        return picture;
+    }
     const QColor fill = theme::authorColor(
         QString::fromStdString(who.email.empty() ? who.name : who.email));
 
@@ -196,6 +202,12 @@ void CommitDetailsPanel::buildUi() {
     authorRow->setSpacing(8);
     m_avatar = new QLabel(bottom);
     m_avatar->setFixedSize(avatarSide(), avatarSide());
+    connect(&AvatarStore::instance(), &AvatarStore::avatarReady, this, [this](const QString& email) {
+        if (!m_workingTree && !m_commitId.isEmpty() &&
+            QString::fromStdString(m_lastAuthor.email).trimmed().toLower() == email) {
+            m_avatar->setPixmap(avatarFor(m_lastAuthor));
+        }
+    });
     authorRow->addWidget(m_avatar, 0, Qt::AlignTop);
 
     auto* who = new QVBoxLayout;

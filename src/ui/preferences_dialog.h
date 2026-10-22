@@ -110,6 +110,7 @@ private:
     QCheckBox* m_animateBox = nullptr;
     QCheckBox* m_foldMergedBox = nullptr;
     QCheckBox* m_mergedRemoteLabelsBox = nullptr;
+    QCheckBox* m_avatarsBox = nullptr;
     QCheckBox* m_updateCheckBox = nullptr;
     QComboBox* m_themeBox = nullptr;
     QSpinBox* m_zoomBox = nullptr;

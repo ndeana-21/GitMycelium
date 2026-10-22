@@ -396,6 +396,10 @@ add_executable(test_file_browser test_file_browser.cpp ${CMAKE_SOURCE_DIR}/src/t
 target_link_libraries(test_file_browser PRIVATE gmc_ui gmc_model gmc_repo gmc_git gmc_core gmc_theme Qt6::Widgets Qt6::Test)
 add_test(NAME file_browser COMMAND test_file_browser)
 
+add_executable(test_avatars test_avatars.cpp ${CMAKE_SOURCE_DIR}/src/theme/icons.qrc)
+target_link_libraries(test_avatars PRIVATE gmc_ui gmc_model gmc_repo gmc_git gmc_core gmc_theme Qt6::Widgets Qt6::Test)
+add_test(NAME avatars COMMAND test_avatars)
+
 add_executable(test_pick_onto test_pick_onto.cpp ${CMAKE_SOURCE_DIR}/src/theme/icons.qrc)
 target_link_libraries(test_pick_onto PRIVATE gmc_ui gmc_model gmc_repo gmc_git gmc_core gmc_theme Qt6::Widgets Qt6::Test)
 add_test(NAME pick_onto COMMAND test_pick_onto)

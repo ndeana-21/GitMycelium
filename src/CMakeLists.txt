@@ -123,6 +123,8 @@ target_compile_definitions(gmc_update PRIVATE
     GMC_VERSION="${PROJECT_VERSION}" GMC_BUILD_NUMBER=${GMC_BUILD_NUMBER})
 
 add_library(gmc_ui STATIC
+    ui/avatar_store.cpp
+    ui/avatar_store.h
     ui/diff_view.cpp
     ui/diff_view.h
     ui/diff_minimap.cpp

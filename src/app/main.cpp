@@ -1157,6 +1157,7 @@ int main(int argc, char* argv[]) {
     window.setTabsPersistenceEnabled(!headlessRun && shotPath.empty() && uiLoadTraceSeconds == 0);
     window.setBackgroundIndexingEnabled(!headlessRun && shotPath.empty());
     window.setUpdateChecksEnabled(!headlessRun && shotPath.empty() && uiLoadTraceSeconds == 0);
+    window.setAvatarsAllowed(!headlessRun && shotPath.empty() && uiLoadTraceSeconds == 0);
     window.setAsyncReadsEnabled(!headlessRun && shotPath.empty());
     if (!path.empty()) {
         window.openRepository(QString::fromStdString(path));
