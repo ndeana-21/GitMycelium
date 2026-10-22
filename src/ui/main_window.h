@@ -213,6 +213,9 @@ public:
     /// One line about the history model: rows held, a page in flight, more to come.
     /// `--ui-load-trace` samples it while the window idles.
     QString loadStateForDiagnostics() const;
+    /// Moves every file the Commit Panel lists to the other side, unstaged first, as
+    /// a click on Stage All / Unstage All would; says what it moved.
+    QString stageToggleForDiagnostics();
     /// `show` reports the column mode and layout; `rich`/`text`/`compact` switch the mode.
     QStringList columnsForDiagnostics(const QString& op);
     /// `show` lists the date separators in the loaded graph; `none|hour|day|week|month|year`

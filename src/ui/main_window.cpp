@@ -7745,6 +7745,18 @@ QString MainWindow::loadStateForDiagnostics() const {
 }
 
 
+QString MainWindow::stageToggleForDiagnostics() {
+    if (const QStringList unstaged = m_details->unstagedPaths(); !unstaged.isEmpty()) {
+        applyToFiles(unstaged, StageOp::Stage);
+        return QStringLiteral("stage %1").arg(unstaged.size());
+    }
+    if (const QStringList staged = m_details->stagedPaths(); !staged.isEmpty()) {
+        applyToFiles(staged, StageOp::Unstage);
+        return QStringLiteral("unstage %1").arg(staged.size());
+    }
+    return QStringLiteral("nothing to move");
+}
+
 QStringList MainWindow::columnsForDiagnostics(const QString& op) {
     if (op == QStringLiteral("rich")) {
         setColumnMode(GraphColumnMode::Rich, true);

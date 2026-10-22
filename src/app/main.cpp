@@ -596,6 +596,7 @@ int main(int argc, char* argv[]) {
     std::string uiPreflightOp;
     std::string uiPreventionOp;
     int uiLoadTraceSeconds = 0;
+    bool uiStageTrace = false;
     int uiReflogLimit = 0;
     std::string uiColumnsOp;
     std::string uiTimelineOp;
@@ -914,6 +915,9 @@ int main(int argc, char* argv[]) {
             uiPreventionOp = argv[++i];
         } else if (arg == "--ui-load-trace" && i + 1 < argc) {
             uiLoadTraceSeconds = std::max(1, std::atoi(argv[++i]));
+        } else if (arg == "--ui-stage-trace" && i + 1 < argc) {
+            uiLoadTraceSeconds = std::max(1, std::atoi(argv[++i]));
+            uiStageTrace = true;
         } else if (arg == "--ui-reflog") {
             // The optional limit is taken only when it is a number: a bare
             // "--ui-reflog /repo" must not swallow the path as the limit.
@@ -1888,6 +1892,17 @@ int main(int argc, char* argv[]) {
                              }
                          });
         report->start(500);
+        if (uiStageTrace) {
+            // Every three seconds the Commit Panel's files change sides, so a stall
+            // that staging causes shows in the lines that follow.
+            auto* toggle = new QTimer(&window);
+            QObject::connect(toggle, &QTimer::timeout, &window, [&window, clock] {
+                std::printf("t=%6lldms %s\n", static_cast<long long>(clock->elapsed()),
+                            window.stageToggleForDiagnostics().toUtf8().constData());
+                std::fflush(stdout);
+            });
+            toggle->start(3000);
+        }
     }
 
     if (uiReflogLimit > 0) {
