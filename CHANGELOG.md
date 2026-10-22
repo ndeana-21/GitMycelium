@@ -4,6 +4,39 @@ All notable changes to GitMycelium are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Apply a commit's changes to the working tree**, without committing them: commit
+  menu → "Apply changes to working tree", or drag commits onto the working-tree row.
+  The changes land unstaged; where they overlap your own edits the file gets conflict
+  markers to resolve.
+- **Authors' pictures** in the graph's nodes and the commit details: GitHub's for a
+  GitHub no-reply address, Gravatar's otherwise. Preferences → Graph turns them off.
+- **A gear at the right of the graph's column headings** chooses the columns (Branch /
+  Tag, Graph, Message, Author, Date, SHA).
+- Dragging a label or commits near the top or bottom of the graph, or past it,
+  scrolls the graph.
+
+### Changed
+
+- **Staging and unstaging are instant.** The files move in the panel at once; all the
+  chosen files go into the index in one write, in the background.
+- **The Commit Panel's Stash takes the unstaged changes** (untracked files included)
+  and leaves the staged ones for the commit; with nothing unstaged it stashes the
+  staged changes. The button says which.
+- Stash, pop, apply and drop, deleting branches in bulk and setting upstreams run in
+  the background; the window no longer freezes for them. (`git stash` itself takes
+  about two seconds on a 300,000-file working tree.)
+- Hiding or showing branches and tags no longer empties the graph: it is re-read in
+  the background and swapped in place.
+- Tags are drawn as luggage tags, not rectangles.
+
+### Fixed
+
+- A stash made from the Commit Panel was drawn as an ordinary commit with no label.
+
 ## [1.4.0] - 2026-10-20
 
 ### Added
