@@ -4,7 +4,7 @@ All notable changes to GitMycelium are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.4.1] - 2026-10-29
 
 ### Added
 
@@ -36,6 +36,15 @@ All notable changes to GitMycelium are recorded here. The format follows
 ### Fixed
 
 - A stash made from the Commit Panel was drawn as an ordinary commit with no label.
+- Unstaging after a commit made by git itself (a repository with commit hooks or
+  signing, or a terminal) put the old index back, so the committed change showed up
+  in Staged reverted.
+
+### Downloads
+
+- **Linux x86_64:** `GitMycelium-1.4.1-x86_64.AppImage`.
+- **macOS (Apple Silicon):** `GitMycelium-1.4.1-arm64.dmg`.
+- **Windows x86_64:** `GitMycelium-1.4.1-windows-x86_64.zip`.
 
 ## [1.4.0] - 2026-10-20
 
